@@ -617,9 +617,7 @@ async function executeToolCallsParallel(
 
 	// Start all prepared thunks concurrently. The barrier now only assembles
 	// the source-ordered return value; it no longer gates durability.
-	const runners = entries.map((entry) =>
-		entry.kind === "settled" ? Promise.resolve(entry.outcome) : entry.run(),
-	);
+	const runners = entries.map((entry) => (entry.kind === "settled" ? Promise.resolve(entry.outcome) : entry.run()));
 	const allSettled = Promise.all(runners);
 
 	// If the abort race wins, allSettled may reject later (e.g. a listener
