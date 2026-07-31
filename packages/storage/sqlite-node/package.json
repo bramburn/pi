@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-storage-sqlite-node",
+	"name": "@bramburn/pi-storage-sqlite-node",
 	"version": "0.83.0",
 	"description": "Node sqlite storage backend for @earendil-works/pi-agent-core sessions",
 	"type": "module",
@@ -25,14 +25,14 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/bramburn/pi.git",
 		"directory": "packages/storage/sqlite-node"
 	},
 	"engines": {
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@earendil-works/pi-ai": "^0.83.0",
-		"@earendil-works/pi-agent-core": "^0.83.0"
+		"@bramburn/pi-ai": "^0.83.0",
+		"@bramburn/pi-agent-core": "^0.83.0"
 	}
 }

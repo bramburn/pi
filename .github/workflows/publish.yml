@@ -1,0 +1,104 @@
+name: Publish npm packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g., v0.83.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      # Publish packages in dependency order (no internal deps → leaf → dependent)
+      # ai, tui, protocol: no internal dependencies
+      # agent: depends on ai
+      # storage: depends on agent, ai
+      # coding-agent: depends on agent, ai, tui
+      # server: depends on coding-agent
+
+      - name: Publish @bramburn/pi-ai
+        run: |
+          cd packages/ai
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-tui
+        run: |
+          cd packages/tui
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-protocol
+        run: |
+          cd packages/protocol
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-agent-core
+        run: |
+          cd packages/agent
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-storage-sqlite-node
+        run: |
+          cd packages/storage/sqlite-node
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-coding-agent
+        run: |
+          cd packages/coding-agent
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-server
+        run: |
+          cd packages/server
+          npm ci --ignore-scripts
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
