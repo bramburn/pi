@@ -11,8 +11,8 @@ const outputDir = join(codingAgentDir, "install-lock");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
 const outputLockfilePath = join(outputDir, "package-lock.json");
-const internalPackagePrefix = "@bramburn/pi-";
-const installPackageName = "@bramburn/pi-coding-agent-install";
+const internalPackagePrefix = "@earendil-works/pi-";
+const installPackageName = "@earendil-works/pi-coding-agent-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
@@ -156,7 +156,23 @@ function getInternalWorkspaces(lockPackages) {
 	return workspaces;
 }
 
-function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
+function resolveExternalDependency(lockPackages, packageName, fromLockPath, rootLockPackages) {
+	// For workspace packages in the install lock, check the root lockfile first for
+	// nested workspace entries. This handles cases where the root install lock has
+	// a different (usually older) version than what a workspace package needs.
+	// e.g. @earendil-works/pi-coding-agent -> packages/coding-agent/node_modules/cross-spawn
+	if (rootLockPackages && fromLockPath.startsWith("node_modules/")) {
+		const wsName = fromLockPath.slice("node_modules/".length).split("/node_modules/")[0];
+		// Map @earendil-works/pi-<name> -> <name>
+		const nameOnly = wsName.replace("@earendil-works/pi-", "");
+		const nestedLockPath = `packages/${nameOnly}/node_modules/${packageName}`;
+		const entry = rootLockPackages[nestedLockPath];
+		if (entry && !entry.link) {
+			return nestedLockPath;
+		}
+	}
+
+	// Standard node_modules directory walk
 	const candidateDirs = [];
 	let current = fromLockPath;
 
@@ -214,7 +230,7 @@ function addInternalWorkspace(installLockPackages, addedPaths, queue, name, work
 }
 
 function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, name, from) {
-	const lockPath = resolveExternalDependency(lockPackages, name, from);
+	const lockPath = resolveExternalDependency(lockPackages, name, from, lockPackages);
 	if (addedPaths.has(lockPath)) {
 		return;
 	}
@@ -259,7 +275,7 @@ function createRootLockEntry(installerPackageJson) {
 	return sortedPackageEntry(entry);
 }
 
-function validateGeneratedFiles(installerPackageJson, installLock, internalNames) {
+function validateGeneratedFiles(installerPackageJson, installLock, internalNames, rootLockPackages) {
 	const errors = [];
 	const rootEntry = installLock.packages[""];
 	const includedPackageNames = new Set();
@@ -329,13 +345,13 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 		for (const [dependencyName, dependencySpec] of Object.entries(packageDependencies(entry))) {
 			let dependencyLockPath;
 			try {
-				dependencyLockPath = resolveExternalDependency(installLock.packages, dependencyName, lockPath);
-			} catch {
-				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
+				dependencyLockPath = resolveExternalDependency(installLock.packages, dependencyName, lockPath, rootLockPackages);
+			} catch (err) {
+					errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
 				continue;
 			}
-
 			const dependencyEntry = installLock.packages[dependencyLockPath];
+
 			if (isExactVersionSpec(dependencySpec) && dependencyEntry.version !== dependencySpec) {
 				errors.push(
 					`${lockPath || "root"} dependency ${dependencyName}@${dependencySpec} resolves to ${dependencyEntry.version}`,
@@ -399,7 +415,7 @@ function generateInstallLock() {
 		packages: sortedObject(installLockPackages),
 	};
 
-	validateGeneratedFiles(installerPackageJson, installLock, internalNames);
+	validateGeneratedFiles(installerPackageJson, installLock, internalNames, lockPackages);
 	return { installerPackageJson, installLock };
 }
 

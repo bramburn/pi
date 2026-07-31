@@ -1,5 +1,5 @@
 {
-	"name": "@bramburn/pi-protocol",
+	"name": "@earendil-works/pi-protocol",
 	"version": "0.83.0",
 	"description": "Transport-neutral CBOR protocol for remote pi sessions",
 	"type": "module",
@@ -23,7 +23,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bramburn/pi.git",
+		"url": "git+https://github.com/earendil-works/pi.git",
 		"directory": "packages/protocol"
 	},
 	"engines": { "node": ">=22.19.0" },

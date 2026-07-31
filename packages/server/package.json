@@ -1,5 +1,5 @@
 {
-	"name": "@bramburn/pi-server",
+	"name": "@earendil-works/pi-server",
 	"version": "0.83.0",
 	"description": "experimental server package for pi",
 	"type": "module",
@@ -33,14 +33,14 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/bramburn/pi.git",
+		"url": "git+https://github.com/earendil-works/pi.git",
 		"directory": "packages/server"
 	},
 	"engines": {
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@bramburn/pi-coding-agent": "^0.83.0"
+		"@earendil-works/pi-coding-agent": "^0.83.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0"
