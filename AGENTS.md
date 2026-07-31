@@ -157,6 +157,15 @@ Attribution:
 
 5. **If CI publish fails**: inspect the failed `publish-npm` job. The publish helper is idempotent and skips package versions already present on npm, so rerun the tag workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Forking
+
+When this repo is forked (e.g. `bramburn/pi` from `earendil-works/pi`), the fork needs build-time markers so users can tell at a glance that they are running the fork rather than upstream:
+
+- `packages/coding-agent/src/config.ts` exports `FORK_NAME` (string) and uses it in the `pi --version` output. Format: `pi <version> [<FORK_NAME>]`.
+- `packages/coding-agent/src/main.ts` references `FORK_NAME` in the `parsed.version` branch and prints `${FORK_NAME}` next to the version line.
+- When changing the fork's identity (renaming, merging with another fork, dropping the fork marker), update `FORK_NAME` in `config.ts` and verify `pi --version` still prints the new marker. The output is the source of truth: if it doesn't say the right name, the constant is stale.
+- Do NOT remove `FORK_NAME` to "match upstream" without explicit user instruction — the fork marker is intentional even though upstream lacks it. The fork publishes to its own npm scope and the marker tells users which scope's binaries they have installed.
+
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.
