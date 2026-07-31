@@ -734,59 +734,146 @@ describe("TUI differential rendering", () => {
 		tui.stop();
 	});
 
-	it("clears stale content when maxLinesRendered was inflated by a transient component", async () => {
+	// Regression tests for issue #6050: scrolling up during streaming caused the
+	// viewport to jump to the top because every off-screen change triggered a full
+	// redraw (ESC[3J scrollback clear). The fix splits the old unconditional
+	// fullRender into three cases: skip entirely when all changes are off-screen,
+	// full redraw only when the buffer genuinely shrank, otherwise clamp.
+	it("skips full redraw when only off-screen lines change (streaming append)", async () => {
 		const terminal = new VirtualTerminal(40, 10);
 		const tui: TUI = new TuiMainScreen(terminal);
-		const chat = new TestComponent();
-		const editor = new TestComponent();
-		tui.addChild(chat);
-		tui.addChild(editor);
+		const component = new TestComponent();
+		tui.addChild(component);
 
-		const longChat = Array.from({ length: 15 }, (_, i) => `Chat ${i}`);
-		const shortChat = Array.from({ length: 12 }, (_, i) => `Chat ${i}`);
-		const editorLines = ["Editor 0", "Editor 1", "Editor 2"];
-		const selectorLines = Array.from({ length: 8 }, (_, i) => `Selector ${i}`);
-
-		chat.lines = longChat;
-		editor.lines = editorLines;
+		// Initial render: short content, viewport at top
+		component.lines = ["Line 0", "Line 1"];
 		tui.start();
 		await terminal.waitForRender();
 
-		editor.lines = selectorLines;
+		const initialRedraws = tui.fullRedraws;
+
+		// Simulate streaming: append many lines so content overflows the viewport
+		// (lines 0-9 are off-screen, only the last 10 are visible).
+		component.lines = Array.from({ length: 20 }, (_, i) => `Line ${i}`);
 		tui.requestRender();
 		await terminal.waitForRender();
 
-		editor.lines = editorLines;
+		// Now streaming appends one more line. firstChanged is delta between
+		// previousLines (length 20) and newLines (length 21) — the change is at
+		// index 20, above the viewport top (10), so the diff triggers the
+		// firstChanged < prevViewportTop branch. Before the fix this caused
+		// fullRender(true) (scrollback clear) on every append.
+		component.lines = [...Array.from({ length: 20 }, (_, i) => `Line ${i}`), "APPENDED LINE"];
 		tui.requestRender();
 		await terminal.waitForRender();
 
-		const redrawsBeforeSwitch = tui.fullRedraws;
-		chat.lines = shortChat;
+		// The fix: appended line is below the viewport (lastChanged >= prevViewportTop),
+		// so Case C applies and the diff path is used instead of a full redraw.
+		assert.strictEqual(
+			tui.fullRedraws,
+			initialRedraws,
+			"Streaming append must NOT trigger a full redraw (would cause scrollback jump)",
+		);
+
+		tui.stop();
+	});
+
+	it("skips full redraw when all changes are strictly above the viewport", async () => {
+		const terminal = new VirtualTerminal(40, 10);
+		const tui: TUI = new TuiMainScreen(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		// Initial render: content fits exactly in viewport
+		component.lines = Array.from({ length: 10 }, (_, i) => `Line ${i}`);
+		tui.start();
+		await terminal.waitForRender();
+
+		const initialRedraws = tui.fullRedraws;
+
+		// Grow the buffer so old content scrolls off-screen, then change ONLY
+		// the off-screen lines. The visible viewport rows should not change.
+		component.lines = [
+			"REPLACED 0",
+			"REPLACED 1",
+			"REPLACED 2",
+			"REPLACED 3",
+			"REPLACED 4",
+			"REPLACED 5",
+			"REPLACED 6",
+			"REPLACED 7",
+			"REPLACED 8",
+			"REPLACED 9",
+			"Visible 0",
+			"Visible 1",
+			"Visible 2",
+			"Visible 3",
+			"Visible 4",
+			"Visible 5",
+			"Visible 6",
+			"Visible 7",
+			"Visible 8",
+			"Visible 9",
+		];
 		tui.requestRender();
 		await terminal.waitForRender();
 
-		assert.ok(tui.fullRedraws > redrawsBeforeSwitch, "Branch switch should trigger a full redraw");
+		// Now change ONLY the off-screen lines (lines 0-9) without affecting
+		// the visible 10 lines. The firstChanged = 0 is above the viewport,
+		// but lastChanged = 9 is also above the viewport — Case A applies:
+		// skip the draw entirely, sync state.
+		component.lines = [
+			"CHANGED 0",
+			"CHANGED 1",
+			"CHANGED 2",
+			"CHANGED 3",
+			"CHANGED 4",
+			"CHANGED 5",
+			"CHANGED 6",
+			"CHANGED 7",
+			"CHANGED 8",
+			"CHANGED 9",
+			"Visible 0",
+			"Visible 1",
+			"Visible 2",
+			"Visible 3",
+			"Visible 4",
+			"Visible 5",
+			"Visible 6",
+			"Visible 7",
+			"Visible 8",
+			"Visible 9",
+		];
+		tui.requestRender();
+		await terminal.waitForRender();
 
-		const viewport = terminal.getViewport();
-		for (let i = 0; i < 10; i++) {
-			const line = viewport[i] ?? "";
-			assert.ok(!line.includes("Chat 12"), `Stale "Chat 12" at viewport row ${i}`);
-			assert.ok(!line.includes("Chat 13"), `Stale "Chat 13" at viewport row ${i}`);
-			assert.ok(!line.includes("Chat 14"), `Stale "Chat 14" at viewport row ${i}`);
-		}
+		// Case A: all changes off-screen → no full redraw, no diff write.
+		assert.strictEqual(tui.fullRedraws, initialRedraws, "Off-screen-only changes must NOT trigger a full redraw");
 
-		assert.deepStrictEqual(viewport, [
-			"Chat 5",
-			"Chat 6",
-			"Chat 7",
-			"Chat 8",
-			"Chat 9",
-			"Chat 10",
-			"Chat 11",
-			"Editor 0",
-			"Editor 1",
-			"Editor 2",
-		]);
+		tui.stop();
+	});
+
+	it("still triggers full redraw when buffer shrinks below the previous viewport top", async () => {
+		const terminal = new VirtualTerminal(40, 10);
+		const tui: TUI = new TuiMainScreen(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		// Initial render: 20 lines, viewport top = 10
+		component.lines = Array.from({ length: 20 }, (_, i) => `Line ${i}`);
+		tui.start();
+		await terminal.waitForRender();
+
+		const initialRedraws = tui.fullRedraws;
+
+		// Shrink to 5 lines. The new buffer (5) does not reach the previous
+		// viewport top (10) — stale content from the old buffer would be
+		// visible. Case B must trigger a full redraw.
+		component.lines = ["A", "B", "C", "D", "E"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		assert.ok(tui.fullRedraws > initialRedraws, "Buffer shrink below prev viewport top must trigger a full redraw");
 
 		tui.stop();
 	});
