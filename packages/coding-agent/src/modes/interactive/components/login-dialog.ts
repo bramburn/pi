@@ -1,6 +1,6 @@
-import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@earendil-works/pi-ai/oauth";
+import type { AuthInfoLink, OAuthDeviceCodeInfo } from "@earendil-works/pi-ai";
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
-import { exec } from "child_process";
+import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
@@ -38,8 +38,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.tui = tui;
 		this.onComplete = onComplete;
 
-		const providerInfo = getOAuthProviders().find((p) => p.id === providerId);
-		const providerName = providerNameOverride || providerInfo?.name || providerId;
+		const providerName = providerNameOverride || providerId;
 		const title = titleOverride ?? `Login to ${providerName}`;
 
 		// Top border
@@ -56,7 +55,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.input = new Input();
 		this.input.onSubmit = () => {
 			if (this.inputResolver) {
-				this.inputResolver(this.input.getValue());
+				const value = this.input.getValue();
+				this.replaceInputWithSubmittedText(value);
+				this.inputResolver(value);
 				this.inputResolver = undefined;
 				this.inputRejecter = undefined;
 			}
@@ -71,6 +72,12 @@ export class LoginDialogComponent extends Container implements Focusable {
 
 	get signal(): AbortSignal {
 		return this.abortController.signal;
+	}
+
+	private replaceInputWithSubmittedText(value: string): void {
+		this.contentContainer.children = this.contentContainer.children.map((child) =>
+			child === this.input ? new Text(`> ${value}`, 0, 0) : child,
+		);
 	}
 
 	private cancel(): void {
@@ -101,7 +108,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 			this.contentContainer.addChild(new Text(theme.fg("warning", instructions), 1, 0));
 		}
 
-		this.openUrl(url);
+		openBrowser(url);
 		this.tui.requestRender();
 	}
 
@@ -120,23 +127,14 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("warning", `Enter code: ${info.userCode}`), 1, 0));
 
-		this.openUrl(info.verificationUri);
 		this.tui.requestRender();
-	}
-
-	private openUrl(url: string): void {
-		const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		try {
-			exec(`${openCmd} "${url}"`, () => {});
-		} catch {
-			// Ignore browser launch failures. The URL remains visible for manual opening/copying.
-		}
 	}
 
 	/**
 	 * Show input for manual code/URL entry (for callback server providers)
 	 */
 	showManualInput(prompt: string): Promise<string> {
+		this.input.setValue("");
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);
@@ -177,17 +175,29 @@ export class LoginDialogComponent extends Container implements Focusable {
 		});
 	}
 
-	/**
-	 * Show informational text without prompting for input.
-	 */
-	showInfo(lines: string[]): void {
+	/** Show informational text before another login step. */
+	showDetails(lines: string[]): void {
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
 		for (const line of lines) {
 			this.contentContainer.addChild(new Text(line, 1, 0));
 		}
+		this.tui.requestRender();
+	}
+
+	/** Show provider-owned information and links without starting an auth callback flow. */
+	showInfo(message: string, links: readonly AuthInfoLink[] = [], showCloseHint = false): void {
 		this.contentContainer.addChild(new Spacer(1));
-		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to close")})`, 1, 0));
+		this.contentContainer.addChild(new Text(theme.fg("text", message), 1, 0));
+		for (const link of links) {
+			const text = link.label ? `${link.label}: ${link.url}` : link.url;
+			const hyperlink = `\x1b]8;;${link.url}\x07${text}\x1b]8;;\x07`;
+			this.contentContainer.addChild(new Text(theme.fg("accent", hyperlink), 1, 0));
+		}
+		if (showCloseHint) {
+			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to close")})`, 1, 0));
+		}
 		this.tui.requestRender();
 	}
 

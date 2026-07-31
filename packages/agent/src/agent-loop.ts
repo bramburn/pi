@@ -7,10 +7,10 @@ import {
 	type AssistantMessage,
 	type Context,
 	EventStream,
-	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
+import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -32,8 +32,8 @@ export function agentLoop(
 	prompts: AgentMessage[],
 	context: AgentContext,
 	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): EventStream<AgentEvent, AgentMessage[]> {
 	const stream = createAgentStream();
 
@@ -64,8 +64,8 @@ export function agentLoop(
 export function agentLoopContinue(
 	context: AgentContext,
 	config: AgentLoopConfig,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): EventStream<AgentEvent, AgentMessage[]> {
 	if (context.messages.length === 0) {
 		throw new Error("Cannot continue: no messages in context");
@@ -97,8 +97,8 @@ export async function runAgentLoop(
 	context: AgentContext,
 	config: AgentLoopConfig,
 	emit: AgentEventSink,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): Promise<AgentMessage[]> {
 	const newMessages: AgentMessage[] = [...prompts];
 	const currentContext: AgentContext = {
@@ -113,7 +113,7 @@ export async function runAgentLoop(
 		await emit({ type: "message_end", message: prompt });
 	}
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
 
@@ -121,8 +121,8 @@ export async function runAgentLoopContinue(
 	context: AgentContext,
 	config: AgentLoopConfig,
 	emit: AgentEventSink,
-	signal?: AbortSignal,
-	streamFn?: StreamFn,
+	signal: AbortSignal | undefined,
+	streamFn: StreamFn,
 ): Promise<AgentMessage[]> {
 	if (context.messages.length === 0) {
 		throw new Error("Cannot continue: no messages in context");
@@ -138,7 +138,7 @@ export async function runAgentLoopContinue(
 	await emit({ type: "agent_start" });
 	await emit({ type: "turn_start" });
 
-	await runLoop(currentContext, newMessages, config, signal, emit, streamFn);
+	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
 
@@ -158,7 +158,7 @@ async function runLoop(
 	initialConfig: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
-	streamFn?: StreamFn,
+	streamFunction: StreamFn,
 ): Promise<void> {
 	let currentContext = initialContext;
 	let config = initialConfig;
@@ -190,7 +190,7 @@ async function runLoop(
 			}
 
 			// Stream assistant response
-			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
 			newMessages.push(message);
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -205,7 +205,13 @@ async function runLoop(
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
 			if (toolCalls.length > 0) {
-				const executedToolBatch = await executeToolCalls(currentContext, message, config, signal, emit);
+				// A "length" stop means the output was cut off by the token limit, so
+				// every tool call in the message may carry truncated arguments. Fail
+				// them all instead of executing potentially borked calls.
+				const executedToolBatch =
+					message.stopReason === "length"
+						? await failToolCallsFromTruncatedMessage(toolCalls, emit)
+						: await executeToolCalls(currentContext, message, config, signal, emit);
 				toolResults.push(...executedToolBatch.messages);
 				hasMoreToolCalls = !executedToolBatch.terminate;
 
@@ -277,7 +283,7 @@ async function streamAssistantResponse(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
-	streamFn?: StreamFn,
+	streamFunction: StreamFn,
 ): Promise<AssistantMessage> {
 	// Apply context transform if configured (AgentMessage[] → AgentMessage[])
 	let messages = context.messages;
@@ -294,8 +300,6 @@ async function streamAssistantResponse(
 		messages: llmMessages,
 		tools: context.tools,
 	};
-
-	const streamFunction = streamFn || streamSimple;
 
 	// Resolve API key (important for expiring tokens)
 	const resolvedApiKey =
@@ -365,6 +369,40 @@ async function streamAssistantResponse(
 	}
 	await emit({ type: "message_end", message: finalMessage });
 	return finalMessage;
+}
+
+/**
+ * Fail all tool calls from an assistant message that was truncated by the
+ * output token limit. Streamed tool-call arguments are finalized with a
+ * best-effort JSON salvage parser, so a truncated message can yield tool calls
+ * whose arguments parse and validate but are silently incomplete. None of them
+ * are safe to execute; report each as an error so the model can re-issue them.
+ */
+async function failToolCallsFromTruncatedMessage(
+	toolCalls: AgentToolCall[],
+	emit: AgentEventSink,
+): Promise<ExecutedToolCallBatch> {
+	const messages: ToolResultMessage[] = [];
+	for (const toolCall of toolCalls) {
+		await emit({
+			type: "tool_execution_start",
+			toolCallId: toolCall.id,
+			toolName: toolCall.name,
+			args: toolCall.arguments,
+		});
+		const finalized: FinalizedToolCallOutcome = {
+			toolCall,
+			result: createErrorToolResult(
+				`Tool call "${toolCall.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.`,
+			),
+			isError: true,
+		};
+		await emitToolExecutionEnd(finalized, emit);
+		const toolResultMessage = createToolResultMessage(finalized);
+		await emitToolResultMessage(toolResultMessage, emit);
+		messages.push(toolResultMessage);
+	}
+	return { messages, terminate: false };
 }
 
 /**
@@ -456,7 +494,15 @@ async function executeToolCallsParallel(
 	signal: AbortSignal | undefined,
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallBatch> {
-	const finalizedCalls: FinalizedToolCallEntry[] = [];
+	const entries: ParallelToolCallEntry[] = [];
+	const settledOutcomes: Array<PersistedToolCallResult | undefined> = [];
+
+	// Claim map coordinating per-sibling persistence with the abort race below.
+	// Inserting a toolCallId IS the claim: whoever inserts must be the one to
+	// emit that result, and check-then-insert never spans an await, so each
+	// toolCallId gets exactly one emitted toolResult — including when a stalled
+	// sibling settles after the batch was abandoned on abort.
+	const claimedToolResults = new Map<string, ToolResultMessage>();
 
 	for (const toolCall of toolCalls) {
 		await emit({
@@ -473,45 +519,131 @@ async function executeToolCallsParallel(
 				result: preparation.result,
 				isError: preparation.isError,
 			} satisfies FinalizedToolCallOutcome;
+
+			// Immediate outcomes complete during preflight: persist right away,
+			// exactly like executeToolCallsSequential does per iteration.
+			const toolResultMessage = createToolResultMessage(finalized);
+			claimedToolResults.set(toolCall.id, toolResultMessage);
 			await emitToolExecutionEnd(finalized, emit);
-			finalizedCalls.push(finalized);
+			await emitToolResultMessage(toolResultMessage, emit);
+			entries.push({ kind: "settled", toolCall, outcome: { finalized, toolResultMessage } });
 			if (signal?.aborted) {
 				break;
 			}
 			continue;
 		}
 
-		finalizedCalls.push(async () => {
-			const executed = await executePreparedToolCall(preparation, signal, emit);
-			const finalized = await finalizeExecutedToolCall(
-				currentContext,
-				assistantMessage,
-				preparation,
-				executed,
-				config,
-				signal,
-			);
-			await emitToolExecutionEnd(finalized, emit);
-			return finalized;
+		const index = entries.length;
+		entries.push({
+			kind: "pending",
+			toolCall,
+			run: async () => {
+				const executed = await executePreparedToolCall(preparation, signal, emit);
+				const finalized = await finalizeExecutedToolCall(
+					currentContext,
+					assistantMessage,
+					preparation,
+					executed,
+					config,
+					signal,
+				);
+
+				// Claim-or-bail. No await between the check and the insertion.
+				// If the abort race claimed this id first, the batch was abandoned
+				// and an abort error was already emitted for it: stay silent so we
+				// never emit a duplicate toolResult or post-abort events.
+				const claimed = claimedToolResults.get(toolCall.id);
+				if (claimed) {
+					return { finalized, toolResultMessage: claimed };
+				}
+
+				const toolResultMessage = createToolResultMessage(finalized);
+				claimedToolResults.set(toolCall.id, toolResultMessage);
+				const outcome: PersistedToolCallResult = { finalized, toolResultMessage };
+
+				// Record synchronously so the abort race can see this sibling is
+				// already persisted (emission in flight) and skip it.
+				settledOutcomes[index] = outcome;
+
+				// Persist THIS sibling now, on its own completion, instead of
+				// waiting for the Promise.all barrier. A stalled sibling can no
+				// longer gate the durability of already-completed ones.
+				await emitToolExecutionEnd(finalized, emit);
+				await emitToolResultMessage(toolResultMessage, emit);
+				return outcome;
+			},
 		});
 		if (signal?.aborted) {
 			break;
 		}
 	}
 
-	const orderedFinalizedCalls = await Promise.all(
-		finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))),
-	);
-	const messages: ToolResultMessage[] = [];
-	for (const finalized of orderedFinalizedCalls) {
-		const toolResultMessage = createToolResultMessage(finalized);
-		await emitToolResultMessage(toolResultMessage, emit);
-		messages.push(toolResultMessage);
+	// Builds abort-error outcomes for siblings that never settled, emitting them
+	// so their tool calls are not orphaned and UIs clear their pending state.
+	// Each id is claimed synchronously BEFORE the first emit await, so a
+	// late-settling thunk sees the claim and stays silent.
+	const synthesizeAbortedOutcomes = async (): Promise<PersistedToolCallResult[]> => {
+		const results: PersistedToolCallResult[] = [];
+		for (let index = 0; index < entries.length; index++) {
+			const entry = entries[index];
+			if (!entry) {
+				continue;
+			}
+			const settled = entry.kind === "settled" ? entry.outcome : settledOutcomes[index];
+			if (settled) {
+				// Persisted before the abort (or claimed with emission in flight).
+				results.push(settled);
+				continue;
+			}
+
+			const finalized: FinalizedToolCallOutcome = {
+				toolCall: entry.toolCall,
+				result: createErrorToolResult("Operation aborted"),
+				isError: true,
+			};
+			const toolResultMessage = createToolResultMessage(finalized);
+			claimedToolResults.set(entry.toolCall.id, toolResultMessage);
+			const outcome: PersistedToolCallResult = { finalized, toolResultMessage };
+			settledOutcomes[index] = outcome;
+
+			// Emit tool_execution_end too, otherwise the stalled call keeps
+			// rendering as "running" until the next turn.
+			await emitToolExecutionEnd(finalized, emit);
+			await emitToolResultMessage(toolResultMessage, emit);
+			results.push(outcome);
+		}
+		return results;
+	};
+
+	// Start all prepared thunks concurrently. The barrier now only assembles
+	// the source-ordered return value; it no longer gates durability.
+	const runners = entries.map((entry) => (entry.kind === "settled" ? Promise.resolve(entry.outcome) : entry.run()));
+	const allSettled = Promise.all(runners);
+
+	// If the abort race wins, allSettled may reject later (e.g. a listener
+	// throws inside a late-settling thunk). Mark it handled so it cannot
+	// surface as an unhandled rejection after the batch has returned.
+	allSettled.catch(() => {});
+
+	let outcomes: PersistedToolCallResult[];
+	if (signal) {
+		const abort = waitForAbort(signal);
+		const winner = await Promise.race([
+			allSettled.then((values) => ({ kind: "completed" as const, values })),
+			abort.promise,
+		]);
+		abort.cancel();
+		outcomes = winner === "aborted" ? await synthesizeAbortedOutcomes() : winner.values;
+	} else {
+		outcomes = await allSettled;
 	}
 
+	// Return value keeps assistant source order regardless of completion order,
+	// so turn_end.toolResults and the next LLM call's context are unchanged
+	// from pre-fix semantics.
 	return {
-		messages,
-		terminate: shouldTerminateToolBatch(orderedFinalizedCalls),
+		messages: outcomes.map((outcome) => outcome.toolResultMessage),
+		terminate: shouldTerminateToolBatch(outcomes.map((outcome) => outcome.finalized)),
 	};
 }
 
@@ -539,7 +671,19 @@ type FinalizedToolCallOutcome = {
 	isError: boolean;
 };
 
-type FinalizedToolCallEntry = FinalizedToolCallOutcome | (() => Promise<FinalizedToolCallOutcome>);
+/** A finalized tool call plus the exact ToolResultMessage that was emitted for it. */
+type PersistedToolCallResult = { finalized: FinalizedToolCallOutcome; toolResultMessage: ToolResultMessage };
+
+/**
+ * One entry of a parallel tool batch.
+ * - "settled": outcome known during preflight (unknown tool, invalid args,
+ *   blocked call, aborted preflight). Persisted inline, in preflight order.
+ * - "pending": a prepared tool call whose thunk executes, finalizes, and
+ *   persists its own tool result before resolving.
+ */
+type ParallelToolCallEntry =
+	| { kind: "settled"; toolCall: AgentToolCall; outcome: PersistedToolCallResult }
+	| { kind: "pending"; toolCall: AgentToolCall; run: () => Promise<PersistedToolCallResult> };
 
 function shouldTerminateToolBatch(finalizedCalls: FinalizedToolCallOutcome[]): boolean {
 	return finalizedCalls.length > 0 && finalizedCalls.every((finalized) => finalized.result.terminate === true);
@@ -631,6 +775,7 @@ async function executePreparedToolCall(
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallOutcome> {
 	const updateEvents: Promise<void>[] = [];
+	let acceptingUpdates = true;
 
 	try {
 		const result = await prepared.tool.execute(
@@ -638,6 +783,7 @@ async function executePreparedToolCall(
 			prepared.args as never,
 			signal,
 			(partialResult) => {
+				if (!acceptingUpdates) return;
 				updateEvents.push(
 					Promise.resolve(
 						emit({
@@ -651,14 +797,18 @@ async function executePreparedToolCall(
 				);
 			},
 		);
+		acceptingUpdates = false;
 		await Promise.all(updateEvents);
 		return { result, isError: false };
 	} catch (error) {
+		acceptingUpdates = false;
 		await Promise.all(updateEvents);
 		return {
 			result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
 			isError: true,
 		};
+	} finally {
+		acceptingUpdates = false;
 	}
 }
 
@@ -688,8 +838,10 @@ async function finalizeExecutedToolCall(
 			);
 			if (afterResult) {
 				result = {
+					...result,
 					content: afterResult.content ?? result.content,
 					details: afterResult.details ?? result.details,
+					usage: afterResult.usage ?? result.usage,
 					terminate: afterResult.terminate ?? result.terminate,
 				};
 				isError = afterResult.isError ?? isError;
@@ -714,6 +866,32 @@ function createErrorToolResult(message: string): AgentToolResult<any> {
 	};
 }
 
+/**
+ * Promise resolving when the signal aborts. `cancel` detaches the listener once
+ * the race is decided so the signal does not retain the closure for the rest of
+ * the run.
+ */
+function waitForAbort(signal: AbortSignal): { promise: Promise<"aborted">; cancel: () => void } {
+	let onAbort: (() => void) | undefined;
+	const promise = new Promise<"aborted">((resolve) => {
+		if (signal.aborted) {
+			resolve("aborted");
+			return;
+		}
+		onAbort = () => resolve("aborted");
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	return {
+		promise,
+		cancel: () => {
+			if (onAbort) {
+				signal.removeEventListener("abort", onAbort);
+				onAbort = undefined;
+			}
+		},
+	};
+}
+
 async function emitToolExecutionEnd(finalized: FinalizedToolCallOutcome, emit: AgentEventSink): Promise<void> {
 	await emit({
 		type: "tool_execution_end",
@@ -729,8 +907,12 @@ function createToolResultMessage(finalized: FinalizedToolCallOutcome): ToolResul
 		role: "toolResult",
 		toolCallId: finalized.toolCall.id,
 		toolName: finalized.toolCall.name,
-		content: finalized.result.content,
+		// Untyped tools (JS extensions) can return results without content; normalize
+		// so the null never enters session history or provider payloads.
+		content: finalized.result.content ?? [],
 		details: finalized.result.details,
+		usage: finalized.result.usage,
+		...(finalized.result.addedToolNames?.length ? { addedToolNames: finalized.result.addedToolNames } : {}),
 		isError: finalized.isError,
 		timestamp: Date.now(),
 	};
