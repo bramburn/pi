@@ -30,6 +30,14 @@ export class ClientState {
 		this.#attachedSessionIds.clear();
 	}
 
+	dispose(): void {
+		this.reset();
+		this.#snapshotListeners.clear();
+		this.#eventListeners.clear();
+		this.#sessionSnapshotListeners.clear();
+		this.#sessionEventListeners.clear();
+	}
+
 	getSessionSnapshot(sessionId: string): SessionSnapshot | undefined {
 		return this.#sessionSnapshots.get(sessionId);
 	}
@@ -92,8 +100,6 @@ export class ClientState {
 	applyServerSnapshot(snapshot: ServerSnapshot): void {
 		if (this.#snapshot && snapshot.revision < this.#snapshot.revision) return;
 		this.#snapshot = snapshot;
-		this.#attachedSessionIds.clear();
-		for (const session of snapshot.sessions) if (session.attached) this.#attachedSessionIds.add(session.id);
 		this.#notify(this.#snapshotListeners, snapshot);
 	}
 
