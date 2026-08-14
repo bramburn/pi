@@ -36,11 +36,8 @@ export type StreamFn = (
  *
  * - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
  * - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
- *   `tool_execution_end` and the tool-result message events are emitted per tool in
- *   completion order as each tool is finalized, so completed tools are persisted even
- *   if a sibling stalls. The batch's returned `toolResults` (and `turn_end.toolResults`)
- *   remain in assistant source order. On abort, siblings that never settled are
- *   persisted as `isError` "Operation aborted" results instead of being orphaned.
+ *   `tool_execution_end` is emitted in tool completion order after each tool is finalized,
+ *   while tool-result message artifacts are emitted later in assistant source order.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 
@@ -64,6 +61,11 @@ export type AgentToolCall = Extract<AssistantMessage["content"][number], { type:
 export interface BeforeToolCallResult {
 	block?: boolean;
 	reason?: string;
+	/**
+	 * Hint that the agent should stop after the current tool batch when this call is blocked.
+	 * Early termination only happens when every finalized tool result in the batch sets this to true.
+	 */
+	terminate?: boolean;
 }
 
 /**
@@ -258,11 +260,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Tool execution mode.
 	 * - "sequential": execute tool calls one by one
 	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
-	 *   `tool_execution_end` and the tool-result message events are emitted per tool in
-	 *   completion order as each tool is finalized, so completed tools are persisted even
-	 *   if a sibling stalls. The batch's returned `toolResults` (and `turn_end.toolResults`)
-	 *   remain in assistant source order. On abort, siblings that never settled are
-	 *   persisted as `isError` "Operation aborted" results instead of being orphaned.
+	 *   emit `tool_execution_end` in tool completion order after each tool is finalized,
+	 *   then emit tool-result message artifacts later in assistant source order
 	 *
 	 * Default: "parallel"
 	 */
@@ -272,6 +271,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.
+	 * A blocked result can also set `terminate: true` to participate in the batch early-termination rule.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;

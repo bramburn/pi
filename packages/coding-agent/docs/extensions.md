@@ -628,7 +628,8 @@ Fired for tool execution lifecycle updates.
 In parallel tool mode:
 - `tool_execution_start` is emitted in assistant source order during the preflight phase
 - `tool_execution_update` events may interleave across tools
-- `tool_execution_end` and the final `toolResult` message events (`message_start`/`message_end`) are emitted per tool in completion order as each tool is finalized. `turn_end.toolResults` remains in assistant source order. If the run is aborted while a tool is still executing, its result is persisted as an `isError` "Operation aborted" tool result rather than being orphaned.
+- `tool_execution_end` is emitted in tool completion order after each tool is finalized
+- final `toolResult` message events are still emitted later in assistant source order
 
 ```typescript
 pi.on("tool_execution_start", async (event, ctx) => {
@@ -761,7 +762,8 @@ Behavior guarantees:
 - Mutations to `event.input` affect the actual tool execution
 - Later `tool_call` handlers see mutations made by earlier handlers
 - No re-validation is performed after your mutation
-- Return values from `tool_call` only control blocking via `{ block: true, reason?: string }`
+- Return values from `tool_call` control blocking via `{ block: true, reason?: string, terminate?: boolean }`
+- `terminate` only applies to a blocked call; the agent stops early only when every finalized result in the batch is terminating
 
 ```typescript
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
@@ -777,7 +779,7 @@ pi.on("tool_call", async (event, ctx) => {
     event.input.command = `source ~/.profile\n${event.input.command}`;
 
     if (event.input.command.includes("rm -rf")) {
-      return { block: true, reason: "Dangerous command" };
+      return { block: true, reason: "Dangerous command", terminate: true };
     }
   }
 
@@ -814,7 +816,7 @@ pi.on("tool_call", (event) => {
 
 Fired after tool execution finishes and before `tool_execution_end` plus the final tool result message events are emitted. **Can modify result.**
 
-In parallel tool mode, `tool_result` and `tool_execution_end` may interleave in tool completion order, while final `toolResult` message events (`message_start`/`message_end`) are emitted per tool in completion order as each tool is finalized. `turn_end.toolResults` remains in assistant source order. If the run is aborted while a tool is still executing, its result is persisted as an `isError` "Operation aborted" tool result rather than being orphaned.
+In parallel tool mode, `tool_result` and `tool_execution_end` may interleave in tool completion order, while final `toolResult` message events are still emitted later in assistant source order.
 
 `tool_result` handlers chain like middleware:
 - Handlers run in extension load order
@@ -1424,12 +1426,16 @@ pi.sendUserMessage([
 // During streaming - must specify delivery mode
 pi.sendUserMessage("Focus on error handling", { deliverAs: "steer" });
 pi.sendUserMessage("And then summarize", { deliverAs: "followUp" });
+
+// Opt in to extension command dispatch and skill/prompt template expansion
+pi.sendUserMessage("/review src/index.ts", { expandPromptTemplates: true });
 ```
 
 **Options:**
 - `deliverAs` - Required when agent is streaming:
   - `"steer"` - Queues the message for delivery after the current assistant turn finishes executing its tool calls
   - `"followUp"` - Waits for agent to finish all tools
+- `expandPromptTemplates` - Dispatch extension commands and expand skill commands and prompt templates. Defaults to `false`.
 
 When not streaming, the message is sent immediately and triggers a new turn. When streaming without `deliverAs`, throws an error.
 
@@ -1706,7 +1712,9 @@ Register or override a model provider dynamically. Useful for proxies, custom en
 
 Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
 
-Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/store/network/signal context. The extension decides whether to persist the catalog through `context.store`; live servers such as llama.cpp can ignore it.
+Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/stored-catalog/network/signal context. The extension decides whether to persist catalog metadata through generation-checked `context.publish({ persist: entry })`; live servers such as llama.cpp can return models without persisting them.
+
+`context.signal` is always a concrete signal and provider callbacks must pass it to blocking I/O. Public `ModelRuntime.refresh()` and `ModelRegistry.refresh()` calls accept an optional signal and are unbounded when it is omitted; extensions and applications choose their own deadlines. Cancellation stops the caller waiting even if a provider ignores the signal, but cooperation is still required to stop the underlying work.
 
 Extensions that need native provider auth, filtering, refresh, or stream behavior can register a complete `Provider` from `@earendil-works/pi-ai`. The provider becomes the composition base and `models.json` overrides still apply above it.
 
@@ -1796,7 +1804,8 @@ pi.registerProvider("corporate-ai", {
       const code = await callbacks.onPrompt({ message: "Enter code:" });
       return { refresh: code, access: code, expires: Date.now() + 3600000 };
     },
-    async refreshToken(credentials) {
+    async refreshToken(credentials, signal) {
+      signal.throwIfAborted();
       // Refresh logic
       return credentials;
     },
@@ -1817,7 +1826,7 @@ The object form accepts a complete pi-ai `Provider`, including native `auth`, `g
 - `headers` - Custom headers to include in requests.
 - `authHeader` - If true, adds `Authorization: Bearer` header automatically.
 - `models` - Array of model definitions. If provided, replaces all existing models for this provider. Model definitions can set `baseUrl` to override the provider endpoint for that model.
-- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. Use the scoped `context.store` only when results should persist.
+- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. `context.stored` contains the persisted provider snapshot; use generation-checked `context.publish({ persist: entry })` only when updated catalog data should persist. Use `persist: null` to delete that snapshot.
 - `oauth` - OAuth provider config for `/login` support. When provided, the provider appears in the login menu.
 - `streamSimple` - Custom streaming implementation for non-standard APIs.
 

@@ -6,6 +6,9 @@
 - No emojis in commits, issues, PR comments, or code
 - No fluff or cheerful filler text (e.g., "Thanks @user" not "Thanks so much @user!")
 - Technical prose only, be direct
+- Use concise, clear, simple language. Define unavoidable jargon before using it.
+- Explain non-trivial designs and problems as: problem, concrete example or short trace, then solution. State why the solution is necessary and distinguish it from optional complexity.
+- Prefer concrete behavior and small illustrations over abstract summaries, dense terminology, or unexplained lists of changes.
 - When the user asks a question, answer it first before making edits or running implementation commands.
 - When responding to user feedback or an analysis, explicitly say whether you agree or disagree before saying what you changed.
 
@@ -31,7 +34,6 @@
   - Vitest: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts`
   - `packages/tui` (`node:test`): `node --test test/specific.test.ts`
 - If you create or modify a test file, run it and iterate on test or implementation until it passes.
-- When updating `undici`, you MUST read its changelog/release notes for the target version and evaluate whether any changes may affect functionality before applying the update.
 - For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
 - Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` named `<issue-number>-<short-slug>.test.ts`.
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
@@ -40,6 +42,7 @@
 ## Dependency and Install Security
 
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions.
+- When updating `undici`, you MUST read its changelog/release notes for the target version and evaluate whether any changes may affect functionality before applying the update.
 - Hydrate/update locally with `npm install --ignore-scripts`; clean/CI-style with `npm ci --ignore-scripts`. Don't run lifecycle scripts unless the user asks.
 - If dep metadata changes, refresh `package-lock.json` with `npm install --package-lock-only --ignore-scripts`.
 - If `packages/coding-agent/npm-shrinkwrap.json` needs regen, run `node scripts/generate-coding-agent-shrinkwrap.mjs` (verify with `--check` or `npm run check`). New deps with lifecycle scripts require review and an explicit allowlist entry in that script; never add one silently.
@@ -114,6 +117,7 @@ Rules:
 
 - All new entries go under `## [Unreleased]`. Read the full section first and append to existing subsections; never duplicate them.
 - Released version sections (e.g. `## [0.12.2]`) are immutable; never modify them.
+- Do not create changelog entries when working on a branch other than `main` or pull request
 
 Attribution:
 
@@ -159,15 +163,6 @@ Attribution:
 4. **CI verifies and announces the npm release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required. After publishing, `announce-pi-dev-release` verifies every public workspace package resolves at the exact release version and that its npm tarball is available, then writes the verified release marker to R2. `pi.dev/api/latest-version` reads that marker; it must never announce a release from npm before this job succeeds.
 
 5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
-
-## Forking
-
-When this repo is forked (e.g. `bramburn/pi` from `earendil-works/pi`), the fork needs build-time markers so users can tell at a glance that they are running the fork rather than upstream:
-
-- `packages/coding-agent/src/config.ts` exports `FORK_NAME` (string) and uses it in the `pi --version` output. Format: `pi <version> [<FORK_NAME>]`.
-- `packages/coding-agent/src/main.ts` references `FORK_NAME` in the `parsed.version` branch and prints `${FORK_NAME}` next to the version line.
-- When changing the fork's identity (renaming, merging with another fork, dropping the fork marker), update `FORK_NAME` in `config.ts` and verify `pi --version` still prints the new marker. The output is the source of truth: if it doesn't say the right name, the constant is stale.
-- Do NOT remove `FORK_NAME` to "match upstream" without explicit user instruction — the fork marker is intentional even though upstream lacks it. The fork publishes to its own npm scope and the marker tells users which scope's binaries they have installed.
 
 ## User Override
 

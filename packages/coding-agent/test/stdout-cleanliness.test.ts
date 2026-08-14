@@ -89,10 +89,6 @@ describe("stdout cleanliness in non-interactive modes", () => {
 		const result = await runCli(["--version"]);
 
 		expect(result.code).toBe(0);
-		// Fork bramburn: --version now prints `pi <version> [bramburn]`.
-		// Accept the new fork-marker format. The literal `[bramburn]` suffix
-		// is owned by FORK_NAME in packages/coding-agent/src/config.ts; if
-		// the fork identity changes, update both the constant and this regex.
 		expect(result.stdout.trim()).toMatch(/^pi \d+\.\d+\.\d+ \[bramburn\]$/);
 		expect(result.stderr).toBe("");
 	});

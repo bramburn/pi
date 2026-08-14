@@ -7,6 +7,7 @@ import {
 	type AssistantMessage,
 	type Context,
 	EventStream,
+	type Message,
 	type ToolResultMessage,
 	validateToolArguments,
 } from "@earendil-works/pi-ai";
@@ -293,6 +294,12 @@ async function streamAssistantResponse(
 
 	// Convert to LLM-compatible messages (AgentMessage[] → Message[])
 	const llmMessages = await config.convertToLlm(messages);
+	// Validate message integrity after extension transforms.
+	// Extensions can modify messages via the `context` event hook. Bugs in
+	// extensions may produce invalid sequences that providers reject with
+	// confusing errors (e.g., Anthropic error 2013 "tool call result does not
+	// follow tool call"). Catch these before the provider sees them.
+	validateLlmMessages(llmMessages);
 
 	// Build LLM context
 	const llmContext: Context = {
@@ -921,4 +928,49 @@ function createToolResultMessage(finalized: FinalizedToolCallOutcome): ToolResul
 async function emitToolResultMessage(toolResultMessage: ToolResultMessage, emit: AgentEventSink): Promise<void> {
 	await emit({ type: "message_start", message: toolResultMessage });
 	await emit({ type: "message_end", message: toolResultMessage });
+}
+
+export function validateLlmMessages(messages: Message[]): void {
+	if (messages.length === 0) return;
+
+	// Collect all toolCall IDs from assistant messages.
+	const assistantToolCallIds = new Set<string>();
+	for (const msg of messages) {
+		if (msg.role === "assistant") {
+			for (const block of msg.content) {
+				if (block.type === "toolCall" && block.id) {
+					assistantToolCallIds.add(block.id);
+				}
+			}
+		}
+	}
+
+	// Check for orphaned toolResult messages.
+	for (const msg of messages) {
+		if (msg.role === "toolResult") {
+			const toolResult = msg as ToolResultMessage;
+			if (toolResult.toolCallId && !assistantToolCallIds.has(toolResult.toolCallId)) {
+				throw new Error(
+					`Extension produced invalid message sequence: ` +
+					`toolResult for tool call "${toolResult.toolCallId}" (tool: ${toolResult.toolName}) ` +
+					`has no matching assistant toolCall. ` +
+					`This is usually caused by an extension's context hook removing or modifying ` +
+					`assistant messages that contained tool calls. ` +
+					`Check your active extensions or disable them with /extensions.`,
+				);
+			}
+		}
+	}
+
+	// Check that the last message is not an assistant message.
+	const lastMsg = messages[messages.length - 1];
+	if (lastMsg && lastMsg.role === "assistant") {
+		throw new Error(
+			`Extension produced invalid message sequence: ` +
+			`the last message has role "assistant". ` +
+			`LLM providers require the conversation to end with a user or toolResult message. ` +
+			`This is usually caused by an extension's context hook inserting an assistant-typed ` +
+			`message at the end. Check your active extensions or disable them with /extensions.`,
+		);
+	}
 }
