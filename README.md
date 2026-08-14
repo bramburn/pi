@@ -4,26 +4,34 @@
   </a>
 </p>
 <p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
   <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
 </p>
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+# Pi Coding Agent — bramburn fork
 
-# Pi Agent Harness
+Fork of [earendil-works/pi](https://github.com/earendil-works/pi) maintained by
+[Kaps Ramburn](https://github.com/bramburn) (`nitrogen@gmail.com`).
 
-This is the home of the Pi agent harness project including our self extensible coding agent.
+Tracks upstream `main` and re-applies the fork markers after each sync.
 
-* **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
-* **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
-* **[@earendil-works/pi-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
+## Differences from upstream
 
-To learn more about Pi:
+- `pi --version` prints `pi <version> [bramburn]` (fork marker, see
+  `packages/coding-agent/src/config.ts` `FORK_NAME`).
+- Per-package `.npmrc` files in every workspace package, prepared for
+  `@bramburn` npm-scope publishing on tag push.
+- Three fork-specific fixes preserved across upstream merges:
+  - **Per-sibling `toolResult` emission** in parallel tool batches (no orphans
+    when one sibling stalls). `packages/agent/src/agent-loop.ts`.
+  - **Scrollback-jump guard** while streaming with the viewport scrolled up.
+    `packages/tui/src/tui-main-screen.ts`.
+  - **Reverted Z.AI model test references** to currently available models
+    (Z.AI is not in the fork's provider list).
+- Workspace / lockfile restore: packages use upstream's `@earendil-works/*`
+  npm scope for workspace resolution. The earlier `@bramburn` rename was
+  reverted because the renamed packages are not yet on npm.
 
-* [Visit pi.dev](https://pi.dev), the project website with demos
-* [Read the documentation](https://pi.dev/docs/latest), but you can also ask the agent to explain itself
-
-## All Packages
+## All packages
 
 | Package | Description |
 |---------|-------------|
@@ -46,7 +54,7 @@ If you need stronger boundaries, containerize or sandbox Pi. See [packages/codin
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).
 
 ## Development
 
@@ -55,8 +63,8 @@ npm install --ignore-scripts  # Install all dependencies without running lifecyc
 npm run build         # Refresh model data, then build all packages
 npm run build:offline # Rebuild using existing model data without network access
 npm run check         # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+./test.sh             # Run tests (skips LLM-dependent tests without API keys)
+./pi-test.sh          # Run pi from sources (can be run from any directory)
 ```
 
 ## Building standalone binaries from release source
@@ -86,28 +94,6 @@ We treat npm dependency changes as reviewed code changes.
 - CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
 - Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
 
-## Share your OSS coding agent sessions
-
-If you use Pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
-
 ## License
 
 MIT
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
