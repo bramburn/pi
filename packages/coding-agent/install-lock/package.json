@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/pi-coding-agent-install",
-	"version": "0.84.2",
+	"version": "0.84.2-b1",
 	"private": true,
 	"description": "Lockfile root used by the Pi installer and updater.",
 	"dependencies": {

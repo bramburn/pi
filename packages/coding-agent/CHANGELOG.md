@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+- Synced upstream v0.84.2 onto fork main (which already carried v0.84.1 from `sync/upstream-main-2026-08`). Version bumped to `0.84.2-b1`.
+- Kept `FORK_NAME="bramburn"` marker in `pi --version` output (already in fork main, preserved through the merge).
+- Kept per-sibling `toolResult` emission in parallel tool batches (already in fork main as commit `d9a5a3c6d`, preserved through the upstream rewrite of `executeToolCallsParallel`).
+- Kept the scrollback-jump-on-streaming fix (already in fork main as commit `9176d0044`; upstream v0.84.2 rewrote the TUI in a functional architecture that gates `fullRender(true)` on `firstChanged < prevViewportTop`, which already prevents the same scrollback-jump class — fork fix retained for compatibility with the historical class-based TUI fallback paths that still load the legacy module).
+- Re-applied the `validateLlmMessages()` extension-transform check in `packages/agent/src/agent-loop.ts`; the regression test `validate-llm-messages.test.ts` is restored. (The original `db6d3f17e` commit lived on a feature branch that was never merged to fork main, so the fix is being added here, not preserved.)
+
 ### Fixed
 
 - Fixed Z.AI Coding Plan defaults referencing the removed GLM-5.1 model ([#8096](https://github.com/earendil-works/pi/issues/8096)).
