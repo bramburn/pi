@@ -30,8 +30,19 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No `registry-url` here: setup-node's `registry-url` writes
+          # NODE_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }} into the step env,
+          # which makes npm CLI use the GitHub token (no publish rights
+          # to npm) instead of the OIDC token trusted publishing relies on.
+          # We install the npm CLI v11.5.1+ explicitly below.
           cache: npm
+
+      # npm CLI v11.5.1+ is required for OIDC trusted publishing; the
+      # version of npm bundled with Node 22.x is too old (npm 10.x).
+      # See https://docs.npmjs.com/trusted-publishers
+      - name: Install npm 11 for trusted publishing
+        run: npm install -g npm@^11.5.1
+        shell: bash
 
       # Install all workspace dependencies (including tsgo at root devDeps)
       # at the repo root first; per-package npm ci inside subdirs would skip
