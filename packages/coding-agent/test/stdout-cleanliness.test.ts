@@ -93,7 +93,7 @@ describe("stdout cleanliness in non-interactive modes", () => {
 		// Accept the new fork-marker format. The literal `[bramburn]` suffix
 		// is owned by FORK_NAME in packages/coding-agent/src/config.ts; if
 		// the fork identity changes, update both the constant and this regex.
-		expect(result.stdout.trim()).toMatch(/^pi \d+\.\d+\.\d+ \[bramburn\]$/);
+		expect(result.stdout.trim()).toMatch(/^pi \d+\.\d+\.\d+(-[a-z0-9.]+)? \[bramburn\]$/);
 		expect(result.stderr).toBe("");
 	});
 
