@@ -74,36 +74,36 @@ jobs:
           # The trailing '|| echo' makes the step idempotent: re-running
           # a tag whose version already exists on npm fails fast at the
           # npm CLI but the workflow continues to the other packages.
-          node scripts/fork-publish-rename.mjs packages/ai npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/ai npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-tui
         run: |
-          node scripts/fork-publish-rename.mjs packages/tui npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/tui npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-telemetry
         run: |
-          node scripts/fork-publish-rename.mjs packages/telemetry npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/telemetry npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-protocol
         run: |
-          node scripts/fork-publish-rename.mjs packages/protocol npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/protocol npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-client
         run: |
-          node scripts/fork-publish-rename.mjs packages/client npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/client npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-agent-core
         run: |
-          node scripts/fork-publish-rename.mjs packages/agent npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
-          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-coding-agent
         run: |
-          node scripts/fork-publish-rename.mjs packages/coding-agent npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/coding-agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-server
         run: |
-          node scripts/fork-publish-rename.mjs packages/server npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/server npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
