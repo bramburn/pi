@@ -55,60 +55,44 @@ jobs:
       # here — that would force the legacy token path and re-trigger 2FA.
       - name: Publish @bramburn/pi-ai
         run: |
-          # scripts/fork-publish-rename.mjs swaps name in package.json to the
-          # @bramburn scope and restores it on exit (even on failure), so
-          # npm publish publishes under the trusted-publisher-protected name
-          # while keeping the workspace name (@earendil-works/pi-ai) on disk.
-          node scripts/fork-publish-rename.mjs packages/ai
-          cd packages/ai
-          # || true so already-published versions at this tag don't block the
-          # other packages (npm CLI fails on duplicate versions).
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          # scripts/fork-publish-rename.mjs swaps the package name to
+          # @bramburn/pi-ai, runs the rest of the command line, then
+          # restores the original @earendil-works/pi-ai name. This way
+          # npm publish publishes under the trusted-publisher-protected
+          # name while the workspace name on disk stays untouched.
+          # The trailing '|| echo' makes the step idempotent: re-running
+          # a tag whose version already exists on npm fails fast at the
+          # npm CLI but the workflow continues to the other packages.
+          node scripts/fork-publish-rename.mjs packages/ai npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-tui
         run: |
-          node scripts/fork-publish-rename.mjs packages/tui
-          cd packages/tui
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/tui npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-telemetry
         run: |
-          node scripts/fork-publish-rename.mjs packages/telemetry
-          cd packages/telemetry
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/telemetry npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-protocol
         run: |
-          node scripts/fork-publish-rename.mjs packages/protocol
-          cd packages/protocol
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/protocol npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-client
         run: |
-          node scripts/fork-publish-rename.mjs packages/client
-          cd packages/client
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/client npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-agent-core
         run: |
-          node scripts/fork-publish-rename.mjs packages/agent
-          cd packages/agent
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/agent npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
-          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node
-          cd packages/session-backends/sqlite-node
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-coding-agent
         run: |
-          node scripts/fork-publish-rename.mjs packages/coding-agent
-          cd packages/coding-agent
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/coding-agent npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-server
         run: |
-          node scripts/fork-publish-rename.mjs packages/server
-          cd packages/server
-          npm publish --access public || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/server npm publish --access public || echo "skip: $name already at $npm_package_version"
