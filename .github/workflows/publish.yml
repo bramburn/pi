@@ -33,19 +33,24 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
 
-      # Publish packages in dependency order (no internal deps → leaf → dependent)
-      # ai, tui, protocol: no internal dependencies
+      # Install all workspace dependencies (including tsgo at root devDeps)
+      # at the repo root first; per-package npm ci inside subdirs would skip
+      # workspace devDeps and break the tsgo build.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Build all packages in dependency order (no internal deps → leaf → dependent).
+      # ai, tui, telemetry, protocol: no internal dependencies
       # agent: depends on ai
-      # storage: depends on agent, ai
       # session-backends/sqlite-node (renamed from storage/sqlite-node in v0.84.2)
       # coding-agent: depends on agent, ai, tui
       # server: depends on coding-agent
+      - name: Build all packages
+        run: npm run build
 
       - name: Publish @bramburn/pi-ai
         run: |
           cd packages/ai
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -53,8 +58,13 @@ jobs:
       - name: Publish @bramburn/pi-tui
         run: |
           cd packages/tui
-          npm ci --ignore-scripts
-          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @bramburn/pi-telemetry
+        run: |
+          cd packages/telemetry
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -62,8 +72,6 @@ jobs:
       - name: Publish @bramburn/pi-protocol
         run: |
           cd packages/protocol
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -71,8 +79,6 @@ jobs:
       - name: Publish @bramburn/pi-agent-core
         run: |
           cd packages/agent
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -80,8 +86,6 @@ jobs:
       - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
           cd packages/session-backends/sqlite-node
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -89,8 +93,6 @@ jobs:
       - name: Publish @bramburn/pi-coding-agent
         run: |
           cd packages/coding-agent
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -98,8 +100,6 @@ jobs:
       - name: Publish @bramburn/pi-server
         run: |
           cd packages/server
-          npm ci --ignore-scripts
-          npm run build
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
