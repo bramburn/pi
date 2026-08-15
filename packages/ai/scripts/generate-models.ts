@@ -607,6 +607,16 @@ function mergeAnthropicMessagesCompat(model: Model<Api>, compat: AnthropicMessag
 	model.compat = { ...(model.compat as AnthropicMessagesCompat | undefined), ...compat };
 }
 
+function hasHostnameInDomain(urlString: string, domain: string): boolean {
+	try {
+		const hostname = new URL(urlString).hostname.toLowerCase();
+		const normalizedDomain = domain.toLowerCase();
+		return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
+	} catch {
+		return false;
+	}
+}
+
 function detectOpenAICompletionsCompat(model: Model<"openai-completions">): OpenAICompletionsResolvedCompat {
 	const provider = model.provider;
 	const baseUrl = model.baseUrl;
@@ -625,7 +635,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Open
 	const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
 	const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
 	const isTogetherReasoningOnly = isTogether && TOGETHER_REASONING_ONLY_MODELS.has(model.id);
-	const isDeepSeek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
+	const isDeepSeek = provider === "deepseek" || hasHostnameInDomain(baseUrl, "deepseek.com");
 
 	const isNonStandard =
 		isNvidia ||
