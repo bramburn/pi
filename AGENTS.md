@@ -172,6 +172,67 @@ When this repo is forked (e.g. `bramburn/pi` from `earendil-works/pi`), the fork
 - `packages/coding-agent/src/main.ts` references `FORK_NAME` in the `parsed.version` branch and prints `${FORK_NAME}` next to the version line.
 - When changing the fork's identity (renaming, merging with another fork, dropping the fork marker), update `FORK_NAME` in `config.ts` and verify `pi --version` still prints the new marker. The output is the source of truth: if it doesn't say the right name, the constant is stale.
 - Do NOT remove `FORK_NAME` to "match upstream" without explicit user instruction — the fork marker is intentional even though upstream lacks it. The fork publishes to its own npm scope and the marker tells users which scope's binaries they have installed.
+- `packages/coding-agent/test/stdout-cleanliness.test.ts` `--version` assertion regex must match the fork marker. If the fork version is a pre-release (e.g. `0.84.2-b1`), the regex needs to accept the `-<suffix>` portion in addition to `<digit>.<digit>.<digit>`.
+
+### Fork sync (origin/main -> fork main)
+
+When upstream `earendil-works/pi` ships a new release and the fork needs to follow:
+
+1. **Open a sync branch** off fork `main` (`git checkout -b sync/upstream-<version> fork/main`). Do not commit fork-local work to a long-lived branch.
+2. **Merge `origin/main` into the sync branch**: `git merge --no-ff origin/main -m "Merge upstream <version> into bramburn/pi"`. Resolve conflicts with the table in `.pi/plans/sync-upstream-<version>.md`.
+3. **Bump all workspace package versions to `<version>-b<patch>`** (e.g. `0.84.2-b1`). The fork suffix signals "fork build on the upstream baseline" without colliding with upstream tags.
+4. **Regenerate `packages/coding-agent/npm-shrinkwrap.json`** via `node scripts/generate-coding-agent-shrinkwrap.mjs`.
+5. **Regenerate `packages/coding-agent/install-lock/package.json` and `package-lock.json`** via `node scripts/generate-coding-agent-install-lock.mjs` so the CI `check:install-lock:coding-agent` step passes.
+6. **Re-apply fork-local preserves** that were either dropped by the merge (e.g. `FORK_NAME` references in `config.ts`/`main.ts`/`stdout-cleanliness.test.ts`) or that were never merged to fork main (e.g. `validateLlmMessages` lived only on a feature branch).
+7. **Append a `### Fork-local (bramburn)` section** to each package's `CHANGELOG.md` under `## [Unreleased]`.
+8. **Commit, push, open a PR to fork `main`, and rely on CI** for `npm run check` + `npm run build` + `npm test`. Do not run vitest locally; CI is cleaner.
+9. **After CI passes**, push the fork tag: `git tag -a v<version>-b<patch> -m "..."; git push fork v<version>-b<patch>`.
+
+### Windows prebuild file lock
+
+On Windows, `git merge` / `git rebase` / `git reset --hard` will fail with `unable to unlink old ... Invalid argument` when the working tree contains
+`packages/tui/native/win32/prebuilds/{win32-x64,win32-arm64}/win32-console-mode.node`
+and a running `pi` TUI has the prebuild mmap'd. The fork has historically
+held 4+ open pi TUI processes that pin these files.
+
+Workaround: do NOT kill the pi TUI processes (they belong to user
+sessions). Instead, when a git operation fails on the prebuild:
+
+1. Determine which blob hash the operation needs from the target commit
+   (`git ls-tree <target> packages/tui/native/win32/prebuilds/win32-x64/win32-console-mode.node`).
+2. `git update-index --cacheinfo 100644,<hash>,<path>` to record the target
+   blob in the index without touching the working tree. Git operations that
+   only need the index (e.g. `git rebase` reading the index to compute the
+   merge) then proceed without trying to unlink the locked file.
+3. The working tree will be dirty against the index afterwards; reset the
+   index for that file (`git restore --staged <path>`) before continuing.
+
+The prebuild mismatch between working tree (fork's 3072 byte build) and
+upstream's index (4608 byte build) is benign for `npm ci` on Linux CI but
+shows up locally on Windows during branch switches.
+
+### `.github/workflows/publish.yml` (fork-only)
+
+The fork uses a fork-local publish workflow that runs `npm publish` per
+package on tag push. Two structural rules from the current implementation:
+
+- `npm ci --ignore-scripts` MUST run at the repo root before per-package
+  builds; running it inside each package subdir skips workspace-root
+  devDependencies (notably `@typescript/native-preview` which provides the
+  `tsgo` binary), and every package's `npm run build` then fails with
+  `sh: 1: tsgo: not found`.
+- A single `npm run build` at the repo root builds every package in
+  dependency order (tui → telemetry → ai → agent → session-backends/sqlite-node
+  → protocol → client → server → coding-agent) and populates every `dist/`.
+  Subsequent `cd packages/<x> && npm publish --access public` steps just
+  publish from the prebuilt dist; do not reinstall or rebuild per package.
+- When upstream renames a package (e.g. `storage/sqlite-node` →
+  `session-backends/sqlite-node` in v0.84.2), update the matching publish
+  step's `cd` path AND the `@bramburn/<x>` package name in `name:`.
+- The current workflow uses `secrets.NPM_TOKEN` which is blocked by npm 2FA
+  OTP (see *Known issues* in README.md). Switch to npm trusted publishing
+  via OIDC (`id-token: write` + `npm-publish` environment) once the npm
+  scope is configured, matching upstream's approach.
 
 ## User Override
 
