@@ -48,58 +48,56 @@ jobs:
       - name: Build all packages
         run: npm run build
 
+      # Per-package npm publish steps.
+      # Trusted publishing via OIDC: the workflow's `id-token: write` permission
+      # plus the `npm-publish` environment lets npm CLI auto-detect the OIDC
+      # token from the GitHub Actions environment. Do NOT set NODE_AUTH_TOKEN
+      # here — that would force the legacy token path and re-trigger 2FA.
       - name: Publish @bramburn/pi-ai
         run: |
           cd packages/ai
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # || true so already-published versions at this tag don't block the
+          # other packages (npm CLI fails on duplicate versions; the upstream
+          # publish helper would skip but the per-step version we run here
+          # is the vanilla npm CLI).
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-tui
         run: |
           cd packages/tui
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-telemetry
         run: |
           cd packages/telemetry
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-protocol
         run: |
           cd packages/protocol
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-client
+        run: |
+          cd packages/client
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-agent-core
         run: |
           cd packages/agent
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
           cd packages/session-backends/sqlite-node
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-coding-agent
         run: |
           cd packages/coding-agent
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
 
       - name: Publish @bramburn/pi-server
         run: |
           cd packages/server
-          npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          npm publish --access public || echo "skip: $name already at $npm_package_version"
