@@ -37,6 +37,7 @@ jobs:
       # ai, tui, protocol: no internal dependencies
       # agent: depends on ai
       # storage: depends on agent, ai
+      # session-backends/sqlite-node (renamed from storage/sqlite-node in v0.84.2)
       # coding-agent: depends on agent, ai, tui
       # server: depends on coding-agent
 
@@ -76,9 +77,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @bramburn/pi-storage-sqlite-node
+      - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
-          cd packages/storage/sqlite-node
+          cd packages/session-backends/sqlite-node
           npm ci --ignore-scripts
           npm run build
           npm publish --access public
