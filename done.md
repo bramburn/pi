@@ -92,6 +92,7 @@
 | 86 | 2025-01-20 | `packages/tui/src/tui-main-screen.ts` | [#124](https://github.com/bramburn/pi/issues/124) | 0 | 0 | 4 |
 | 87 | 2025-01-20 | `packages/tui/src/undo-stack.ts` | [#126](https://github.com/bramburn/pi/issues/126) | 0 | 0 | 0 |
 | 88 | 2025-01-20 | `packages/tui/src/utils.ts` | [#128](https://github.com/bramburn/pi/issues/128) | 0 | 0 | 4 |
+| 89 | 2025-01-20 | `packages/tui/src/word-navigation.ts` | [#130](https://github.com/bramburn/pi/issues/130) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
