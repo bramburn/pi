@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 19:45:00
+2026-08-16 20:00:00
 
 ## Last Reviewed File
-packages/tui/src/latex.ts (#119)
+packages/tui/src/layout-node.ts (#121)
 
 ## Statistics
 
@@ -49,6 +49,7 @@ packages/tui/src/latex.ts (#119)
 | 28 | packages/tui/src/index.ts | #115 | audited | Fully compatible |
 | 29 | packages/tui/src/kill-ring.ts | #117 | audited | Fully compatible |
 | 30 | packages/tui/src/latex.ts | #119 | audited | Fully compatible |
+| 31 | packages/tui/src/layout-node.ts | #121 | audited | Fully compatible |
 
 ## Summary
 
