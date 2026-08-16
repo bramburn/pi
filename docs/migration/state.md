@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 21:45:00
+2026-08-16 22:00:00
 
 ## Last Reviewed File
-packages/tui/src/components/box.ts (#135)
+packages/tui/src/components/cancellable-loader.ts (#137)
 
 ## Statistics
 
@@ -57,6 +57,7 @@ packages/tui/src/components/box.ts (#135)
 | 36 | packages/tui/src/word-navigation.ts | #131 | audited | Fully compatible |
 | 37 | packages/tui/src/components/alt-screen-flash.ts | #133 | audited | Fully compatible |
 | 38 | packages/tui/src/components/box.ts | #135 | audited | Fully compatible |
+| 39 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
