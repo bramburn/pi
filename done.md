@@ -85,6 +85,7 @@
 | 79 | 2025-01-20 | `packages/tui/src/latex.ts` | [#110](https://github.com/bramburn/pi/issues/110) | 0 | 0 | 2 |
 | 80 | 2025-01-20 | `packages/tui/src/layout-node.ts` | [#112](https://github.com/bramburn/pi/issues/112) | 0 | 0 | 1 |
 | 81 | 2025-01-20 | `packages/tui/src/native-modifiers.ts` | [#114](https://github.com/bramburn/pi/issues/114) | 0 | 0 | 2 |
+| 82 | 2025-01-20 | `packages/tui/src/stdin-buffer.ts` | [#116](https://github.com/bramburn/pi/issues/116) | 0 | 0 | 4 |
 
 ## Remaining Packages
 
