@@ -99,6 +99,7 @@
 | 93 | 2025-01-20 | `packages/tui/src/components/h-stack.ts` | [#138](https://github.com/bramburn/pi/issues/138) | 0 | 0 | 3 |
 | 94 | 2025-01-20 | `packages/tui/src/components/input.ts` | [#140](https://github.com/bramburn/pi/issues/140) | 0 | 0 | 4 |
 | 95 | 2025-01-20 | `packages/tui/src/components/markdown.ts` | [#142](https://github.com/bramburn/pi/issues/142) | 0 | 0 | 3 |
+| 96 | 2025-01-20 | `packages/tui/src/components/scroll-view.ts` | [#144](https://github.com/bramburn/pi/issues/144) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
