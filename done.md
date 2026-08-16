@@ -103,6 +103,7 @@
 | 97 | 2025-01-20 | `packages/tui/src/components/select-list.ts` | [#146](https://github.com/bramburn/pi/issues/146) | 0 | 0 | 3 |
 | 98 | 2025-01-20 | `packages/tui/src/components/settings-list.ts` | [#148](https://github.com/bramburn/pi/issues/148) | 0 | 0 | 3 |
 | 99 | 2025-01-20 | `packages/tui/src/components/spacer.ts` | [#150](https://github.com/bramburn/pi/issues/150) | 0 | 0 | 2 |
+| 100 | 2025-01-20 | `packages/tui/src/components/text.ts` | [#152](https://github.com/bramburn/pi/issues/152) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
