@@ -90,6 +90,7 @@
 | 84 | 2025-01-20 | `packages/tui/src/terminal-image.ts` | [#120](https://github.com/bramburn/pi/issues/120) | 0 | 0 | 4 |
 | 85 | 2025-01-20 | `packages/tui/src/tui-alt-screen.ts` | [#122](https://github.com/bramburn/pi/issues/122) | 0 | 0 | 4 |
 | 86 | 2025-01-20 | `packages/tui/src/tui-main-screen.ts` | [#124](https://github.com/bramburn/pi/issues/124) | 0 | 0 | 4 |
+| 87 | 2025-01-20 | `packages/tui/src/undo-stack.ts` | [#126](https://github.com/bramburn/pi/issues/126) | 0 | 0 | 0 |
 
 ## Remaining Packages
 
