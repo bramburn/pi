@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 22:15:00
+2026-08-16 22:30:00
 
 ## Last Reviewed File
-packages/tui/src/components/h-stack.ts (#139)
+packages/tui/src/components/input.ts (#141)
 
 ## Statistics
 
@@ -59,6 +59,7 @@ packages/tui/src/components/h-stack.ts (#139)
 | 38 | packages/tui/src/components/box.ts | #135 | audited | Fully compatible |
 | 39 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible |
 | 40 | packages/tui/src/components/h-stack.ts | #139 | audited | Fully compatible |
+| 41 | packages/tui/src/components/input.ts | #141 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
