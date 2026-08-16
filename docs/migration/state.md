@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 18:45:00
+2026-08-16 19:00:00
 
 ## Last Reviewed File
-packages/tui/src/editor-component.ts (#111)
+packages/tui/src/fuzzy.ts (#113)
 
 ## Statistics
 
@@ -45,6 +45,7 @@ packages/tui/src/editor-component.ts (#111)
 | 24 | packages/tui/src/keybindings.ts | #107 | audited | Fully compatible |
 | 25 | packages/tui/src/autocomplete.ts | #109 | audited | Fully compatible |
 | 26 | packages/tui/src/editor-component.ts | #111 | audited | Fully compatible |
+| 27 | packages/tui/src/fuzzy.ts | #113 | audited | Fully compatible |
 
 ## Summary
 
