@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 23:15:00
+2026-08-16 23:30:00
 
 ## Last Reviewed File
-packages/tui/src/components/select-list.ts (#147)
+packages/tui/src/components/settings-list.ts (#149)
 
 ## Statistics
 
@@ -63,6 +63,7 @@ packages/tui/src/components/select-list.ts (#147)
 | 42 | packages/tui/src/components/markdown.ts | #143 | audited | Fully compatible |
 | 43 | packages/tui/src/components/scroll-view.ts | #145 | audited | Fully compatible |
 | 44 | packages/tui/src/components/select-list.ts | #147 | audited | Fully compatible |
+| 45 | packages/tui/src/components/settings-list.ts | #149 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
