@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 20:15:00
+2026-08-16 20:30:00
 
 ## Last Reviewed File
-packages/tui/src/tui-alt-screen.ts (#123)
+packages/tui/src/stdin-buffer.ts (#125)
 
 ## Statistics
 
@@ -51,6 +51,7 @@ packages/tui/src/tui-alt-screen.ts (#123)
 | 30 | packages/tui/src/latex.ts | #119 | audited | Fully compatible |
 | 31 | packages/tui/src/layout-node.ts | #121 | audited | Fully compatible |
 | 32 | packages/tui/src/tui-alt-screen.ts | #123 | audited | Fully compatible |
+| 33 | packages/tui/src/stdin-buffer.ts | #125 | audited | Fully compatible |
 
 ## Summary
 
