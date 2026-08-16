@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 00:00:00
+2026-08-17 00:15:00
 
 ## Last Reviewed File
-packages/tui/src/components/text.ts (#153)
+packages/tui/src/components/truncated-text.ts (#155)
 
 ## Statistics
 
@@ -66,6 +66,7 @@ packages/tui/src/components/text.ts (#153)
 | 45 | packages/tui/src/components/settings-list.ts | #149 | audited | Fully compatible |
 | 46 | packages/tui/src/components/spacer.ts | #151 | audited | Fully compatible |
 | 47 | packages/tui/src/components/text.ts | #153 | audited | Fully compatible |
+| 48 | packages/tui/src/components/truncated-text.ts | #155 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
