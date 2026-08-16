@@ -105,6 +105,7 @@
 | 99 | 2025-01-20 | `packages/tui/src/components/spacer.ts` | [#150](https://github.com/bramburn/pi/issues/150) | 0 | 0 | 2 |
 | 100 | 2025-01-20 | `packages/tui/src/components/text.ts` | [#152](https://github.com/bramburn/pi/issues/152) | 0 | 0 | 3 |
 | 101 | 2025-01-20 | `packages/tui/src/components/truncated-text.ts` | [#154](https://github.com/bramburn/pi/issues/154) | 0 | 0 | 3 |
+| 102 | 2025-01-20 | `packages/tui/src/components/v-stack.ts` | [#156](https://github.com/bramburn/pi/issues/156) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
