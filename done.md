@@ -95,6 +95,7 @@
 | 89 | 2025-01-20 | `packages/tui/src/word-navigation.ts` | [#130](https://github.com/bramburn/pi/issues/130) | 0 | 0 | 3 |
 | 90 | 2025-01-20 | `packages/tui/src/components/alt-screen-flash.ts` | [#132](https://github.com/bramburn/pi/issues/132) | 0 | 0 | 1 |
 | 91 | 2025-01-20 | `packages/tui/src/components/box.ts` | [#134](https://github.com/bramburn/pi/issues/134) | 0 | 0 | 3 |
+| 92 | 2025-01-20 | `packages/tui/src/components/cancellable-loader.ts` | [#136](https://github.com/bramburn/pi/issues/136) | 0 | 0 | 0 |
 
 ## Remaining Packages
 
