@@ -98,6 +98,7 @@
 | 92 | 2025-01-20 | `packages/tui/src/components/cancellable-loader.ts` | [#136](https://github.com/bramburn/pi/issues/136) | 0 | 0 | 0 |
 | 93 | 2025-01-20 | `packages/tui/src/components/h-stack.ts` | [#138](https://github.com/bramburn/pi/issues/138) | 0 | 0 | 3 |
 | 94 | 2025-01-20 | `packages/tui/src/components/input.ts` | [#140](https://github.com/bramburn/pi/issues/140) | 0 | 0 | 4 |
+| 95 | 2025-01-20 | `packages/tui/src/components/markdown.ts` | [#142](https://github.com/bramburn/pi/issues/142) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
