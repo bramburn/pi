@@ -87,6 +87,7 @@
 | 81 | 2025-01-20 | `packages/tui/src/native-modifiers.ts` | [#114](https://github.com/bramburn/pi/issues/114) | 0 | 0 | 2 |
 | 82 | 2025-01-20 | `packages/tui/src/stdin-buffer.ts` | [#116](https://github.com/bramburn/pi/issues/116) | 0 | 0 | 4 |
 | 83 | 2025-01-20 | `packages/tui/src/terminal-colors.ts` | [#118](https://github.com/bramburn/pi/issues/118) | 0 | 0 | 0 |
+| 84 | 2025-01-20 | `packages/tui/src/terminal-image.ts` | [#120](https://github.com/bramburn/pi/issues/120) | 0 | 0 | 4 |
 
 ## Remaining Packages
 
