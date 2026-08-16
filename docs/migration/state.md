@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-16 19:15:00
+2026-08-16 19:30:00
 
 ## Last Reviewed File
-packages/tui/src/index.ts (#115)
+packages/tui/src/kill-ring.ts (#117)
 
 ## Statistics
 
@@ -47,6 +47,7 @@ packages/tui/src/index.ts (#115)
 | 26 | packages/tui/src/editor-component.ts | #111 | audited | Fully compatible |
 | 27 | packages/tui/src/fuzzy.ts | #113 | audited | Fully compatible |
 | 28 | packages/tui/src/index.ts | #115 | audited | Fully compatible |
+| 29 | packages/tui/src/kill-ring.ts | #117 | audited | Fully compatible |
 
 ## Summary
 
