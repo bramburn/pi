@@ -179,6 +179,7 @@
 | 158 | 2025-01-20 | `packages/coding-agent/src/core/tools/path-utils.ts` | [#227](https://github.com/bramburn/pi/issues/227) | 0 | 0 | 1 |
 | 159 | 2025-01-20 | `packages/coding-agent/src/core/tools/read.ts` | [#229](https://github.com/bramburn/pi/issues/229) | 0 | 0 | 1 |
 | 160 | 2025-01-20 | `packages/coding-agent/src/core/tools/render-utils.ts` | [#231](https://github.com/bramburn/pi/issues/231) | 0 | 0 | 2 |
+| 161 | 2025-01-20 | `packages/coding-agent/src/core/tools/tool-definition-wrapper.ts` | [#233](https://github.com/bramburn/pi/issues/233) | 0 | 0 | 1 |
 
 ## Notes
 
