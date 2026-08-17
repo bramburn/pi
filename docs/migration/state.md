@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 04:45:00
+2026-08-17 05:00:00
 
 ## Last Reviewed File
-packages/server/src/listener.ts (#189)
+packages/server/src/snapshots.ts (#191)
 
 ## Statistics
 
@@ -86,6 +86,8 @@ packages/server/src/listener.ts (#189)
 | 65 | packages/protocol/src/framing.ts | #186 | audited | Fully compatible |
 | 66 | packages/protocol/src/schemas.ts | #188 | audited | Fully compatible |
 | 67 | packages/server/src/listener.ts | #189 | audited | Fully compatible |
+| 68 | packages/server/src/sessions.ts | #190 | audited | Node.js crypto - use native |
+| 69 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
