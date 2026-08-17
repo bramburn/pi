@@ -162,6 +162,8 @@
 | 141 | 2025-01-20 | `packages/coding-agent/src/client/remote-session.ts` | [#197](https://github.com/bramburn/pi/issues/197) | 0 | 0 | 2 |
 | 142 | 2025-01-20 | `packages/coding-agent/src/bun/register-bedrock.ts` | [#198](https://github.com/bramburn/pi/issues/198) | 0 | 0 | 0 |
 | 143 | 2025-01-20 | `packages/coding-agent/src/bun/restore-sandbox-env.ts` | [#199](https://github.com/bramburn/pi/issues/199) | 0 | 0 | 2 |
+| 144 | 2025-01-20 | `packages/coding-agent/src/cli/args.ts` | [#200](https://github.com/bramburn/pi/issues/200) | 0 | 0 | 0 |
+| 145 | 2025-01-20 | `packages/coding-agent/src/cli/experimental/command-options.ts` | [#201](https://github.com/bramburn/pi/issues/201) | 0 | 0 | 1 |
 
 ## Notes
 
