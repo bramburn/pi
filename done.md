@@ -176,6 +176,7 @@
 | 155 | 2025-01-20 | `packages/coding-agent/src/core/tools/find.ts` | [#221](https://github.com/bramburn/pi/issues/221) | 0 | 0 | 2 |
 | 156 | 2025-01-20 | `packages/coding-agent/src/core/tools/grep.ts` | [#223](https://github.com/bramburn/pi/issues/223) | 0 | 0 | 2 |
 | 157 | 2025-01-20 | `packages/coding-agent/src/core/tools/output-accumulator.ts` | [#225](https://github.com/bramburn/pi/issues/225) | 0 | 0 | 2 |
+| 158 | 2025-01-20 | `packages/coding-agent/src/core/tools/path-utils.ts` | [#227](https://github.com/bramburn/pi/issues/227) | 0 | 0 | 1 |
 
 ## Notes
 
