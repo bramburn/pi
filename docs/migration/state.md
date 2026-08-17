@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/diagnostics.ts (#244)
+packages/coding-agent/src/core/event-bus.ts (#245)
 
 ## Statistics
 
@@ -118,6 +118,7 @@ packages/coding-agent/src/core/diagnostics.ts (#244)
 | 97 | packages/coding-agent/src/core/compaction/branch-summarization.ts | #240 | audited | Fully compatible |
 | 98 | packages/coding-agent/src/core/defaults.ts | #242 | audited | Fully compatible |
 | 99 | packages/coding-agent/src/core/diagnostics.ts | #244 | audited | Fully compatible |
+| 100 | packages/coding-agent/src/core/event-bus.ts | #245 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
