@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/cache-stats.ts (#238)
+packages/coding-agent/src/core/compaction/branch-summarization.ts (#240)
 
 ## Statistics
 
@@ -115,6 +115,7 @@ packages/coding-agent/src/core/cache-stats.ts (#238)
 | 94 | packages/coding-agent/src/core/auth-guidance.ts | #234 | audited | Fully compatible |
 | 95 | packages/coding-agent/src/core/bash-executor.ts | #236 | audited | Fully compatible |
 | 96 | packages/coding-agent/src/core/cache-stats.ts | #238 | audited | Fully compatible |
+| 97 | packages/coding-agent/src/core/compaction/branch-summarization.ts | #240 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
