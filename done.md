@@ -171,6 +171,7 @@
 | 150 | 2025-01-20 | `packages/coding-agent/src/core/export-html/tool-renderer.ts` | [#211](https://github.com/bramburn/pi/issues/211) | 0 | 0 | 1 |
 | 151 | 2025-01-20 | `packages/coding-agent/src/core/extensions/runner.ts` | [#213](https://github.com/bramburn/pi/issues/213) | 0 | 0 | 1 |
 | 152 | 2025-01-20 | `packages/coding-agent/src/core/extensions/wrapper.ts` | [#215](https://github.com/bramburn/pi/issues/215) | 0 | 0 | 1 |
+| 153 | 2025-01-20 | `packages/coding-agent/src/core/tools/edit-diff.ts` | [#217](https://github.com/bramburn/pi/issues/217) | 0 | 0 | 2 |
 
 ## Notes
 
