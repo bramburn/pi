@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/extensions/runner.ts (#251)
+packages/coding-agent/src/core/extensions/wrapper.ts (#253)
 
 ## Statistics
 
@@ -122,6 +122,7 @@ packages/coding-agent/src/core/extensions/runner.ts (#251)
 | 101 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible |
 | 102 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible |
 | 103 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible |
+| 104 | packages/coding-agent/src/core/extensions/wrapper.ts | #253 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
