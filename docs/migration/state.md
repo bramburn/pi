@@ -94,6 +94,7 @@ packages/coding-agent/src/bun/register-bedrock.ts (#198)
 | 73 | packages/telemetry/src/memory.ts | #195 | audited | Fully compatible |
 | 74 | packages/telemetry/src/noop.ts | #196 | audited | Fully compatible |
 | 75 | packages/coding-agent/src/bun/register-bedrock.ts | #198 | audited | Fully compatible |
+| 76 | packages/coding-agent/src/bun/restore-sandbox-env.ts | #199 | audited | Bun-specific workaround |
 
 ## TUI Package Audit Complete
 
