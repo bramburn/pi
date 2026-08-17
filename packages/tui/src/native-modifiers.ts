@@ -4,6 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const cjsRequire = createRequire(import.meta.url);
 
+/** Detect if running under Bun runtime - native .node modules are not supported */
+const isBun = typeof process.versions.bun !== "undefined";
+
 export type ModifierKey = "shift" | "command" | "control" | "option";
 
 type NativeModifiersHelper = {
@@ -21,6 +24,11 @@ function isNativeModifiersHelper(value: unknown): value is NativeModifiersHelper
 function loadNativeModifiersHelper(): NativeModifiersHelper | undefined {
 	if (nativeModifiersHelper !== undefined) return nativeModifiersHelper ?? undefined;
 	nativeModifiersHelper = null;
+
+	// Bun cannot load Node.js native .node modules (uses JavaScriptCore, not V8)
+	// Gracefully return undefined to trigger fallback behavior
+	if (isBun) return undefined;
+
 	const arch = process.arch;
 	if (arch !== "x64" && arch !== "arm64") return undefined;
 
