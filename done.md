@@ -113,6 +113,7 @@
 | 107 | 2025-01-20 | `packages/ai/src/model-catalog.ts` | [#167](https://github.com/bramburn/pi/issues/167) | 0 | 0 | 2 |
 | 108 | 2025-01-20 | `packages/ai/src/images.ts` | [#169](https://github.com/bramburn/pi/issues/169) | 0 | 0 | 2 |
 | 109 | 2025-01-20 | `packages/ai/src/image-models.generated.ts` | [#171](https://github.com/bramburn/pi/issues/171) | 0 | 0 | 2 |
+| 110 | 2025-01-20 | `packages/ai/src/session-resources.ts` | [#173](https://github.com/bramburn/pi/issues/173) | 0 | 0 | 2 |
 
 ## Remaining Packages
 
