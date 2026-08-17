@@ -184,6 +184,7 @@
 | 163 | 2025-01-20 | `packages/coding-agent/src/migrations.ts` | [#237](https://github.com/bramburn/pi/issues/237) | 0 | 0 | 1 |
 | 164 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/armin.ts` | [#239](https://github.com/bramburn/pi/issues/239) | 0 | 0 | 1 |
 | 165 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/assistant-message.ts` | [#241](https://github.com/bramburn/pi/issues/241) | 0 | 0 | 1 |
+| 166 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/bash-execution.ts` | [#243](https://github.com/bramburn/pi/issues/243) | 0 | 0 | 1 |
 
 ## Notes
 
