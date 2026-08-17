@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 01:30:00
+2026-08-17 01:45:00
 
 ## Last Reviewed File
-packages/ai/src/images-models.ts (#164)
+packages/ai/src/legacy-api-aliases.ts (#166)
 
 ## Statistics
 
@@ -72,6 +72,7 @@ packages/ai/src/images-models.ts (#164)
 | 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
 | 52 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible |
 | 53 | packages/ai/src/images-models.ts | #164 | audited | Fully compatible |
+| 54 | packages/ai/src/legacy-api-aliases.ts | #166 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
