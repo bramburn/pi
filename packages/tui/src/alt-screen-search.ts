@@ -23,18 +23,22 @@ export interface AltScreenSearchMatch {
 function appendMappedText(
 	text: string,
 	span: SearchSourceSpan | undefined,
-	corpus: { text: string; source: Array<SearchSourceSpan | undefined> },
+	parts: string[],
+	source: Array<SearchSourceSpan | undefined>,
 ): void {
-	corpus.text += text;
-	for (let index = 0; index < text.length; index++) corpus.source.push(span);
+	parts.push(text);
+	for (let index = 0; index < text.length; index++) source.push(span);
 }
 
 function buildSearchCorpus(lines: readonly string[]): {
 	text: string;
 	source: Array<SearchSourceSpan | undefined>;
 } {
-	const corpus: { text: string; source: Array<SearchSourceSpan | undefined> } = { text: "", source: [] };
+	// Use array accumulation for O(n) instead of O(n²) string concatenation
+	const parts: string[] = [];
+	const source: Array<SearchSourceSpan | undefined> = [];
 	let pendingSeparator = false;
+	let hasContent = false;
 
 	for (let row = 0; row < lines.length; row++) {
 		const line = stripTerminalSequences(lines[row] ?? "");
@@ -43,21 +47,22 @@ function buildSearchCorpus(lines: readonly string[]): {
 			const text = grapheme.segment;
 			const width = visibleWidth(text);
 			if (/^\s+$/u.test(text)) {
-				if (corpus.text.length > 0) pendingSeparator = true;
+				if (hasContent) pendingSeparator = true;
 				column += width;
 				continue;
 			}
 			if (pendingSeparator) {
-				appendMappedText(" ", undefined, corpus);
+				appendMappedText(" ", undefined, parts, source);
 				pendingSeparator = false;
 			}
-			appendMappedText(text, { row, startCol: column, endCol: column + width }, corpus);
+			hasContent = true;
+			appendMappedText(text, { row, startCol: column, endCol: column + width }, parts, source);
 			column += width;
 		}
-		if (corpus.text.length > 0) pendingSeparator = true;
+		if (hasContent) pendingSeparator = true;
 	}
 
-	return corpus;
+	return { text: parts.join(""), source };
 }
 
 function normalizeQuery(query: string): string {
