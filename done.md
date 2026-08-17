@@ -204,6 +204,7 @@
 | 183 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/markdown-transform.ts` | [#278](https://github.com/bramburn/pi/issues/278) | 0 | 0 | 1 |
 | 184 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/mermaid.ts` | [#280](https://github.com/bramburn/pi/issues/280) | 0 | 0 | 1 |
 | 185 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/model-selector.ts` | [#282](https://github.com/bramburn/pi/issues/282) | 0 | 0 | 1 |
+| 186 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/oauth-selector.ts` | [#284](https://github.com/bramburn/pi/issues/284) | 0 | 0 | 1 |
 
 ## Notes
 
