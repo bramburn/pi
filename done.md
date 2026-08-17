@@ -115,10 +115,24 @@
 | 109 | 2025-01-20 | `packages/ai/src/image-models.generated.ts` | [#171](https://github.com/bramburn/pi/issues/171) | 0 | 0 | 2 |
 | 110 | 2025-01-20 | `packages/ai/src/session-resources.ts` | [#173](https://github.com/bramburn/pi/issues/173) | 0 | 0 | 2 |
 | 111 | 2025-01-20 | `packages/ai/src/cli.ts` | [#175](https://github.com/bramburn/pi/issues/175) | 0 | 0 | 3 |
+| 112 | 2025-01-20 | `packages/ai/src/image-models.ts` | [#164](https://github.com/bramburn/pi/issues/164) | 0 | 0 | 0 |
+| 113 | 2025-01-20 | `packages/ai/src/images-api-registry.ts` | [#162](https://github.com/bramburn/pi/issues/162) | 0 | 0 | 0 |
+| 114 | 2025-01-20 | `packages/ai/src/images-models.ts` | [#164](https://github.com/bramburn/pi/issues/164) | 0 | 0 | 0 |
+| 115 | 2025-01-20 | `packages/ai/src/legacy-api-aliases.ts` | [#166](https://github.com/bramburn/pi/issues/166) | 0 | 0 | 0 |
+| 116 | 2025-01-20 | `packages/ai/src/models-store.ts` | [#170](https://github.com/bramburn/pi/issues/170) | 0 | 0 | 0 |
+| 117 | 2025-01-20 | `packages/ai/src/types.ts` | [#174](https://github.com/bramburn/pi/issues/174) | 0 | 0 | 0 |
+| 118 | 2025-01-20 | `packages/ai/src/models.generated.ts` | [#168](https://github.com/bramburn/pi/issues/168) | 0 | 0 | 0 |
+| 119 | 2025-01-20 | `packages/ai/src/models.ts` | [#168](https://github.com/bramburn/pi/issues/168) | 0 | 0 | 0 |
+| 120 | 2025-01-20 | `packages/ai/src/oauth.ts` | [#159](https://github.com/bramburn/pi/issues/159) | 0 | 0 | 0 |
+| 121 | 2025-01-20 | `packages/ai/src/index.ts` | [#159](https://github.com/bramburn/pi/issues/159) | 0 | 0 | 0 |
 | 112 | 2025-01-20 | `packages/client/src/client.ts` | [#177](https://github.com/bramburn/pi/issues/177) | 0 | 0 | 3 |
 | 113 | 2025-01-20 | `packages/client/src/connection.ts` | [#179](https://github.com/bramburn/pi/issues/179) | 0 | 0 | 3 |
 | 114 | 2025-01-20 | `packages/client/src/errors.ts` | [#181](https://github.com/bramburn/pi/issues/181) | 0 | 0 | 0 |
 | 115 | 2025-01-20 | `packages/client/src/state.ts` | [#183](https://github.com/bramburn/pi/issues/183) | 0 | 0 | 2 |
+| 116 | 2025-01-20 | `packages/client/src/promise.ts` | [#180](https://github.com/bramburn/pi/issues/180) | 0 | 0 | 0 |
+| 117 | 2025-01-20 | `packages/client/src/session-handle.ts` | [#182](https://github.com/bramburn/pi/issues/182) | 0 | 0 | 0 |
+| 118 | 2025-01-20 | `packages/client/src/transport.ts` | [#184](https://github.com/bramburn/pi/issues/184) | 0 | 0 | 0 |
+| 119 | 2025-01-20 | `packages/client/src/unix.ts` | [#90](https://github.com/bramburn/pi/issues/90) | 0 | 0 | 1 |
 
 ## Remaining Packages
 
