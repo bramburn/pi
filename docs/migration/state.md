@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 01:00:00
+2026-08-17 01:15:00
 
 ## Last Reviewed File
-packages/ai/src/image-models.generated.ts (#160)
+packages/ai/src/images-api-registry.ts (#162)
 
 ## Statistics
 
@@ -70,6 +70,7 @@ packages/ai/src/image-models.generated.ts (#160)
 | 49 | packages/tui/src/components/v-stack.ts | #157 | audited | Fully compatible |
 | 50 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible |
 | 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
+| 52 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
