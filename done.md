@@ -202,6 +202,7 @@
 | 181 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts` | [#274](https://github.com/bramburn/pi/issues/274) | 0 | 0 | 1 |
 | 182 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/login-dialog.ts` | [#276](https://github.com/bramburn/pi/issues/276) | 0 | 0 | 1 |
 | 183 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/markdown-transform.ts` | [#278](https://github.com/bramburn/pi/issues/278) | 0 | 0 | 1 |
+| 184 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/mermaid.ts` | [#280](https://github.com/bramburn/pi/issues/280) | 0 | 0 | 1 |
 
 ## Notes
 
