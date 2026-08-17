@@ -146,16 +146,17 @@
 
 ## Remaining Packages
 
-- [ ] packages/agent/src
-- [ ] packages/ai/src
-- [ ] packages/client/src
-- [ ] packages/coding-agent/src (partial - 1 of many files reviewed)
-- [ ] packages/protocol/src
-- [ ] packages/server/src
-- [ ] packages/session-backends/src
-- [ ] packages/storage/src
-- [ ] packages/telemetry/src
-- [ ] packages/tui/src
+- [x] packages/agent/src (7 files reviewed)
+- [x] packages/ai/src (19 files reviewed)
+- [x] packages/client/src (10 files reviewed)
+- [ ] packages/coding-agent/src (partial - core files reviewed)
+- [x] packages/protocol/src (4 files reviewed)
+- [x] packages/server/src (9 files reviewed)
+- [x] packages/session-backends/src (sqlite-node - native)
+- [x] packages/storage/src (no src/ files)
+- [x] packages/telemetry/src (3 files reviewed)
+- [x] packages/tui/src (22 components reviewed)
+- [ ] packages/evals/src (reviewed)
 - [ ] Root config files
 
 ## Notes
