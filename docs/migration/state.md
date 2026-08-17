@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/bun/register-bedrock.ts (#198)
+packages/coding-agent/src/cli/args.ts (#200)
 
 ## Statistics
 
@@ -95,6 +95,7 @@ packages/coding-agent/src/bun/register-bedrock.ts (#198)
 | 74 | packages/telemetry/src/noop.ts | #196 | audited | Fully compatible |
 | 75 | packages/coding-agent/src/bun/register-bedrock.ts | #198 | audited | Fully compatible |
 | 76 | packages/coding-agent/src/bun/restore-sandbox-env.ts | #199 | audited | Bun-specific workaround |
+| 77 | packages/coding-agent/src/cli/args.ts | #200 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
