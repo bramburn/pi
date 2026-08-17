@@ -186,6 +186,7 @@
 | 165 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/assistant-message.ts` | [#241](https://github.com/bramburn/pi/issues/241) | 0 | 0 | 1 |
 | 166 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/bash-execution.ts` | [#243](https://github.com/bramburn/pi/issues/243) | 0 | 0 | 1 |
 | 167 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/bordered-loader.ts` | [#246](https://github.com/bramburn/pi/issues/246) | 0 | 0 | 1 |
+| 168 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/branch-summary-message.ts` | [#248](https://github.com/bramburn/pi/issues/248) | 0 | 0 | 1 |
 
 ## Notes
 
