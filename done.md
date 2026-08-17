@@ -114,6 +114,7 @@
 | 108 | 2025-01-20 | `packages/ai/src/images.ts` | [#169](https://github.com/bramburn/pi/issues/169) | 0 | 0 | 2 |
 | 109 | 2025-01-20 | `packages/ai/src/image-models.generated.ts` | [#171](https://github.com/bramburn/pi/issues/171) | 0 | 0 | 2 |
 | 110 | 2025-01-20 | `packages/ai/src/session-resources.ts` | [#173](https://github.com/bramburn/pi/issues/173) | 0 | 0 | 2 |
+| 111 | 2025-01-20 | `packages/ai/src/cli.ts` | [#175](https://github.com/bramburn/pi/issues/175) | 0 | 0 | 3 |
 
 ## Remaining Packages
 
