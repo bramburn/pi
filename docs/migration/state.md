@@ -36,7 +36,7 @@ packages/coding-agent/src/core/diagnostics.ts (#244)
 | 15 | packages/client/src/unix.ts | #90 | audited | Unix sockets need testing |
 | 16 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point |
 | 17 | packages/ai/src/env-api-keys.ts | #94 | audited | Already Bun-aware |
-| 18 | packages/tui/src/native-modifiers.ts | #96 | audited | **CRITICAL: Native modules** |
+| 18 | packages/tui/src/native-modifiers.ts | #96 | RESOLVED | **Implemented Bun detection + graceful fallback** |
 | 19 | packages/tui/src/alt-screen-search.ts | #97 | audited | Fully compatible |
 | 20 | packages/tui/src/terminal-image.ts | #99 | audited | Fully compatible |
 | 21 | packages/tui/src/terminal.ts | #101 | audited | **CRITICAL: Native modules** |
@@ -144,10 +144,11 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 
 ## Known Issues
 
-| Issue | Files | Risk |
-|-------|-------|------|
-| Native modules | native-modifiers.ts | **CRITICAL** |
-| proper-lockfile | auth-storage, trust-manager | Medium |
-| Worker threads | image-resize | Medium |
-| Proxy agents | bedrock-converse-stream | Medium |
-| Unix sockets | client/unix.ts | Medium |
+| Issue | Files | Risk | Status |
+|-------|-------|------|--------|
+| Native modules | native-modifiers.ts | **CRITICAL** | ✅ Graceful fallback implemented |
+| Native modules | terminal.ts | **CRITICAL** | ⚠️ Needs testing |
+| proper-lockfile | auth-storage, trust-manager | Medium | Pending |
+| Worker threads | image-resize | Medium | Pending |
+| Proxy agents | bedrock-converse-stream | Medium | Pending |
+| Unix sockets | client/unix.ts | Medium | Pending |
