@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/credential-print.ts (#208)
+packages/coding-agent/src/cli/experimental/command-options.ts (#210)
 
 ## Statistics
 
@@ -100,6 +100,7 @@ packages/coding-agent/src/cli/credential-print.ts (#208)
 | 79 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible |
 | 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
 | 81 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible |
+| 82 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
