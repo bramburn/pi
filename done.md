@@ -108,6 +108,7 @@
 | 102 | 2025-01-20 | `packages/tui/src/components/v-stack.ts` | [#156](https://github.com/bramburn/pi/issues/156) | 0 | 0 | 3 |
 | 103 | 2025-01-20 | `packages/ai/src/bun-oauth.ts` | [#159](https://github.com/bramburn/pi/issues/159) | 0 | 0 | 2 |
 | 104 | 2025-01-20 | `packages/ai/src/env-api-keys.ts` | [#161](https://github.com/bramburn/pi/issues/161) | 0 | 0 | 3 |
+| 105 | 2025-01-20 | `packages/ai/src/bedrock-provider.ts` | [#163](https://github.com/bramburn/pi/issues/163) | 0 | 0 | 0 |
 
 ## Remaining Packages
 
