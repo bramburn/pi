@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 04:30:00
+2026-08-17 04:45:00
 
 ## Last Reviewed File
-packages/protocol/src/schemas.ts (#188)
+packages/server/src/listener.ts (#189)
 
 ## Statistics
 
@@ -85,6 +85,7 @@ packages/protocol/src/schemas.ts (#188)
 | 64 | packages/protocol/src/codec.ts | #186 | audited | Fully compatible |
 | 65 | packages/protocol/src/framing.ts | #186 | audited | Fully compatible |
 | 66 | packages/protocol/src/schemas.ts | #188 | audited | Fully compatible |
+| 67 | packages/server/src/listener.ts | #189 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
