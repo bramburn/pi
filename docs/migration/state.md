@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/experimental/transport-address.ts (#212)
+packages/coding-agent/src/cli/file-processor.ts (#214)
 
 ## Statistics
 
@@ -102,6 +102,7 @@ packages/coding-agent/src/cli/experimental/transport-address.ts (#212)
 | 81 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible |
 | 82 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible |
 | 83 | packages/coding-agent/src/cli/experimental/transport-address.ts | #212 | audited | Fully compatible |
+| 84 | packages/coding-agent/src/cli/file-processor.ts | #214 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
