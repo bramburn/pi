@@ -160,6 +160,8 @@
 - [ ] Root config files
 
 | 141 | 2025-01-20 | `packages/coding-agent/src/client/remote-session.ts` | [#197](https://github.com/bramburn/pi/issues/197) | 0 | 0 | 2 |
+| 142 | 2025-01-20 | `packages/coding-agent/src/bun/register-bedrock.ts` | [#198](https://github.com/bramburn/pi/issues/198) | 0 | 0 | 0 |
+| 143 | 2025-01-20 | `packages/coding-agent/src/bun/restore-sandbox-env.ts` | [#199](https://github.com/bramburn/pi/issues/199) | 0 | 0 | 2 |
 
 ## Notes
 
