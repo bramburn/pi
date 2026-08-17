@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/messages.ts (#259)
+packages/coding-agent/src/core/model-config.ts (#261)
 
 ## Statistics
 
@@ -126,6 +126,7 @@ packages/coding-agent/src/core/messages.ts (#259)
 | 105 | packages/coding-agent/src/core/footer-data-provider.ts | #255 | audited | Fully compatible |
 | 106 | packages/coding-agent/src/core/http-dispatcher.ts | #257 | audited | Fully compatible |
 | 107 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible |
+| 108 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
