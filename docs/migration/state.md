@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 02:30:00
+2026-08-17 02:45:00
 
 ## Last Reviewed File
-packages/ai/src/session-resources.ts (#172)
+packages/ai/src/types.ts (#174)
 
 ## Statistics
 
@@ -76,6 +76,7 @@ packages/ai/src/session-resources.ts (#172)
 | 55 | packages/ai/src/model-catalog.ts | #168 | audited | Fully compatible |
 | 56 | packages/ai/src/models-store.ts | #170 | audited | Fully compatible |
 | 57 | packages/ai/src/session-resources.ts | #172 | audited | Fully compatible |
+| 58 | packages/ai/src/types.ts | #174 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
