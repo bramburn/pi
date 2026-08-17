@@ -197,6 +197,7 @@
 | 176 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts` | [#264](https://github.com/bramburn/pi/issues/264) | 0 | 0 | 1 |
 | 177 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/extension-editor.ts` | [#266](https://github.com/bramburn/pi/issues/266) | 0 | 0 | 1 |
 | 178 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/extension-input.ts` | [#268](https://github.com/bramburn/pi/issues/268) | 0 | 0 | 1 |
+| 179 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/extension-selector.ts` | [#270](https://github.com/bramburn/pi/issues/270) | 0 | 0 | 1 |
 
 ## Notes
 
