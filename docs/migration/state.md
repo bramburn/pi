@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/evals/src/extensions.eval.ts (#193)
+packages/evals/src/smoke.eval.ts (#194)
 
 ## Statistics
 
@@ -90,6 +90,7 @@ packages/evals/src/extensions.eval.ts (#193)
 | 69 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible |
 | 70 | packages/evals/src/pi-harness.ts | #192 | audited | Node.js imports - test in Bun |
 | 71 | packages/evals/src/extensions.eval.ts | #193 | audited | Needs testing |
+| 72 | packages/evals/src/smoke.eval.ts | #194 | audited | Needs vitest |
 
 ## TUI Package Audit Complete
 
