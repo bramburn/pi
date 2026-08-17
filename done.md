@@ -172,6 +172,7 @@
 | 151 | 2025-01-20 | `packages/coding-agent/src/core/extensions/runner.ts` | [#213](https://github.com/bramburn/pi/issues/213) | 0 | 0 | 1 |
 | 152 | 2025-01-20 | `packages/coding-agent/src/core/extensions/wrapper.ts` | [#215](https://github.com/bramburn/pi/issues/215) | 0 | 0 | 1 |
 | 153 | 2025-01-20 | `packages/coding-agent/src/core/tools/edit-diff.ts` | [#217](https://github.com/bramburn/pi/issues/217) | 0 | 0 | 2 |
+| 154 | 2025-01-20 | `packages/coding-agent/src/core/tools/file-mutation-queue.ts` | [#219](https://github.com/bramburn/pi/issues/219) | 0 | 0 | 1 |
 
 ## Notes
 
