@@ -159,6 +159,8 @@
 - [ ] packages/evals/src (reviewed)
 - [ ] Root config files
 
+| 141 | 2025-01-20 | `packages/coding-agent/src/client/remote-session.ts` | [#197](https://github.com/bramburn/pi/issues/197) | 0 | 0 | 2 |
+
 ## Notes
 
 - One file per run as per user request
