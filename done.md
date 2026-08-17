@@ -164,6 +164,7 @@
 | 143 | 2025-01-20 | `packages/coding-agent/src/bun/restore-sandbox-env.ts` | [#199](https://github.com/bramburn/pi/issues/199) | 0 | 0 | 2 |
 | 144 | 2025-01-20 | `packages/coding-agent/src/cli/args.ts` | [#200](https://github.com/bramburn/pi/issues/200) | 0 | 0 | 0 |
 | 145 | 2025-01-20 | `packages/coding-agent/src/cli/experimental/command-options.ts` | [#201](https://github.com/bramburn/pi/issues/201) | 0 | 0 | 1 |
+| 146 | 2025-01-20 | `packages/coding-agent/src/cli/experimental/transport-address.ts` | [#203](https://github.com/bramburn/pi/issues/203) | 0 | 0 | 1 |
 
 ## Notes
 
