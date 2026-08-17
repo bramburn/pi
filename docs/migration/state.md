@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/auth-command.ts (#204)
+packages/coding-agent/src/cli/config-selector.ts (#206)
 
 ## Statistics
 
@@ -98,6 +98,7 @@ packages/coding-agent/src/cli/auth-command.ts (#204)
 | 77 | packages/coding-agent/src/cli/args.ts | #200 | audited | Fully compatible |
 | 78 | packages/coding-agent/src/cli/auth-check.ts | #202 | audited | Fully compatible |
 | 79 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible |
+| 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
