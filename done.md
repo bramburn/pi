@@ -118,6 +118,7 @@
 | 112 | 2025-01-20 | `packages/client/src/client.ts` | [#177](https://github.com/bramburn/pi/issues/177) | 0 | 0 | 3 |
 | 113 | 2025-01-20 | `packages/client/src/connection.ts` | [#179](https://github.com/bramburn/pi/issues/179) | 0 | 0 | 3 |
 | 114 | 2025-01-20 | `packages/client/src/errors.ts` | [#181](https://github.com/bramburn/pi/issues/181) | 0 | 0 | 0 |
+| 115 | 2025-01-20 | `packages/client/src/state.ts` | [#183](https://github.com/bramburn/pi/issues/183) | 0 | 0 | 2 |
 
 ## Remaining Packages
 
