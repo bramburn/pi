@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/output-guard.ts (#269)
+packages/coding-agent/src/core/package-manager.ts (#271)
 
 ## Statistics
 
@@ -131,6 +131,7 @@ packages/coding-agent/src/core/output-guard.ts (#269)
 | 110 | packages/coding-agent/src/core/model-resolver.ts | #265 | audited | Fully compatible |
 | 111 | packages/coding-agent/src/core/model-runtime.ts | #267 | audited | Fully compatible |
 | 112 | packages/coding-agent/src/core/output-guard.ts | #269 | audited | Fully compatible |
+| 113 | packages/coding-agent/src/core/package-manager.ts | #271 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
