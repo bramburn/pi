@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 00:45:00
+2026-08-17 01:00:00
 
 ## Last Reviewed File
-packages/ai/src/bedrock-provider.ts (#158)
+packages/ai/src/image-models.generated.ts (#160)
 
 ## Statistics
 
@@ -69,6 +69,7 @@ packages/ai/src/bedrock-provider.ts (#158)
 | 48 | packages/tui/src/components/truncated-text.ts | #155 | audited | Fully compatible |
 | 49 | packages/tui/src/components/v-stack.ts | #157 | audited | Fully compatible |
 | 50 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible |
+| 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
