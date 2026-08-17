@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 05:00:00
+2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/server/src/snapshots.ts (#191)
+packages/evals/src/extensions.eval.ts (#193)
 
 ## Statistics
 
@@ -88,6 +88,8 @@ packages/server/src/snapshots.ts (#191)
 | 67 | packages/server/src/listener.ts | #189 | audited | Fully compatible |
 | 68 | packages/server/src/sessions.ts | #190 | audited | Node.js crypto - use native |
 | 69 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible |
+| 70 | packages/evals/src/pi-harness.ts | #192 | audited | Node.js imports - test in Bun |
+| 71 | packages/evals/src/extensions.eval.ts | #193 | audited | Needs testing |
 
 ## TUI Package Audit Complete
 
