@@ -128,6 +128,8 @@
 | 122 | 2025-01-20 | `packages/protocol/src/codec.ts` | [#185](https://github.com/bramburn/pi/issues/185) | 0 | 0 | 2 |
 | 123 | 2025-01-20 | `packages/protocol/src/framing.ts` | [#186](https://github.com/bramburn/pi/issues/186) | 0 | 0 | 0 |
 | 124 | 2025-01-20 | `packages/protocol/src/schemas.ts` | [#187](https://github.com/bramburn/pi/issues/187) | 0 | 0 | 1 |
+| 125 | 2025-01-20 | `packages/server/src/listener.ts` | [#189](https://github.com/bramburn/pi/issues/189) | 0 | 0 | 0 |
+| 126 | 2025-01-20 | `packages/server/src/sessions.ts` | [#190](https://github.com/bramburn/pi/issues/190) | 0 | 0 | 3 |
 | 112 | 2025-01-20 | `packages/client/src/client.ts` | [#177](https://github.com/bramburn/pi/issues/177) | 0 | 0 | 3 |
 | 113 | 2025-01-20 | `packages/client/src/connection.ts` | [#179](https://github.com/bramburn/pi/issues/179) | 0 | 0 | 3 |
 | 114 | 2025-01-20 | `packages/client/src/errors.ts` | [#181](https://github.com/bramburn/pi/issues/181) | 0 | 0 | 0 |
