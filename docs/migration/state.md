@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/client/transcript.ts (#228)
+packages/coding-agent/src/core/agent-session-runtime.ts (#230)
 
 ## Statistics
 
@@ -110,6 +110,7 @@ packages/coding-agent/src/client/transcript.ts (#228)
 | 89 | packages/coding-agent/src/cli/startup-ui.ts | #224 | audited | Fully compatible |
 | 90 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible |
 | 91 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible |
+| 92 | packages/coding-agent/src/core/agent-session-runtime.ts | #230 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
