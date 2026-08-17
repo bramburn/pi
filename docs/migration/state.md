@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/session-picker.ts (#222)
+packages/coding-agent/src/cli/startup-ui.ts (#224)
 
 ## Statistics
 
@@ -107,6 +107,7 @@ packages/coding-agent/src/cli/session-picker.ts (#222)
 | 86 | packages/coding-agent/src/cli/list-models.ts | #218 | audited | Fully compatible |
 | 87 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible |
 | 88 | packages/coding-agent/src/cli/session-picker.ts | #222 | audited | Fully compatible |
+| 89 | packages/coding-agent/src/cli/startup-ui.ts | #224 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
