@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/remote-catalog-provider.ts (#283)
+packages/coding-agent/src/core/resolve-config-value.ts (#285)
 
 ## Statistics
 
@@ -138,6 +138,7 @@ packages/coding-agent/src/core/remote-catalog-provider.ts (#283)
 | 117 | packages/coding-agent/src/core/provider-composer.ts | #279 | audited | Fully compatible |
 | 118 | packages/coding-agent/src/core/radius.ts | #281 | audited | Fully compatible |
 | 119 | packages/coding-agent/src/core/remote-catalog-provider.ts | #283 | audited | Fully compatible |
+| 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
