@@ -111,6 +111,7 @@
 | 105 | 2025-01-20 | `packages/ai/src/bedrock-provider.ts` | [#163](https://github.com/bramburn/pi/issues/163) | 0 | 0 | 0 |
 | 106 | 2025-01-20 | `packages/ai/src/compat.ts` | [#165](https://github.com/bramburn/pi/issues/165) | 0 | 0 | 4 |
 | 107 | 2025-01-20 | `packages/ai/src/model-catalog.ts` | [#167](https://github.com/bramburn/pi/issues/167) | 0 | 0 | 2 |
+| 108 | 2025-01-20 | `packages/ai/src/images.ts` | [#169](https://github.com/bramburn/pi/issues/169) | 0 | 0 | 2 |
 
 ## Remaining Packages
 
