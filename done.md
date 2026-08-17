@@ -130,6 +130,8 @@
 | 124 | 2025-01-20 | `packages/protocol/src/schemas.ts` | [#187](https://github.com/bramburn/pi/issues/187) | 0 | 0 | 1 |
 | 125 | 2025-01-20 | `packages/server/src/listener.ts` | [#189](https://github.com/bramburn/pi/issues/189) | 0 | 0 | 0 |
 | 126 | 2025-01-20 | `packages/server/src/sessions.ts` | [#190](https://github.com/bramburn/pi/issues/190) | 0 | 0 | 3 |
+| 127 | 2025-01-20 | `packages/server/src/snapshots.ts` | [#191](https://github.com/bramburn/pi/issues/191) | 0 | 0 | 0 |
+| 128 | 2025-01-20 | `packages/evals/src/pi-harness.ts` | [#192](https://github.com/bramburn/pi/issues/192) | 0 | 0 | 2 |
 | 112 | 2025-01-20 | `packages/client/src/client.ts` | [#177](https://github.com/bramburn/pi/issues/177) | 0 | 0 | 3 |
 | 113 | 2025-01-20 | `packages/client/src/connection.ts` | [#179](https://github.com/bramburn/pi/issues/179) | 0 | 0 | 3 |
 | 114 | 2025-01-20 | `packages/client/src/errors.ts` | [#181](https://github.com/bramburn/pi/issues/181) | 0 | 0 | 0 |
