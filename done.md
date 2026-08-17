@@ -168,6 +168,7 @@
 | 147 | 2025-01-20 | `packages/coding-agent/src/client/transcript.ts` | [#205](https://github.com/bramburn/pi/issues/205) | 0 | 0 | 2 |
 | 148 | 2025-01-20 | `packages/coding-agent/src/core/compaction/branch-summarization.ts` | [#207](https://github.com/bramburn/pi/issues/207) | 0 | 0 | 1 |
 | 149 | 2025-01-20 | `packages/coding-agent/src/core/export-html/ansi-to-html.ts` | [#209](https://github.com/bramburn/pi/issues/209) | 0 | 0 | 1 |
+| 150 | 2025-01-20 | `packages/coding-agent/src/core/export-html/tool-renderer.ts` | [#211](https://github.com/bramburn/pi/issues/211) | 0 | 0 | 1 |
 
 ## Notes
 
