@@ -182,6 +182,7 @@
 | 161 | 2025-01-20 | `packages/coding-agent/src/core/tools/tool-definition-wrapper.ts` | [#233](https://github.com/bramburn/pi/issues/233) | 0 | 0 | 1 |
 | 162 | 2025-01-20 | `packages/coding-agent/src/extensions/llama/huggingface.ts` | [#235](https://github.com/bramburn/pi/issues/235) | 0 | 0 | 1 |
 | 163 | 2025-01-20 | `packages/coding-agent/src/migrations.ts` | [#237](https://github.com/bramburn/pi/issues/237) | 0 | 0 | 1 |
+| 164 | 2025-01-20 | `packages/coding-agent/src/modes/interactive/components/armin.ts` | [#239](https://github.com/bramburn/pi/issues/239) | 0 | 0 | 1 |
 
 ## Notes
 
