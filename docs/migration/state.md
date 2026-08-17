@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/model-resolver.ts (#265)
+packages/coding-agent/src/core/model-runtime.ts (#267)
 
 ## Statistics
 
@@ -129,6 +129,7 @@ packages/coding-agent/src/core/model-resolver.ts (#265)
 | 108 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible |
 | 109 | packages/coding-agent/src/core/model-registry.ts | #263 | audited | Fully compatible |
 | 110 | packages/coding-agent/src/core/model-resolver.ts | #265 | audited | Fully compatible |
+| 111 | packages/coding-agent/src/core/model-runtime.ts | #267 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
