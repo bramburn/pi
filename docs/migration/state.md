@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 03:30:00
+2026-08-17 03:45:00
 
 ## Last Reviewed File
-packages/client/src/promise.ts (#180)
+packages/client/src/session-handle.ts (#182)
 
 ## Statistics
 
@@ -80,6 +80,7 @@ packages/client/src/promise.ts (#180)
 | 59 | packages/client/src/errors.ts | #176 | audited | Fully compatible |
 | 60 | packages/client/src/connection.ts | #178 | audited | Fully compatible |
 | 61 | packages/client/src/promise.ts | #180 | audited | Fully compatible |
+| 62 | packages/client/src/session-handle.ts | #182 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
