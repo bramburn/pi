@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/telemetry/src/noop.ts (#196)
+packages/coding-agent/src/bun/register-bedrock.ts (#198)
 
 ## Statistics
 
@@ -93,6 +93,7 @@ packages/telemetry/src/noop.ts (#196)
 | 72 | packages/evals/src/smoke.eval.ts | #194 | audited | Needs vitest |
 | 73 | packages/telemetry/src/memory.ts | #195 | audited | Fully compatible |
 | 74 | packages/telemetry/src/noop.ts | #196 | audited | Fully compatible |
+| 75 | packages/coding-agent/src/bun/register-bedrock.ts | #198 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
