@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/provider-composer.ts (#279)
+packages/coding-agent/src/core/radius.ts (#281)
 
 ## Statistics
 
@@ -136,6 +136,7 @@ packages/coding-agent/src/core/provider-composer.ts (#279)
 | 115 | packages/coding-agent/src/core/prompt-templates.ts | #275 | audited | Fully compatible |
 | 116 | packages/coding-agent/src/core/provider-attribution.ts | #277 | audited | Fully compatible |
 | 117 | packages/coding-agent/src/core/provider-composer.ts | #279 | audited | Fully compatible |
+| 118 | packages/coding-agent/src/core/radius.ts | #281 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
