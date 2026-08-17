@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-17 05:15:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/export-html/ansi-to-html.ts (#247)
+packages/coding-agent/src/core/export-html/tool-renderer.ts (#249)
 
 ## Statistics
 
@@ -120,6 +120,7 @@ packages/coding-agent/src/core/export-html/ansi-to-html.ts (#247)
 | 99 | packages/coding-agent/src/core/diagnostics.ts | #244 | audited | Fully compatible |
 | 100 | packages/coding-agent/src/core/event-bus.ts | #245 | audited | Fully compatible |
 | 101 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible |
+| 102 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
