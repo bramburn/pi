@@ -240,6 +240,7 @@
 | 219 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-selector.ts` | [#364](https://github.com/bramburn/pi/issues/364) | 0 | 1 | 1 |
 | 220 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/first-time-setup.ts` | [#367](https://github.com/bramburn/pi/issues/367) | 0 | 1 | 1 |
 | 221 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/footer.ts` | [#370](https://github.com/bramburn/pi/issues/370) | 0 | 1 | 1 |
+| 222 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/index.ts` | [#373](https://github.com/bramburn/pi/issues/373) | 0 | 1 | 1 |
 
 ## Notes
 
