@@ -71,6 +71,7 @@ packages/coding-agent/src/utils/image-resize-core.ts (#369)
 | 50 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible |
 | 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
 | 52 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible |
+| 52.5 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Map singleton-registry iteration order + set/get semantics) |
 | 53 | packages/ai/src/images-models.ts | #164 | audited | Fully compatible |
 | 54 | packages/ai/src/legacy-api-aliases.ts | #166 | audited | Fully compatible |
 | 54.5 | packages/ai/src/legacy-api-aliases.ts | #166 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers ESM dynamic-import cache + deprecation-alias re-export) |
