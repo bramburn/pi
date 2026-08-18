@@ -136,7 +136,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 115 | packages/coding-agent/src/core/prompt-templates.ts | #275 | audited | Fully compatible |
 | 116 | packages/coding-agent/src/core/provider-attribution.ts | #277 | audited | Fully compatible |
 | 117 | packages/coding-agent/src/core/provider-composer.ts | #279 | audited | Fully compatible |
-| 118 | packages/coding-agent/src/core/radius.ts | #281 | audited | Fully compatible |
+| 118 | packages/coding-agent/src/core/radius.ts | #281 | audited | Fully compatible (close-out of audit track) |
 | 119 | packages/coding-agent/src/core/remote-catalog-provider.ts | #283 | audited | Fully compatible (close-out of audit track) |
 | 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible (no migration work; close-out of audit track) |
 
