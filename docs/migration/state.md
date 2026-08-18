@@ -143,6 +143,7 @@ packages/tui/src/components/image.ts (#288)
 | 121 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible |
 | 122 | packages/tui/src/components/image.ts | #288 | audited | Fully compatible |
 | 123 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
+| 124 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible (close-out of audit track) |
 
 ## TUI Package Audit Complete
 
