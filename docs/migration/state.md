@@ -58,6 +58,7 @@ packages/coding-agent/src/utils/paths.ts (#375)
 | 37 | packages/tui/src/components/alt-screen-flash.ts | #133 | audited | Fully compatible |
 | 38 | packages/tui/src/components/box.ts | #135 | audited | Fully compatible |
 | 39 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible |
+| 39.5 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers private AbortController instance-field-init per-instance identity) |
 | 40 | packages/tui/src/components/h-stack.ts | #139 | audited | Fully compatible |
 | 41 | packages/tui/src/components/input.ts | #141 | audited | Fully compatible |
 | 42 | packages/tui/src/components/markdown.ts | #143 | audited | Fully compatible |
