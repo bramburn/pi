@@ -184,6 +184,7 @@ packages/coding-agent/src/core/compaction/index.ts (#350)
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 148 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (surface-level audit; 969-line pure-TS file, no node:* or process.* imports) |
 | 149 | packages/coding-agent/src/core/compaction/index.ts | #350 | audited | Fully compatible |
+| 149.5 | packages/coding-agent/src/core/compaction/index.ts | #350 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers wildcard re-export binding identity) |
 | 148.5 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers async-retry microtask semantics) |
 | 147.5 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; deep-read of exportToJsonl block confirms only the audited surfaces) |
 | 146 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible |
