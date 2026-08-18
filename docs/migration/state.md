@@ -47,6 +47,7 @@ packages/coding-agent/src/core/project-trust.ts (#380)
 | 26 | packages/tui/src/editor-component.ts | #111 | audited | Fully compatible |
 | 27 | packages/tui/src/fuzzy.ts | #113 | audited | Fully compatible |
 | 28 | packages/tui/src/index.ts | #115 | audited | Fully compatible |
+| 28.5 | packages/tui/src/index.ts | #115 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers per-binding re-export live-reference identity for the ~30-statement chain) |
 | 29 | packages/tui/src/kill-ring.ts | #117 | audited | Fully compatible |
 | 30 | packages/tui/src/latex.ts | #119 | audited | Fully compatible |
 | 31 | packages/tui/src/layout-node.ts | #121 | audited | Fully compatible |
