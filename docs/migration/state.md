@@ -175,6 +175,7 @@ packages/coding-agent/src/core/agent-session.ts (#344)
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
+| 146.5 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 147.5 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; deep-read of exportToJsonl block confirms only the audited surfaces) |
 | 146 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible |
