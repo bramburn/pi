@@ -69,6 +69,7 @@ packages/coding-agent/src/utils/mime.ts (#372)
 | 48 | packages/tui/src/components/truncated-text.ts | #155 | audited | Fully compatible |
 | 49 | packages/tui/src/components/v-stack.ts | #157 | audited | Fully compatible |
 | 50 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible |
+| 50.5 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers object-literal aggregation of named function imports + module-namespace reference identity) |
 | 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
 | 52 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible |
 | 52.5 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Map singleton-registry iteration order + set/get semantics) |
