@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-18 13:00:00
+2026-08-18 14:00:00
 
 ## Last Reviewed File
-packages/tui/src/components/image.ts (#288)
+packages/tui/src/components/loader.ts (#290)
 
 ## Statistics
 
-- Files audited: 122
+- Files audited: 123
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -142,6 +142,7 @@ packages/tui/src/components/image.ts (#288)
 | 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible (no migration work; close-out of audit track) |
 | 121 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible |
 | 122 | packages/tui/src/components/image.ts | #288 | audited | Fully compatible |
+| 123 | packages/tui/src/components/loader.ts | #290 | audited | Fully compatible |
 | 123 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 124 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible (close-out of audit track) |
 
