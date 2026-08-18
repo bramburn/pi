@@ -157,6 +157,7 @@ packages/coding-agent/src/cli/experimental/cli.ts (#326)
 | 134 | packages/coding-agent/src/cli/args.ts | #312 | audited | Fully compatible |
 | 135 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible |
 | 136 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible |
+| 136.5 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 137 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible |
 | 137.5 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 138 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible |
