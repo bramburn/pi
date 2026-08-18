@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 23:00:00
+2026-08-21 00:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/sdk.ts (#386)
+packages/coding-agent/src/utils/fs-watch.ts (#387)
 
 ## Statistics
 
@@ -216,6 +216,7 @@ packages/coding-agent/src/core/sdk.ts (#386)
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/utils/image-process.ts | #381 | audited | Fully compatible |
 | 160 | packages/coding-agent/src/utils/image-convert.ts | #384 | audited | Fully compatible |
+| 161 | packages/coding-agent/src/utils/fs-watch.ts | #387 | audited | Fully compatible |
 | 161 | packages/coding-agent/src/core/sdk.ts | #386 | audited | Fully compatible |
 | 161.5 | packages/coding-agent/src/core/sdk.ts | #386 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers setDefaultStreamFn top-level side-effect + module-initialization order) |
 | 160 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible |

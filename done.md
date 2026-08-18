@@ -245,6 +245,7 @@
 | 224 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/login-dialog.ts` | [#379](https://github.com/bramburn/pi/issues/379) | 0 | 1 | 1 |
 | 225 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/markdown-transform.ts` | [#382](https://github.com/bramburn/pi/issues/382) | 0 | 1 | 1 |
 | 226 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/mermaid.ts` | [#385](https://github.com/bramburn/pi/issues/385) | 0 | 1 | 1 |
+| 227 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/model-selector.ts` | [#388](https://github.com/bramburn/pi/issues/388) | 1 | 1 | 1 |
 
 ## Notes
 
