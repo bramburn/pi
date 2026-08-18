@@ -56,6 +56,7 @@ packages/coding-agent/src/core/models-store.ts (#377)
 | 35 | packages/tui/src/undo-stack.ts | #129 | audited | Fully compatible |
 | 36 | packages/tui/src/word-navigation.ts | #131 | audited | Fully compatible |
 | 37 | packages/tui/src/components/alt-screen-flash.ts | #133 | audited | Fully compatible |
+| 37.5 | packages/tui/src/components/alt-screen-flash.ts | #133 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers setTimeout(...).unref() + Node.js Timeout unref parity) |
 | 38 | packages/tui/src/components/box.ts | #135 | audited | Fully compatible |
 | 39 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible |
 | 39.5 | packages/tui/src/components/cancellable-loader.ts | #137 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers private AbortController instance-field-init per-instance identity) |
