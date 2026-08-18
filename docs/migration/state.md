@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 11:00:00
+2026-08-19 12:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/experimental/commands/client.ts (#330)
+packages/coding-agent/src/cli/experimental/commands/pi.ts (#332)
 
 ## Statistics
 
-- Files audited: 142
+- Files audited: 143
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -169,6 +169,7 @@ packages/coding-agent/src/cli/experimental/commands/client.ts (#330)
 | 142 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible |
 | 141.5 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 142 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible |
+| 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #332 | audited | Fully compatible |
 | 142.5 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 140.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible |
