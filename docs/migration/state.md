@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 14:00:00
+2026-08-20 15:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/mime.ts (#372)
+packages/coding-agent/src/core/keybindings.ts (#374)
 
 ## Statistics
 
-- Files audited: 156
+- Files audited: 157
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -204,6 +204,7 @@ packages/coding-agent/src/utils/mime.ts (#372)
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible |
 | 156 | packages/coding-agent/src/utils/mime.ts | #372 | audited | Fully compatible |
+| 157 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible |
 | 155.5 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Buffer.from(uint8Array).toString(base64) + Buffer.byteLength parity) |
 | 156 | packages/coding-agent/src/core/index.ts | #371 | audited | Fully compatible |
 | 156.5 | packages/coding-agent/src/core/index.ts | #371 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers per-binding re-export live-binding identity) |
