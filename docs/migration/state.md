@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 03:00:00
+2026-08-20 04:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/exec.ts (#356)
+packages/coding-agent/src/utils/deprecation.ts (#357)
 
 ## Statistics
 
@@ -97,6 +97,7 @@ packages/coding-agent/src/core/exec.ts (#356)
 | 76 | packages/coding-agent/src/bun/restore-sandbox-env.ts | #199 | audited | Bun-specific workaround |
 | 77 | packages/coding-agent/src/cli/args.ts | #200 | audited | Fully compatible |
 | 78 | packages/coding-agent/src/cli/auth-check.ts | #202 | audited | Fully compatible |
+| 78.5 | packages/coding-agent/src/cli/auth-check.ts | #202 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers try/await/catch microtask scheduling) |
 | 79 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible |
 | 79.5 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers regex /iu flag parity) |
 | 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
@@ -186,6 +187,7 @@ packages/coding-agent/src/core/exec.ts (#356)
 | 148 | packages/coding-agent/src/utils/clipboard-image.ts | #348 | audited | Fully compatible |
 | 149 | packages/coding-agent/src/utils/clipboard.ts | #351 | audited | Fully compatible |
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
+| 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
 | 150.5 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Node-API native module + createRequire semantics + graceful-degradation path) |
 | 151 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible |
 | 151.5 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers stdout/stderr Buffer chunk streaming) |
