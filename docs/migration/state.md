@@ -124,6 +124,7 @@ packages/tui/src/components/stack.ts (#292)
 | 103 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible |
 | 104 | packages/coding-agent/src/core/extensions/wrapper.ts | #253 | audited | Fully compatible |
 | 105 | packages/coding-agent/src/core/footer-data-provider.ts | #255 | RESOLVED | **Bun: stronger watchFile dedup via persistent mtime/size signature** |
+| 105.5 | packages/coding-agent/src/core/extensions/wrapper.ts | #253 | audited | Fully compatible (close-out of audit track) |
 | 106 | packages/coding-agent/src/core/http-dispatcher.ts | #257 | RESOLVED | **Bun path: skip undici.setGlobalDispatcher; Node path: full undici install** |
 | 107 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible |
 | 108 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible |
