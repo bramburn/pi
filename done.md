@@ -234,6 +234,7 @@
 | 213 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/daxnuts.ts` | [#346](https://github.com/bramburn/pi/issues/346) | 1 | 1 | 1 |
 | 214 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/diff.ts` | [#349](https://github.com/bramburn/pi/issues/349) | 0 | 1 | 1 |
 | 215 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/dynamic-border.ts` | [#352](https://github.com/bramburn/pi/issues/352) | 0 | 1 | 1 |
+| 216 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts` | [#355](https://github.com/bramburn/pi/issues/355) | 0 | 1 | 1 |
 
 ## Notes
 
