@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 17:00:00
+2026-08-20 18:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/models-store.ts (#377)
+packages/coding-agent/src/utils/photon.ts (#378)
 
 ## Statistics
 
@@ -208,6 +208,7 @@ packages/coding-agent/src/core/models-store.ts (#377)
 | 155 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible |
 | 156 | packages/coding-agent/src/utils/mime.ts | #372 | audited | Fully compatible |
 | 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
+| 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |
 | 158.5 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers signal.throwIfAborted() + raceWithAbortSignal integration) |
 | 157 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible |
