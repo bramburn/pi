@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 12:00:00
+2026-08-20 13:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/image-resize-core.ts (#369)
+packages/coding-agent/src/core/index.ts (#371)
 
 ## Statistics
 
-- Files audited: 155
+- Files audited: 156
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -202,6 +202,7 @@ packages/coding-agent/src/utils/image-resize-core.ts (#369)
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible |
+| 156 | packages/coding-agent/src/core/index.ts | #371 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (type-only; 1728-line file) |
 | 155.5 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers typebox Static<TSchema> conditional-type derivation) |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
