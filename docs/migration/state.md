@@ -73,6 +73,7 @@ packages/coding-agent/src/core/extensions/types.ts (#368)
 | 52 | packages/ai/src/images-api-registry.ts | #162 | audited | Fully compatible |
 | 53 | packages/ai/src/images-models.ts | #164 | audited | Fully compatible |
 | 54 | packages/ai/src/legacy-api-aliases.ts | #166 | audited | Fully compatible |
+| 54.5 | packages/ai/src/legacy-api-aliases.ts | #166 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers ESM dynamic-import cache + deprecation-alias re-export) |
 | 55 | packages/ai/src/model-catalog.ts | #168 | audited | Fully compatible |
 | 56 | packages/ai/src/models-store.ts | #170 | audited | Fully compatible |
 | 57 | packages/ai/src/session-resources.ts | #172 | audited | Fully compatible |
