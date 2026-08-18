@@ -68,6 +68,7 @@ packages/coding-agent/src/core/keybindings.ts (#374)
 | 47 | packages/tui/src/components/text.ts | #153 | audited | Fully compatible |
 | 48 | packages/tui/src/components/truncated-text.ts | #155 | audited | Fully compatible |
 | 49 | packages/tui/src/components/v-stack.ts | #157 | audited | Fully compatible |
+| 49.5 | packages/tui/src/components/v-stack.ts | #157 | audited | Fully compatible (close-out of audit track; research comment by Loop #3 + this iteration covers the Stack extends Stack pure-TS render loop) |
 | 50 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible |
 | 50.5 | packages/ai/src/bedrock-provider.ts | #158 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers object-literal aggregation of named function imports + module-namespace reference identity) |
 | 51 | packages/ai/src/image-models.generated.ts | #160 | audited | Fully compatible |
