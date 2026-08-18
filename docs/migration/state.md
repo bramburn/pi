@@ -171,6 +171,7 @@ packages/coding-agent/src/bun/cli.ts (#338)
 | 142 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible |
 | 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #333 | audited | Fully compatible |
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
+| 144.5 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 145 | packages/coding-agent/src/bun/cli.ts | #338 | audited | Bun-specific entry point (Bun-only chain) |
 | 145.5 | packages/coding-agent/src/bun/cli.ts | #338 | audited | Bun-specific entry point (close-out of audit track; research comment by Loop #6) |
 | 142.5 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
