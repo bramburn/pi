@@ -189,6 +189,7 @@ packages/coding-agent/src/core/experimental.ts (#359)
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
+| 152.5 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers process.env indexing parity) |
 | 150.5 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Node-API native module + createRequire semantics + graceful-degradation path) |
 | 151 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible |
 | 151.5 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers stdout/stderr Buffer chunk streaming) |
