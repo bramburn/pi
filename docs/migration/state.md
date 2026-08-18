@@ -166,6 +166,7 @@ packages/coding-agent/src/cli/experimental/auth.ts (#329)
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
 | 141 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible |
 | 142 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible |
+| 142.5 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 140.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible |
 | 141.5 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
