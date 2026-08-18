@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 08:00:00
+2026-08-19 09:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/experimental/cli.ts (#326)
+packages/coding-agent/src/cli/experimental/transport-address.ts (#327)
 
 ## Statistics
 
@@ -156,6 +156,7 @@ packages/coding-agent/src/cli/experimental/cli.ts (#326)
 | 133 | packages/coding-agent/src/cli/file-processor.ts | #311 | audited | Fully compatible |
 | 134 | packages/coding-agent/src/cli/args.ts | #312 | audited | Fully compatible |
 | 135 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible |
+| 135.5 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 136 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible |
 | 136.5 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 137 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible |
@@ -163,6 +164,7 @@ packages/coding-agent/src/cli/experimental/cli.ts (#326)
 | 138 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible |
 | 139 | packages/coding-agent/src/cli/experimental/command.ts | #322 | audited | Fully compatible |
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
+| 141 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible |
 | 140.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible |
 | 141.5 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |

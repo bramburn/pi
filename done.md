@@ -225,6 +225,7 @@
 | 204 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/bash-execution.ts` | [#321](https://github.com/bramburn/pi/issues/321) | 0 | 1 | 2 |
 | 205 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/bordered-loader.ts` | [#323](https://github.com/bramburn/pi/issues/323) | 1 | 1 | 1 |
 | 206 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/branch-summary-message.ts` | [#325](https://github.com/bramburn/pi/issues/325) | 0 | 1 | 1 |
+| 207 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/compaction-summary-message.ts` | [#328](https://github.com/bramburn/pi/issues/328) | 0 | 1 | 1 |
 
 ## Notes
 
