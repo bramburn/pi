@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 04:00:00
+2026-08-20 05:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/deprecation.ts (#357)
+packages/coding-agent/src/core/experimental.ts (#359)
 
 ## Statistics
 
-- Files audited: 151
+- Files audited: 152
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -188,6 +188,7 @@ packages/coding-agent/src/utils/deprecation.ts (#357)
 | 149 | packages/coding-agent/src/utils/clipboard.ts | #351 | audited | Fully compatible |
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
+| 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
 | 150.5 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Node-API native module + createRequire semantics + graceful-degradation path) |
 | 151 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible |
 | 151.5 | packages/coding-agent/src/core/exec.ts | #356 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers stdout/stderr Buffer chunk streaming) |
