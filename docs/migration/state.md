@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 19:00:00
+2026-08-20 20:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/project-trust.ts (#380)
+packages/coding-agent/src/utils/image-process.ts (#381)
 
 ## Statistics
 
@@ -35,6 +35,7 @@ packages/coding-agent/src/core/project-trust.ts (#380)
 | 14 | packages/ai/src/utils/provider-env.ts | #88 | audited | Already Bun-aware |
 | 15 | packages/client/src/unix.ts | #90 | RESOLVED | **node:net fully implemented on Bun; drain-backpressure is callback-driven (cross-runtime safe)** |
 | 16 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point |
+| 16.5 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point (close-out of audit track; research comment by Loop #6 covers per-loader lazy-lambda reference identity for the seven OAuth loaders) |
 | 17 | packages/ai/src/env-api-keys.ts | #94 | audited | Already Bun-aware |
 | 18 | packages/tui/src/native-modifiers.ts | #96 | RESOLVED | **Implemented Bun detection + graceful fallback** |
 | 19 | packages/tui/src/alt-screen-search.ts | #97 | audited | Fully compatible |
@@ -211,6 +212,7 @@ packages/coding-agent/src/core/project-trust.ts (#380)
 | 156 | packages/coding-agent/src/utils/mime.ts | #372 | audited | Fully compatible |
 | 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
+| 159 | packages/coding-agent/src/utils/image-process.ts | #381 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
 | 159.5 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers await Promise microtask scheduling) |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |

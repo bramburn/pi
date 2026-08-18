@@ -243,6 +243,7 @@
 | 222 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/index.ts` | [#373](https://github.com/bramburn/pi/issues/373) | 0 | 1 | 1 |
 | 223 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts` | [#376](https://github.com/bramburn/pi/issues/376) | 0 | 1 | 1 |
 | 224 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/login-dialog.ts` | [#379](https://github.com/bramburn/pi/issues/379) | 0 | 1 | 1 |
+| 225 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/markdown-transform.ts` | [#382](https://github.com/bramburn/pi/issues/382) | 0 | 1 | 1 |
 
 ## Notes
 
