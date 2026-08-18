@@ -211,6 +211,7 @@ packages/coding-agent/src/core/project-trust.ts (#380)
 | 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
+| 159.5 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers await Promise microtask scheduling) |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |
 | 158.5 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers signal.throwIfAborted() + raceWithAbortSignal integration) |
 | 157 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible |
