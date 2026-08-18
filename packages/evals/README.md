@@ -22,6 +22,18 @@ CLI values take precedence and become defaults for harnesses that do not select 
 Authentication comes from Pi's normal `ModelRuntime`, including Pi subscription credentials and provider API-key
 environment variables.
 
+### Running evals under Bun
+
+The vitest config in `vitest.config.ts` pins `pool: "forks"` so the eval runner works under both Node and Bun (issue #193).
+To run an eval suite directly under Bun:
+
+```bash
+cd packages/evals
+bun x vitest run --config vitest.config.ts src/extensions.eval.ts
+```
+
+Use `bun x vitest` (not `bun test`) — `bun test` invokes Bun's built-in Jest-compatible runner, not Vitest.
+
 Additional arguments are forwarded to Vitest:
 
 ```bash

@@ -89,7 +89,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 68 | packages/server/src/sessions.ts | #190 | audited | Node.js crypto - use native |
 | 69 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible |
 | 70 | packages/evals/src/pi-harness.ts | #192 | audited | Node.js imports - test in Bun |
-| 71 | packages/evals/src/extensions.eval.ts | #193 | audited | Needs testing |
+| 71 | packages/evals/src/extensions.eval.ts | #193 | RESOLVED | **vitest pool pinned to forks (Bun-safe); bun x vitest in README** |
 | 72 | packages/evals/src/smoke.eval.ts | #194 | audited | Needs vitest |
 | 73 | packages/telemetry/src/memory.ts | #195 | audited | Fully compatible |
 | 74 | packages/telemetry/src/noop.ts | #196 | audited | Fully compatible |
