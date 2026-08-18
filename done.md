@@ -238,6 +238,7 @@
 | 217 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-editor.ts` | [#358](https://github.com/bramburn/pi/issues/358) | 0 | 1 | 1 |
 | 218 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-input.ts` | [#361](https://github.com/bramburn/pi/issues/361) | 0 | 1 | 1 |
 | 219 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-selector.ts` | [#364](https://github.com/bramburn/pi/issues/364) | 0 | 1 | 1 |
+| 220 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/first-time-setup.ts` | [#367](https://github.com/bramburn/pi/issues/367) | 0 | 1 | 1 |
 
 ## Notes
 

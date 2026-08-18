@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 09:00:00
+2026-08-20 10:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/extensions/index.ts (#365)
+packages/coding-agent/src/utils/image-resize.ts (#366)
 
 ## Statistics
 
@@ -78,6 +78,7 @@ packages/coding-agent/src/core/extensions/index.ts (#365)
 | 57 | packages/ai/src/session-resources.ts | #172 | audited | Fully compatible |
 | 58 | packages/ai/src/types.ts | #174 | audited | Fully compatible |
 | 59 | packages/client/src/errors.ts | #176 | audited | Fully compatible |
+| 59.5 | packages/client/src/errors.ts | #176 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers toDisconnectedError identity-preservation via ECMA-262 instanceof) |
 | 60 | packages/client/src/connection.ts | #178 | audited | Fully compatible |
 | 60.5 | packages/client/src/connection.ts | #178 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers ServerMessageDecoder frame-decoding + maxFrameLength guard) |
 | 61 | packages/client/src/promise.ts | #180 | audited | Fully compatible |
@@ -197,6 +198,7 @@ packages/coding-agent/src/core/extensions/index.ts (#365)
 | 154 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible |
 | 154.5 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers class re-export prototype-chain identity) |
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
+| 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
