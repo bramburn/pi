@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 18:00:00
+2026-08-20 19:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/photon.ts (#378)
+packages/coding-agent/src/core/project-trust.ts (#380)
 
 ## Statistics
 
-- Files audited: 158
+- Files audited: 159
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -210,6 +210,7 @@ packages/coding-agent/src/utils/photon.ts (#378)
 | 156 | packages/coding-agent/src/utils/mime.ts | #372 | audited | Fully compatible |
 | 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
+| 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |
 | 158.5 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers signal.throwIfAborted() + raceWithAbortSignal integration) |
 | 157 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible |
