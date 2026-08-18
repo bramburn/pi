@@ -231,6 +231,7 @@
 | 210 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` | [#337](https://github.com/bramburn/pi/issues/337) | 0 | 1 | 1 |
 | 211 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-entry.ts` | [#340](https://github.com/bramburn/pi/issues/340) | 0 | 1 | 1 |
 | 212 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-message.ts` | [#343](https://github.com/bramburn/pi/issues/343) | 0 | 1 | 1 |
+| 213 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/daxnuts.ts` | [#346](https://github.com/bramburn/pi/issues/346) | 1 | 1 | 1 |
 
 ## Notes
 
