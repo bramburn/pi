@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-18 12:00:00
+2026-08-18 13:00:00
 
 ## Last Reviewed File
-packages/tui/src/components/editor.ts (#286)
+packages/tui/src/components/image.ts (#288)
 
 ## Statistics
 
-- Files audited: 121
+- Files audited: 122
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -141,6 +141,7 @@ packages/tui/src/components/editor.ts (#286)
 | 119 | packages/coding-agent/src/core/remote-catalog-provider.ts | #283 | audited | Fully compatible (close-out of audit track) |
 | 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible (no migration work; close-out of audit track) |
 | 121 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible |
+| 122 | packages/tui/src/components/image.ts | #288 | audited | Fully compatible |
 
 ## TUI Package Audit Complete
 
