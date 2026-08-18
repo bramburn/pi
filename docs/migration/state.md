@@ -148,6 +148,7 @@ packages/coding-agent/src/core/extensions/loader.ts (#296)
 | 125 | packages/coding-agent/src/core/resource-loader.ts | #294 | audited | Fully compatible |
 | 126 | packages/coding-agent/src/core/extensions/loader.ts | #296 | audited | Fully compatible (jiti uses createRequire which Bun supports) |
 | 126.5 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
+| 126.6 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible (close-out of audit track) |
 | 125.5 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 123 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 124 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible (close-out of audit track) |
