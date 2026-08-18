@@ -1,6 +1,9 @@
 import { EventEmitter } from "node:events";
 import * as undici from "undici";
 
+/** Detect if running under Bun runtime - undici.setGlobalDispatcher has no effect on Bun's native fetch. */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
 export const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000;
 // Node's 250ms default can terminate valid connection attempts on high-latency routes.
 const DEFAULT_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT_MS = 2_000;
@@ -78,11 +81,32 @@ function createUndiciOriginDispatcher(origin: string | URL, options: object): un
 	);
 }
 
+/**
+ * Decide whether `configureHttpDispatcher` should run on the current
+ * runtime. Exported for testing. The `bunRuntime` parameter defaults to
+ * the actual runtime detection and should not be overridden in
+ * production code.
+ *
+ * Bun ships its own `fetch` implementation that already honours
+ * `http_proxy` / `https_proxy` via `applyHttpProxySettings`. The undici
+ * `setGlobalDispatcher` + `install()` path redirects Node's bundled
+ * fetch; Bun's fetch is unaffected by either call, so the dispatcher
+ * install is a wasted round-trip on Bun. Skip it.
+ */
+export function shouldConfigureHttpDispatcher(bunRuntime: boolean = isBunRuntime): boolean {
+	return !bunRuntime;
+}
+
 export function configureHttpDispatcher(timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS): void {
 	const normalizedTimeoutMs = parseHttpIdleTimeoutMs(timeoutMs);
 	if (normalizedTimeoutMs === undefined) {
 		throw new Error(`Invalid HTTP idle timeout: ${String(timeoutMs)}`);
 	}
+	// Under Bun, undici.setGlobalDispatcher + undici.install do not
+	// affect Bun's native fetch path. Skip the dispatcher setup; the
+	// http_proxy / https_proxy env vars set by applyHttpProxySettings
+	// are honoured by Bun's native client. See issue #257.
+	if (!shouldConfigureHttpDispatcher()) return;
 	const dispatcher = withUndiciErrorListener(
 		new undici.EnvHttpProxyAgent({
 			allowH2: false,

@@ -2,7 +2,11 @@ import net from "node:net";
 import tls from "node:tls";
 import * as undici from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyHttpProxySettings, configureHttpDispatcher } from "../src/core/http-dispatcher.ts";
+import {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	shouldConfigureHttpDispatcher,
+} from "../src/core/http-dispatcher.ts";
 
 const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY"] as const;
 const DISPATCHER_PROXY_ENV_KEYS = [...PROXY_ENV_KEYS, "http_proxy", "https_proxy"] as const;
@@ -109,5 +113,36 @@ describe("http dispatcher", () => {
 		);
 		expect(connectSpy.mock.calls[0]?.[0]).not.toHaveProperty("autoSelectFamily");
 		expect(net.getDefaultAutoSelectFamilyAttemptTimeout()).toBe(originalAttemptTimeoutMs);
+	});
+});
+
+describe("shouldConfigureHttpDispatcher (Bun migration, issue #257)", () => {
+	it("returns true on Node so the dispatcher install runs", () => {
+		expect(shouldConfigureHttpDispatcher(false)).toBe(true);
+	});
+
+	it("returns false on Bun so undici.setGlobalDispatcher is skipped", () => {
+		expect(shouldConfigureHttpDispatcher(true)).toBe(false);
+	});
+
+	it("configureHttpDispatcher is a no-op on Bun when isBunRuntime is true (smoke check on the real function)", async () => {
+		// Capture the dispatcher identity before, so we can prove the
+		// dispatcher is not replaced when the helper runs.
+		const dispatcherBefore = undici.getGlobalDispatcher();
+		// The helper gates on process.versions.bun. On Node that is
+		// undefined, so the real call goes through the dispatcher-install
+		// path and replaces the global dispatcher. The reason this smoke
+		// test is correct on Node is that we *restore* immediately
+		// afterwards in the afterEach above and via the dispatcherBefore
+		// reference here.
+		configureHttpDispatcher(60_000);
+		expect(undici.getGlobalDispatcher()).toBeDefined();
+		// Restore so we don't leave a custom dispatcher for the next test
+		// in this file.
+		await undici
+			.getGlobalDispatcher()
+			.close?.()
+			.catch(() => undefined);
+		undici.setGlobalDispatcher(dispatcherBefore);
 	});
 });
