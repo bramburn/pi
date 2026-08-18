@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 19:00:00
+2026-08-19 20:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/abort.ts (#342)
+packages/coding-agent/src/core/agent-session.ts (#344)
 
 ## Statistics
 
-- Files audited: 146
+- Files audited: 147
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -175,6 +175,7 @@ packages/coding-agent/src/utils/abort.ts (#342)
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
+| 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 146 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible |
 | 146.5 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 145.5 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
