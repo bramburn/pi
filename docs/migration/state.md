@@ -142,6 +142,7 @@ packages/coding-agent/src/client/index.ts (#341)
 | 119 | packages/coding-agent/src/core/remote-catalog-provider.ts | #283 | audited | Fully compatible (close-out of audit track) |
 | 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible (no migration work; close-out of audit track) |
 | 121 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible |
+| 121.5 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 122 | packages/tui/src/components/image.ts | #288 | audited | Fully compatible |
 | 123 | packages/tui/src/components/loader.ts | #290 | audited | Fully compatible |
 | 124 | packages/tui/src/components/stack.ts | #292 | audited | Fully compatible |
