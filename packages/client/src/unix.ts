@@ -9,7 +9,17 @@ export interface UnixTransportOptions {
 	maxPendingBytes?: number;
 }
 
-/** Creates fresh Unix-domain socket transports for PiClient connection attempts in Node-compatible runtimes. */
+/**
+ * Creates fresh Unix-domain socket transports for PiClient connection attempts.
+ *
+ * Compatible with both Node.js and Bun: Bun documents `node:net` as fully
+ * implemented, including `createConnection(path)` for Unix-domain sockets
+ * (see https://bun.sh/docs/runtime/nodejs-apis and
+ * https://nodejs.org/api/net.html#netcreateconnection). The `drain`-based
+ * backpressure path is implemented via the write callback as the source of
+ * truth, so it is correct even when Bun's `socket.write()` does not signal
+ * backpressure via the boolean return value.
+ */
 export function createUnixTransportFactory(options: UnixTransportOptions): ByteTransportFactory {
 	if (options.path.length === 0) throw new TypeError("Unix transport path must not be empty");
 	if (Buffer.byteLength(options.path) > MAX_UNIX_SOCKET_PATH_BYTES) {

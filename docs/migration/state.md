@@ -33,7 +33,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 12 | packages/server/src/server.ts | #84 | audited | Fully compatible |
 | 13 | packages/telemetry/src | #86 | audited | Fully compatible |
 | 14 | packages/ai/src/utils/provider-env.ts | #88 | audited | Already Bun-aware |
-| 15 | packages/client/src/unix.ts | #90 | audited | Unix sockets need testing |
+| 15 | packages/client/src/unix.ts | #90 | RESOLVED | **node:net fully implemented on Bun; drain-backpressure is callback-driven (cross-runtime safe)** |
 | 16 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point |
 | 17 | packages/ai/src/env-api-keys.ts | #94 | audited | Already Bun-aware |
 | 18 | packages/tui/src/native-modifiers.ts | #96 | RESOLVED | **Implemented Bun detection + graceful fallback** |
@@ -174,4 +174,4 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 | proper-lockfile | trust-manager | Medium | ✅ Resolved (Bun → in-process lock) |
 | Worker threads | image-resize | Medium | Pending |
 | Proxy agents | bedrock-converse-stream | Medium | ✅ Resolved (Bun → native HTTP) |
-| Unix sockets | client/unix.ts | Medium | Pending |
+| Unix sockets | client/unix.ts | Medium | ✅ Resolved (Bun implements node:net) |
