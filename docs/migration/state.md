@@ -202,6 +202,7 @@ packages/coding-agent/src/core/index.ts (#371)
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible |
+| 155.5 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Buffer.from(uint8Array).toString(base64) + Buffer.byteLength parity) |
 | 156 | packages/coding-agent/src/core/index.ts | #371 | audited | Fully compatible |
 | 156.5 | packages/coding-agent/src/core/index.ts | #371 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers per-binding re-export live-binding identity) |
 | 155 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (type-only; 1728-line file) |
