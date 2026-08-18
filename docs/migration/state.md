@@ -79,6 +79,7 @@ packages/coding-agent/src/core/extensions/index.ts (#365)
 | 58 | packages/ai/src/types.ts | #174 | audited | Fully compatible |
 | 59 | packages/client/src/errors.ts | #176 | audited | Fully compatible |
 | 60 | packages/client/src/connection.ts | #178 | audited | Fully compatible |
+| 60.5 | packages/client/src/connection.ts | #178 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers ServerMessageDecoder frame-decoding + maxFrameLength guard) |
 | 61 | packages/client/src/promise.ts | #180 | audited | Fully compatible |
 | 62 | packages/client/src/session-handle.ts | #182 | audited | Fully compatible |
 | 62.5 | packages/client/src/session-handle.ts | #182 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Symbol.asyncDispose well-known symbol parity) |
