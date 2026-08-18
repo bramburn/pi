@@ -223,6 +223,7 @@
 | 202 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/armin.ts` | [#317](https://github.com/bramburn/pi/issues/317) | 1 | 2 | 1 |
 | 203 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/assistant-message.ts` | [#319](https://github.com/bramburn/pi/issues/319) | 0 | 1 | 2 |
 | 204 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/bash-execution.ts` | [#321](https://github.com/bramburn/pi/issues/321) | 0 | 1 | 2 |
+| 205 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/bordered-loader.ts` | [#323](https://github.com/bramburn/pi/issues/323) | 1 | 1 | 1 |
 
 ## Notes
 
