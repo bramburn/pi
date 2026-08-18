@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 07:00:00
+2026-08-20 08:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/export-html/index.ts (#362)
+packages/coding-agent/src/utils/frontmatter.ts (#363)
 
 ## Statistics
 
@@ -81,6 +81,7 @@ packages/coding-agent/src/core/export-html/index.ts (#362)
 | 60 | packages/client/src/connection.ts | #178 | audited | Fully compatible |
 | 61 | packages/client/src/promise.ts | #180 | audited | Fully compatible |
 | 62 | packages/client/src/session-handle.ts | #182 | audited | Fully compatible |
+| 62.5 | packages/client/src/session-handle.ts | #182 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Symbol.asyncDispose well-known symbol parity) |
 | 63 | packages/client/src/transport.ts | #184 | audited | Fully compatible |
 | 63.5 | packages/client/src/transport.ts | #184 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Uint8Array indexing parity) |
 | 64 | packages/protocol/src/codec.ts | #186 | audited | Fully compatible |
@@ -192,6 +193,7 @@ packages/coding-agent/src/core/export-html/index.ts (#362)
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
 | 152 | packages/coding-agent/src/utils/exif-orientation.ts | #360 | audited | Fully compatible |
+| 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
