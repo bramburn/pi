@@ -208,6 +208,7 @@
 | 187 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts` | [#287](https://github.com/bramburn/pi/issues/287) | 0 | 1 | 2 |
 | 188 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/session-selector-search.ts` | [#289](https://github.com/bramburn/pi/issues/289) | 0 | 2 | 2 |
 | 189 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/session-selector.ts` | [#291](https://github.com/bramburn/pi/issues/291) | 0 | 2 | 3 |
+| 190 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/settings-selector.ts` | [#293](https://github.com/bramburn/pi/issues/293) | 0 | 2 | 2 |
 
 ## Notes
 
