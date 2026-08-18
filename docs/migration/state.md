@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 12:00:00
+2026-08-19 13:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/experimental/commands/pi.ts (#332)
+packages/coding-agent/src/cli/experimental/commands/pi.ts (#333)
 
 ## Statistics
 
@@ -167,6 +167,7 @@ packages/coding-agent/src/cli/experimental/commands/pi.ts (#332)
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
 | 141 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible |
 | 142 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible |
+| 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #333 | audited | Fully compatible |
 | 142.5 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141.5 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 142 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible |
