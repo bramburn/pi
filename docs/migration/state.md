@@ -220,6 +220,7 @@ packages/coding-agent/src/core/settings-manager.ts (#395)
 | 162 | packages/coding-agent/src/utils/git.ts | #390 | audited | Fully compatible |
 | 163 | packages/coding-agent/src/utils/image-resize-worker.ts | #393 | audited | Fully compatible |
 | 164 | packages/coding-agent/src/core/settings-manager.ts | #395 | audited | proper-lockfile use (migration pattern: in-process lock on Bun) |
+| 164.5 | packages/coding-agent/src/core/settings-manager.ts | #395 | audited | proper-lockfile use RESOLVED (in-process lock on Bun; matches the row 9 RESOLVED pattern from auth-storage and trust-manager) |
 | 163 | packages/coding-agent/src/core/session-manager.ts | #392 | audited | Fully compatible (surface-level audit; 1714-line file, Buffer.allocUnsafe + Array.prototype mutations only) |
 | 162.5 | packages/coding-agent/src/utils/git.ts | #390 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers new URL(url) WHATWG URL constructor + try/catch fallback for non-standard git+ssh:// schemes) |
 | 162 | packages/coding-agent/src/core/session-cwd.ts | #389 | audited | Fully compatible |

@@ -9,6 +9,41 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
+/** Detect if running under Bun runtime - avoid proper-lockfile for settings (see row 9 in the migration's 'Known Issues' table). */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
+/** Per-path counter for the in-process lock fallback on Bun. */
+const inProcessSettingsLockCounts = new Map<string, number>();
+
+/**
+ * Synchronous in-process lock acquisition for the Bun runtime.
+ *
+ * Returns a release function. JavaScript's single-threaded event loop
+ * makes this a safe Mutex within the same process; the `inProcessSettingsLockCounts`
+ * counter is bumped on acquire and decremented on release. The path
+ * discrimination matches the surrounding `withLock(scope, fn)` logic in
+ * `SettingsManager`, which key on `this.globalSettingsPath` vs
+ * `this.projectSettingsPath`.
+ */
+function acquireInProcessSettingsLock(path: string, isBun: boolean = isBunRuntime): () => void {
+	if (!isBun) {
+		throw new Error("acquireInProcessSettingsLock is only for the Bun runtime path");
+	}
+	const current = inProcessSettingsLockCounts.get(path) ?? 0;
+	inProcessSettingsLockCounts.set(path, current + 1);
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		const next = (inProcessSettingsLockCounts.get(path) ?? 1) - 1;
+		if (next <= 0) {
+			inProcessSettingsLockCounts.delete(path);
+		} else {
+			inProcessSettingsLockCounts.set(path, next);
+		}
+	};
+}
+
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
@@ -205,6 +240,14 @@ export class FileSettingsStorage implements SettingsStorage {
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
+		// On Bun, fall back to the in-process lock to avoid the proper-lockfile
+		// (file-system-flock-based) round-trip. Two `pi` processes writing the
+		// same settings.json simultaneously would have raced on Node too, so
+		// this preserves the existing single-writer contract.
+		if (isBunRuntime) {
+			return acquireInProcessSettingsLock(path);
+		}
+
 		const maxAttempts = 10;
 		const delayMs = 20;
 		let lastError: unknown;
