@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 22:00:00
+2026-08-20 23:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/image-convert.ts (#384)
+packages/coding-agent/src/core/sdk.ts (#386)
 
 ## Statistics
 
-- Files audited: 160
+- Files audited: 161
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -216,6 +216,7 @@ packages/coding-agent/src/utils/image-convert.ts (#384)
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/utils/image-process.ts | #381 | audited | Fully compatible |
 | 160 | packages/coding-agent/src/utils/image-convert.ts | #384 | audited | Fully compatible |
+| 161 | packages/coding-agent/src/core/sdk.ts | #386 | audited | Fully compatible |
 | 160 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible |
 | 160.5 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers async-await-Map-construction pattern in the list() method) |
 | 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
