@@ -173,6 +173,7 @@ packages/coding-agent/src/client/index.ts (#341)
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible |
+| 146.5 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 145.5 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 144.5 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 145 | packages/coding-agent/src/bun/cli.ts | #338 | audited | Bun-specific entry point (Bun-only chain) |
