@@ -174,6 +174,7 @@ packages/coding-agent/src/cli/experimental/commands/server.ts (#335)
 | 142 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible |
 | 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #332 | audited | Fully compatible |
 | 144 | packages/coding-agent/src/cli/experimental/commands/server.ts | #335 | audited | Fully compatible |
+| 144.5 | packages/coding-agent/src/cli/experimental/commands/server.ts | #335 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 143.5 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #332 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 143.6 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #333 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; duplicate-audit row created by parallel Loop #4 run while #332 was closing) |
 | 142.5 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
