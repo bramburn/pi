@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 18:00:00
+2026-08-19 19:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/client/index.ts (#341)
+packages/coding-agent/src/utils/abort.ts (#342)
 
 ## Statistics
 
@@ -119,6 +119,7 @@ packages/coding-agent/src/client/index.ts (#341)
 | 98 | packages/coding-agent/src/core/defaults.ts | #242 | audited | Fully compatible |
 | 99 | packages/coding-agent/src/core/diagnostics.ts | #244 | audited | Fully compatible |
 | 100 | packages/coding-agent/src/core/event-bus.ts | #245 | audited | Fully compatible |
+| 100.5 | packages/coding-agent/src/core/event-bus.ts | #245 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; duplicate-audit row created by parallel Loop #4 / Loop #6 run while #298 was closing) |
 | 101 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible |
 | 102 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible |
 | 103 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible |
@@ -173,6 +174,7 @@ packages/coding-agent/src/client/index.ts (#341)
 | 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #333 | audited | Fully compatible |
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
+| 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible |
 | 146.5 | packages/coding-agent/src/client/index.ts | #341 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 145.5 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |

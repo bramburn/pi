@@ -230,6 +230,7 @@
 | 209 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/countdown-timer.ts` | [#334](https://github.com/bramburn/pi/issues/334) | 0 | 1 | 2 |
 | 210 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-editor.ts` | [#337](https://github.com/bramburn/pi/issues/337) | 0 | 1 | 1 |
 | 211 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-entry.ts` | [#340](https://github.com/bramburn/pi/issues/340) | 0 | 1 | 1 |
+| 212 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/custom-message.ts` | [#343](https://github.com/bramburn/pi/issues/343) | 0 | 1 | 1 |
 
 ## Notes
 
