@@ -64,6 +64,9 @@ import {
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
+/** Detect if running under Bun runtime - skip http-proxy-agent and let Bun's native client honor env vars. */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 
 export interface BedrockOptions extends StreamOptions {
@@ -196,7 +199,13 @@ export const stream: StreamFunction<"bedrock-converse-stream", BedrockOptions> =
 			}
 
 			const proxyUrl = resolveHttpProxyUrlForTarget(model.baseUrl, options.env);
-			if (proxyUrl) {
+			// Bun has its own HTTP client and does not cooperate with
+			// `http-proxy-agent` / `https-proxy-agent` (issue #80): its native
+			// client reads `http_proxy` / `https_proxy` itself when no agent is
+			// passed. Skip the explicit Node proxy agents under Bun and let the
+			// native client honor the environment variables directly. `no_proxy`
+			// is not supported on Bun — that is a documented limitation.
+			if (proxyUrl && !isBunRuntime) {
 				// Bedrock runtime uses NodeHttp2Handler by default since v3.798.0, which is based
 				// on `http2` module and has no support for http agent.
 				// Use NodeHttpHandler to support HTTP(S) proxy agents.
