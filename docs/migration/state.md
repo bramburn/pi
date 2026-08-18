@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 01:00:00
+2026-08-20 02:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/clipboard.ts (#351)
+packages/coding-agent/src/core/compaction/utils.ts (#353)
 
 ## Statistics
 
-- Files audited: 149
+- Files audited: 150
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -187,6 +187,7 @@ packages/coding-agent/src/utils/clipboard.ts (#351)
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 148 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (surface-level audit; 969-line pure-TS file, no node:* or process.* imports) |
 | 149 | packages/coding-agent/src/core/compaction/index.ts | #350 | audited | Fully compatible |
+| 150 | packages/coding-agent/src/core/compaction/utils.ts | #353 | audited | Fully compatible |
 | 149.5 | packages/coding-agent/src/core/compaction/index.ts | #350 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers wildcard re-export binding identity) |
 | 148.5 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers async-retry microtask semantics) |
 | 147.5 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; deep-read of exportToJsonl block confirms only the audited surfaces) |
