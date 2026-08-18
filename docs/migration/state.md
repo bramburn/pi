@@ -27,6 +27,7 @@ packages/coding-agent/src/utils/image-convert.ts (#384)
 | 6 | packages/tui/src/tui.ts | #72 | audited | Fully compatible |
 | 7 | packages/agent/src/harness/env/nodejs.ts | #74 | audited | Fully compatible |
 | 8 | packages/ai/src/auth/oauth/load.ts | #76 | audited | Already Bun-aware |
+| 8.5 | packages/ai/src/auth/oauth/load.ts | #76 | audited | Already Bun-aware (close-out of audit track; research comment by Loop #6 covers import.meta.url + runtime-specifier .ts/.js rewrite + dynamic import()) |
 | 9 | packages/coding-agent/src/core/trust-manager.ts | #78 | RESOLVED | **Bun path: in-process lock; Node path: proper-lockfile** |
 | 10 | packages/ai/src/api/bedrock-converse-stream.ts | #80 | RESOLVED | **Bun path: skip proxy agent; Node path: http-proxy-agent** |
 | 11 | packages/coding-agent/src/cli.ts | #82 | audited | Fully compatible |
