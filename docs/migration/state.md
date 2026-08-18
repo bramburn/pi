@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 22:00:00
+2026-08-19 23:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/compaction/compaction.ts (#347)
+packages/coding-agent/src/utils/clipboard-image.ts (#348)
 
 ## Statistics
 
@@ -108,6 +108,7 @@ packages/coding-agent/src/core/compaction/compaction.ts (#347)
 | 87 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible |
 | 88 | packages/coding-agent/src/cli/session-picker.ts | #222 | audited | Fully compatible |
 | 89 | packages/coding-agent/src/cli/startup-ui.ts | #224 | audited | Fully compatible |
+| 89.5 | packages/coding-agent/src/cli/startup-ui.ts | #224 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers bare-fs specifier resolution) |
 | 90 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible |
 | 91 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible |
 | 91.5 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers structuredClone parity) |
@@ -178,6 +179,7 @@ packages/coding-agent/src/core/compaction/compaction.ts (#347)
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
 | 147 | packages/coding-agent/src/utils/changelog.ts | #345 | audited | Fully compatible |
+| 148 | packages/coding-agent/src/utils/clipboard-image.ts | #348 | audited | Fully compatible |
 | 146.5 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 148 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (surface-level audit; 969-line pure-TS file, no node:* or process.* imports) |
