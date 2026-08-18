@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 15:00:00
+2026-08-20 16:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/keybindings.ts (#374)
+packages/coding-agent/src/utils/paths.ts (#375)
 
 ## Statistics
 
@@ -205,6 +205,7 @@ packages/coding-agent/src/core/keybindings.ts (#374)
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible |
 | 156 | packages/coding-agent/src/utils/mime.ts | #372 | audited | Fully compatible |
+| 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
 | 157 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible |
 | 157.5 | packages/coding-agent/src/core/keybindings.ts | #374 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers try/catch graceful-degradation around readFileSync + JSON.parse) |
 | 155.5 | packages/coding-agent/src/utils/image-resize-core.ts | #369 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Buffer.from(uint8Array).toString(base64) + Buffer.byteLength parity) |
