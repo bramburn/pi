@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-18 17:00:00
+2026-08-18 18:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/extensions/loader.ts (#296)
+packages/coding-agent/src/core/event-bus.ts (#298)
 
 ## Statistics
 
-- Files audited: 126
+- Files audited: 127
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -147,6 +147,7 @@ packages/coding-agent/src/core/extensions/loader.ts (#296)
 | 124 | packages/tui/src/components/stack.ts | #292 | audited | Fully compatible |
 | 125 | packages/coding-agent/src/core/resource-loader.ts | #294 | audited | Fully compatible |
 | 126 | packages/coding-agent/src/core/extensions/loader.ts | #296 | audited | Fully compatible (jiti uses createRequire which Bun supports) |
+| 127 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible |
 | 126.5 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 126.6 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible (close-out of audit track) |
 | 125.5 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
