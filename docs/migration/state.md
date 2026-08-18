@@ -164,6 +164,7 @@ packages/coding-agent/src/cli/experimental/cli.ts (#326)
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
 | 140.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible |
+| 141.5 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 138.5 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 132.5 | packages/coding-agent/src/cli/list-models.ts | #218 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 131.5 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
