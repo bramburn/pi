@@ -94,6 +94,7 @@ packages/coding-agent/src/core/experimental.ts (#359)
 | 73 | packages/telemetry/src/memory.ts | #195 | audited | Fully compatible |
 | 74 | packages/telemetry/src/noop.ts | #196 | audited | Fully compatible |
 | 75 | packages/coding-agent/src/bun/register-bedrock.ts | #198 | audited | Fully compatible |
+| 75.5 | packages/coding-agent/src/bun/register-bedrock.ts | #198 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Bun-specific entry chunk + npm exports subpath resolution) |
 | 76 | packages/coding-agent/src/bun/restore-sandbox-env.ts | #199 | audited | Bun-specific workaround |
 | 77 | packages/coding-agent/src/cli/args.ts | #200 | audited | Fully compatible |
 | 78 | packages/coding-agent/src/cli/auth-check.ts | #202 | audited | Fully compatible |
