@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 03:00:00
+2026-08-19 04:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/auth-command.ts (#316)
+packages/coding-agent/src/cli/credential-print.ts (#318)
 
 ## Statistics
 
-- Files audited: 136
+- Files audited: 137
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -157,6 +157,7 @@ packages/coding-agent/src/cli/auth-command.ts (#316)
 | 134 | packages/coding-agent/src/cli/args.ts | #312 | audited | Fully compatible |
 | 135 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible |
 | 136 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible |
+| 137 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible |
 | 132.5 | packages/coding-agent/src/cli/list-models.ts | #218 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 131.5 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 130.5 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
