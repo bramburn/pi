@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 10:00:00
+2026-08-20 11:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/image-resize.ts (#366)
+packages/coding-agent/src/core/extensions/types.ts (#368)
 
 ## Statistics
 
-- Files audited: 154
+- Files audited: 155
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -199,6 +199,7 @@ packages/coding-agent/src/utils/image-resize.ts (#366)
 | 154.5 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers class re-export prototype-chain identity) |
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
+| 155 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (type-only; 1728-line file) |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
