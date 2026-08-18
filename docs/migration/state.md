@@ -142,6 +142,7 @@ packages/tui/src/components/image.ts (#288)
 | 120 | packages/coding-agent/src/core/resolve-config-value.ts | #285 | audited | Fully compatible (no migration work; close-out of audit track) |
 | 121 | packages/tui/src/components/editor.ts | #286 | audited | Fully compatible |
 | 122 | packages/tui/src/components/image.ts | #288 | audited | Fully compatible |
+| 123 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 
 ## TUI Package Audit Complete
 
