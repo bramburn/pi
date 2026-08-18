@@ -100,6 +100,7 @@ packages/coding-agent/src/core/compaction/utils.ts (#353)
 | 79 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible |
 | 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
 | 81 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible |
+| 81.5 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers cliModel! + conditional object spread) |
 | 82 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible |
 | 82.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 83 | packages/coding-agent/src/cli/experimental/transport-address.ts | #212 | audited | Fully compatible |
