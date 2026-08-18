@@ -194,6 +194,7 @@ packages/coding-agent/src/core/extensions/index.ts (#365)
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
 | 152 | packages/coding-agent/src/utils/exif-orientation.ts | #360 | audited | Fully compatible |
 | 154 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible |
+| 154.5 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers class re-export prototype-chain identity) |
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
