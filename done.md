@@ -247,6 +247,7 @@
 | 226 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/mermaid.ts` | [#385](https://github.com/bramburn/pi/issues/385) | 0 | 1 | 1 |
 | 227 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/model-selector.ts` | [#388](https://github.com/bramburn/pi/issues/388) | 1 | 1 | 1 |
 | 228 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/oauth-selector.ts` | [#391](https://github.com/bramburn/pi/issues/391) | 0 | 1 | 1 |
+| 229 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts` | [#394](https://github.com/bramburn/pi/issues/394) | 0 | 1 | 1 |
 
 ## Notes
 
