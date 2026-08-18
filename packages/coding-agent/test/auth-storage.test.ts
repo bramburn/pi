@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { type CredentialStore, createModels, type Provider } from "@earendil-works/pi-ai";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AuthStorage, FileAuthStorageBackend } from "../src/core/auth-storage.ts";
+import {
+	AuthStorage,
+	acquireInProcessAuthLock,
+	acquireInProcessAuthLockAsync,
+	FileAuthStorageBackend,
+} from "../src/core/auth-storage.ts";
 
 describe("AuthStorage", () => {
 	const tempDir = join(tmpdir(), `pi-test-auth-storage-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -531,5 +536,58 @@ describe("AuthStorage", () => {
 		writeFileSync(authJsonPath, "{invalid-json", "utf8");
 		await expect(storage.modify("openai", async () => ({ type: "api_key", key: "new" }))).rejects.toThrow();
 		expect(readFileSync(authJsonPath, "utf8")).toBe("{invalid-json");
+	});
+});
+
+describe("acquireInProcessAuthLock (Bun migration, issue #62)", () => {
+	const uniquePath = (label: string): string =>
+		join(tmpdir(), `auth-lock-${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+	test("throws when isBun is false so the in-process lock is never used on Node", () => {
+		expect(() => acquireInProcessAuthLock(uniquePath("node-sync"), false)).toThrow(/Bun runtime path/);
+	});
+
+	test("acquires and releases a sync lock on a path", () => {
+		const path = uniquePath("sync-basic");
+		const release = acquireInProcessAuthLock(path, true);
+		expect(typeof release).toBe("function");
+		release();
+	});
+
+	test("sync release is idempotent and cannot be called twice", () => {
+		const path = uniquePath("sync-idempotent");
+		const release = acquireInProcessAuthLock(path, true);
+		release();
+		// Calling release a second time must not throw and must not
+		// drive the refcount negative.
+		release();
+	});
+
+	test("async lock throws when isBun is false", async () => {
+		await expect(acquireInProcessAuthLockAsync(uniquePath("node-async"), false)).rejects.toThrow(/Bun runtime path/);
+	});
+
+	test("async lock acquires and releases on a fresh path", async () => {
+		const path = uniquePath("async-basic");
+		const release = await acquireInProcessAuthLockAsync(path, true);
+		expect(typeof release).toBe("function");
+		await release();
+	});
+
+	test("async lock serializes two acquires on the same path", async () => {
+		const path = uniquePath("async-serialized");
+		const release1 = await acquireInProcessAuthLockAsync(path, true);
+		let secondAcquired = false;
+		const pending = acquireInProcessAuthLockAsync(path, true).then((release2) => {
+			secondAcquired = true;
+			return release2;
+		});
+		// Second acquire must NOT resolve while the first is still held.
+		await new Promise((r) => setTimeout(r, 20));
+		expect(secondAcquired).toBe(false);
+		await release1();
+		const release2 = await pending;
+		expect(secondAcquired).toBe(true);
+		await release2();
 	});
 });

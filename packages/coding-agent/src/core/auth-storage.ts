@@ -13,6 +13,91 @@ import { raceWithAbortSignal } from "../utils/abort.ts";
 import { getFileRevision, normalizePath } from "../utils/paths.ts";
 import { isCommandConfigValue, resolveConfigValue } from "./resolve-config-value.ts";
 
+/** Detect if running under Bun runtime - avoid proper-lockfile for auth storage */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
+/** Per-path refcount for the in-process auth-storage lock (Bun only). */
+const inProcessAuthLockCounts = new Map<string, number>();
+
+/** Per-path waiters for the in-process async auth-storage lock (Bun only). */
+const inProcessAuthLockWaiters = new Map<string, Array<() => void>>();
+
+/**
+ * In-process re-entrant lock for the auth storage, used under Bun where
+ * `proper-lockfile` is the source of an open compat question (see issue
+ * #62, sister to the trust-store #78 fix). Auth storage writes are
+ * serialized inside a single `pi` process; two `pi` instances writing
+ * the same auth.json from the same user would have raced on Node too,
+ * so the in-process lock preserves the existing single-writer contract.
+ *
+ * Exported for testing. The `isBun` parameter defaults to the actual
+ * runtime detection and should not be overridden in production code.
+ */
+export function acquireInProcessAuthLock(authPath: string, isBun: boolean = isBunRuntime): () => void {
+	if (!isBun) {
+		throw new Error("acquireInProcessAuthLock is only for the Bun runtime path");
+	}
+	const current = inProcessAuthLockCounts.get(authPath) ?? 0;
+	inProcessAuthLockCounts.set(authPath, current + 1);
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		const next = (inProcessAuthLockCounts.get(authPath) ?? 1) - 1;
+		if (next <= 0) {
+			inProcessAuthLockCounts.delete(authPath);
+		} else {
+			inProcessAuthLockCounts.set(authPath, next);
+		}
+	};
+}
+
+/**
+ * Async counterpart to `acquireInProcessAuthLock`. Same contract but
+ * uses a waiter queue so async callers serialize through the same
+ * in-process critical section. Exported for testing.
+ */
+export function acquireInProcessAuthLockAsync(
+	authPath: string,
+	isBun: boolean = isBunRuntime,
+): Promise<() => Promise<void>> {
+	if (!isBun) {
+		return Promise.reject(new Error("acquireInProcessAuthLockAsync is only for the Bun runtime path"));
+	}
+	return new Promise<() => Promise<void>>((resolve) => {
+		const tryAcquire = (): void => {
+			if ((inProcessAuthLockCounts.get(authPath) ?? 0) === 0) {
+				inProcessAuthLockCounts.set(authPath, 1);
+				let released = false;
+				resolve(async () => {
+					if (released) return;
+					released = true;
+					// Decrement the count and hand the lock to the next waiter.
+					const next = (inProcessAuthLockCounts.get(authPath) ?? 1) - 1;
+					if (next <= 0) {
+						inProcessAuthLockCounts.delete(authPath);
+					} else {
+						inProcessAuthLockCounts.set(authPath, next);
+					}
+					const queue = inProcessAuthLockWaiters.get(authPath);
+					if (queue && queue.length > 0) {
+						const nextWaiter = queue.shift();
+						if (queue.length === 0) {
+							inProcessAuthLockWaiters.delete(authPath);
+						}
+						if (nextWaiter) nextWaiter();
+					}
+				});
+			} else {
+				const queue = inProcessAuthLockWaiters.get(authPath) ?? [];
+				queue.push(tryAcquire);
+				inProcessAuthLockWaiters.set(authPath, queue);
+			}
+		};
+		tryAcquire();
+	});
+}
+
 type AuthStorageData = Record<string, Credential>;
 
 type LockResult<T> = {
@@ -65,6 +150,15 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
+		// Under Bun, use the in-process re-entrant lock (issue #62) so the
+		// auth storage is serialized inside the single `pi` process without
+		// round-tripping through proper-lockfile. Two `pi` processes writing
+		// the same auth.json simultaneously would have raced on Node too, so
+		// this preserves the existing single-writer contract.
+		if (isBunRuntime) {
+			return acquireInProcessAuthLock(path);
+		}
+
 		const maxAttempts = 10;
 		const delayMs = 20;
 		let lastError: unknown;
@@ -116,6 +210,20 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		signal: AbortSignal | undefined,
 		onCompromised: (error: Error) => void,
 	): Promise<() => Promise<void>> {
+		// Under Bun, use the in-process async lock (issue #62). See
+		// acquireLockSyncWithRetry for the rationale.
+		if (isBunRuntime) {
+			signal?.throwIfAborted();
+			const release = await acquireInProcessAuthLockAsync(this.authPath);
+			if (signal?.aborted) {
+				await release();
+				signal.throwIfAborted();
+			}
+			return async () => {
+				await release();
+			};
+		}
+
 		const staleMs = 30_000;
 		const maxDelayMs = 2_000;
 		const deadline = Date.now() + staleMs;

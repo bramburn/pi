@@ -19,7 +19,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 
 | # | File | Issue | Status | Notes |
 |---|------|-------|--------|-------|
-| 1 | packages/coding-agent/src/core/auth-storage.ts | #62 | audited | Uses proper-lockfile |
+| 1 | packages/coding-agent/src/core/auth-storage.ts | #62 | RESOLVED | **Bun path: in-process lock; Node path: proper-lockfile** |
 | 2 | packages/coding-agent/src/config.ts | #64 | audited | Already Bun-aware |
 | 3 | packages/evals/src/pi-harness.ts | #66 | audited | perf_hooks compatible |
 | 4 | packages/coding-agent/src/utils/pi-user-agent.ts | #68 | audited | Already Bun-aware |
@@ -170,7 +170,7 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 |-------|-------|------|--------|
 | Native modules | native-modifiers.ts | **CRITICAL** | ✅ Graceful fallback implemented |
 | Native modules | terminal.ts | **CRITICAL** | ✅ Graceful fallback implemented |
-| proper-lockfile | auth-storage | Medium | Pending |
+| proper-lockfile | auth-storage | Medium | ✅ Resolved (Bun → in-process lock) |
 | proper-lockfile | trust-manager | Medium | ✅ Resolved (Bun → in-process lock) |
 | Worker threads | image-resize | Medium | Pending |
 | Proxy agents | bedrock-converse-stream | Medium | Pending |
