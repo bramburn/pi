@@ -110,6 +110,7 @@ packages/coding-agent/src/core/compaction/compaction.ts (#347)
 | 89 | packages/coding-agent/src/cli/startup-ui.ts | #224 | audited | Fully compatible |
 | 90 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible |
 | 91 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible |
+| 91.5 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers structuredClone parity) |
 | 92 | packages/coding-agent/src/core/agent-session-runtime.ts | #230 | audited | Fully compatible |
 | 93 | packages/coding-agent/src/core/agent-session-services.ts | #232 | audited | Fully compatible |
 | 93.5 | packages/coding-agent/src/core/agent-session-services.ts | #232 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
