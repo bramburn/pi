@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 04:00:00
+2026-08-21 05:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/image-resize-worker.ts (#393)
+packages/coding-agent/src/core/settings-manager.ts (#395)
 
 ## Statistics
 
-- Files audited: 163
+- Files audited: 164
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -219,6 +219,7 @@ packages/coding-agent/src/utils/image-resize-worker.ts (#393)
 | 161 | packages/coding-agent/src/utils/fs-watch.ts | #387 | audited | Fully compatible |
 | 162 | packages/coding-agent/src/utils/git.ts | #390 | audited | Fully compatible |
 | 163 | packages/coding-agent/src/utils/image-resize-worker.ts | #393 | audited | Fully compatible |
+| 164 | packages/coding-agent/src/core/settings-manager.ts | #395 | audited | proper-lockfile use (migration pattern: in-process lock on Bun) |
 | 163 | packages/coding-agent/src/core/session-manager.ts | #392 | audited | Fully compatible (surface-level audit; 1714-line file, Buffer.allocUnsafe + Array.prototype mutations only) |
 | 162.5 | packages/coding-agent/src/utils/git.ts | #390 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers new URL(url) WHATWG URL constructor + try/catch fallback for non-standard git+ssh:// schemes) |
 | 162 | packages/coding-agent/src/core/session-cwd.ts | #389 | audited | Fully compatible |
