@@ -215,6 +215,7 @@
 | 194 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/theme-selector.ts` | [#301](https://github.com/bramburn/pi/issues/301) | 0 | 2 | 1 |
 | 195 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/thinking-selector.ts` | [#303](https://github.com/bramburn/pi/issues/303) | 0 | 1 | 1 |
 | 196 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/tool-execution.ts` | [#305](https://github.com/bramburn/pi/issues/305) | 0 | 1 | 3 |
+| 197 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/tree-selector.ts` | [#307](https://github.com/bramburn/pi/issues/307) | 0 | 2 | 3 |
 
 ## Notes
 
