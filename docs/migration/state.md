@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-18 20:00:00
+2026-08-18 21:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/migrations.ts (#302)
+packages/coding-agent/src/core/auth-guidance.ts (#304)
 
 ## Statistics
 
-- Files audited: 129
+- Files audited: 130
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -150,6 +150,7 @@ packages/coding-agent/src/migrations.ts (#302)
 | 127 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible |
 | 128 | packages/coding-agent/src/core/diagnostics.ts | #300 | audited | Fully compatible (type-declaration module) |
 | 129 | packages/coding-agent/src/migrations.ts | #302 | audited | Fully compatible |
+| 130 | packages/coding-agent/src/core/auth-guidance.ts | #304 | audited | Fully compatible |
 | 129.5 | packages/coding-agent/src/core/cache-stats.ts | #238 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 128.5 | packages/coding-agent/src/core/compaction/branch-summarization.ts | #240 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 128.6 | packages/coding-agent/src/core/defaults.ts | #242 | audited | Fully compatible (close-out of audit track) |
