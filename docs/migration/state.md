@@ -148,6 +148,7 @@ packages/coding-agent/src/utils/child-process.ts (#336)
 | 125 | packages/coding-agent/src/core/resource-loader.ts | #294 | audited | Fully compatible |
 | 126 | packages/coding-agent/src/core/extensions/loader.ts | #296 | audited | Fully compatible (jiti uses createRequire which Bun supports) |
 | 127 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible |
+| 127.5 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 128 | packages/coding-agent/src/core/diagnostics.ts | #300 | audited | Fully compatible (type-declaration module) |
 | 129 | packages/coding-agent/src/migrations.ts | #302 | audited | Fully compatible |
 | 130 | packages/coding-agent/src/core/auth-guidance.ts | #304 | audited | Fully compatible |
