@@ -220,6 +220,7 @@
 | 199 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/user-message-selector.ts` | [#310](https://github.com/bramburn/pi/issues/310) | 1 | 1 | 2 |
 | 200 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/user-message.ts` | [#313](https://github.com/bramburn/pi/issues/313) | 0 | 1 | 1 |
 | 201 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/visual-truncate.ts` | [#315](https://github.com/bramburn/pi/issues/315) | 0 | 1 | 1 |
+| 202 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/armin.ts` | [#317](https://github.com/bramburn/pi/issues/317) | 1 | 2 | 1 |
 
 ## Notes
 
