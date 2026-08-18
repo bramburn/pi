@@ -149,6 +149,7 @@ packages/coding-agent/src/core/diagnostics.ts (#300)
 | 126 | packages/coding-agent/src/core/extensions/loader.ts | #296 | audited | Fully compatible (jiti uses createRequire which Bun supports) |
 | 127 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible |
 | 128 | packages/coding-agent/src/core/diagnostics.ts | #300 | audited | Fully compatible (type-declaration module) |
+| 128.5 | packages/coding-agent/src/core/compaction/branch-summarization.ts | #240 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 127.5 | packages/coding-agent/src/core/bash-executor.ts | #236 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 126.5 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 126.6 | packages/coding-agent/src/core/export-html/ansi-to-html.ts | #247 | audited | Fully compatible (close-out of audit track) |
