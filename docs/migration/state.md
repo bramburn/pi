@@ -214,6 +214,7 @@ packages/coding-agent/src/core/runtime-credentials.ts (#383)
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/utils/image-process.ts | #381 | audited | Fully compatible |
 | 160 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible |
+| 160.5 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers async-await-Map-construction pattern in the list() method) |
 | 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
 | 159.5 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers await Promise microtask scheduling) |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |
