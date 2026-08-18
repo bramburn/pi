@@ -103,6 +103,7 @@ packages/coding-agent/src/core/compaction/index.ts (#350)
 | 82 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible |
 | 83 | packages/coding-agent/src/cli/experimental/transport-address.ts | #212 | audited | Fully compatible |
 | 84 | packages/coding-agent/src/cli/file-processor.ts | #214 | audited | Fully compatible |
+| 84.5 | packages/coding-agent/src/cli/file-processor.ts | #214 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers chalk v5 ANSI parity + stderr-flush order) |
 | 85 | packages/coding-agent/src/cli/initial-message.ts | #216 | audited | Fully compatible |
 | 86 | packages/coding-agent/src/cli/list-models.ts | #218 | audited | Fully compatible |
 | 87 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible |
