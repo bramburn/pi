@@ -200,6 +200,7 @@ packages/coding-agent/src/core/extensions/types.ts (#368)
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 154 | packages/coding-agent/src/utils/image-resize.ts | #366 | audited | Fully compatible |
 | 155 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (type-only; 1728-line file) |
+| 155.5 | packages/coding-agent/src/core/extensions/types.ts | #368 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers typebox Static<TSchema> conditional-type derivation) |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
