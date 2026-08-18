@@ -5,6 +5,42 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME } from "../config.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 
+/** Detect if running under Bun runtime - avoid proper-lockfile for trust store */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
+/** Per-path refcount for the in-process trust-store lock (Bun only). */
+const inProcessTrustLockCounts = new Map<string, number>();
+
+/**
+ * In-process re-entrant lock for the trust store, used under Bun where
+ * `proper-lockfile` is the source of an open compatibility question (see
+ * issue #78). Trust store writes are serialized inside a single `pi`
+ * process; two `pi` instances targeting the same `~/.pi` trust.json from
+ * the same user would have raced on Node too, so the in-process lock
+ * preserves the existing single-writer contract.
+ *
+ * Exported for testing. The `isBun` parameter defaults to the actual
+ * runtime detection and should not be overridden in production code.
+ */
+export function acquireInProcessTrustLock(trustPath: string, isBun: boolean = isBunRuntime): () => void {
+	if (!isBun) {
+		throw new Error("acquireInProcessTrustLock is only for the Bun runtime path");
+	}
+	const current = inProcessTrustLockCounts.get(trustPath) ?? 0;
+	inProcessTrustLockCounts.set(trustPath, current + 1);
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		const next = (inProcessTrustLockCounts.get(trustPath) ?? 1) - 1;
+		if (next <= 0) {
+			inProcessTrustLockCounts.delete(trustPath);
+		} else {
+			inProcessTrustLockCounts.set(trustPath, next);
+		}
+	};
+}
+
 export type ProjectTrustDecision = boolean | null;
 
 export interface ProjectTrustStoreEntry {
@@ -134,6 +170,15 @@ function writeTrustFile(path: string, data: TrustFile): void {
 }
 
 function acquireTrustLockSync(path: string): () => void {
+	// Under Bun, use the in-process re-entrant lock (issue #78) so the
+	// trust store is serialized inside the single `pi` process without
+	// round-tripping through proper-lockfile. Two `pi` processes writing
+	// the same trust.json simultaneously would have raced on Node too, so
+	// this preserves the existing single-writer contract.
+	if (isBunRuntime) {
+		return acquireInProcessTrustLock(path);
+	}
+
 	const trustDir = dirname(path);
 	mkdirSync(trustDir, { recursive: true });
 	const maxAttempts = 10;

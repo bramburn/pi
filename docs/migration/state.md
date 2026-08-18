@@ -27,7 +27,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 6 | packages/tui/src/tui.ts | #72 | audited | Fully compatible |
 | 7 | packages/agent/src/harness/env/nodejs.ts | #74 | audited | Fully compatible |
 | 8 | packages/ai/src/auth/oauth/load.ts | #76 | audited | Already Bun-aware |
-| 9 | packages/coding-agent/src/core/trust-manager.ts | #78 | audited | Uses proper-lockfile |
+| 9 | packages/coding-agent/src/core/trust-manager.ts | #78 | RESOLVED | **Bun path: in-process lock; Node path: proper-lockfile** |
 | 10 | packages/ai/src/api/bedrock-converse-stream.ts | #80 | audited | Proxy agents need testing |
 | 11 | packages/coding-agent/src/cli.ts | #82 | audited | Fully compatible |
 | 12 | packages/server/src/server.ts | #84 | audited | Fully compatible |
@@ -170,7 +170,8 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 |-------|-------|------|--------|
 | Native modules | native-modifiers.ts | **CRITICAL** | ✅ Graceful fallback implemented |
 | Native modules | terminal.ts | **CRITICAL** | ✅ Graceful fallback implemented |
-| proper-lockfile | auth-storage, trust-manager | Medium | Pending |
+| proper-lockfile | auth-storage | Medium | Pending |
+| proper-lockfile | trust-manager | Medium | ✅ Resolved (Bun → in-process lock) |
 | Worker threads | image-resize | Medium | Pending |
 | Proxy agents | bedrock-converse-stream | Medium | Pending |
 | Unix sockets | client/unix.ts | Medium | Pending |
