@@ -236,6 +236,7 @@
 | 215 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/dynamic-border.ts` | [#352](https://github.com/bramburn/pi/issues/352) | 0 | 1 | 1 |
 | 216 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/earendil-announcement.ts` | [#355](https://github.com/bramburn/pi/issues/355) | 0 | 1 | 1 |
 | 217 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-editor.ts` | [#358](https://github.com/bramburn/pi/issues/358) | 0 | 1 | 1 |
+| 218 | 2026-08-20 | `packages/coding-agent/src/modes/interactive/components/extension-input.ts` | [#361](https://github.com/bramburn/pi/issues/361) | 0 | 1 | 1 |
 
 ## Notes
 

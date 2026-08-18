@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 05:00:00
+2026-08-20 06:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/experimental.ts (#359)
+packages/coding-agent/src/utils/exif-orientation.ts (#360)
 
 ## Statistics
 
@@ -88,6 +88,7 @@ packages/coding-agent/src/core/experimental.ts (#359)
 | 67 | packages/server/src/listener.ts | #189 | audited | Fully compatible |
 | 68 | packages/server/src/sessions.ts | #190 | audited | Node.js crypto - use native |
 | 69 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible |
+| 69.5 | packages/server/src/snapshots.ts | #191 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers chained .then().catch() promise-queue serialisation) |
 | 70 | packages/evals/src/pi-harness.ts | #192 | audited | Node.js imports - test in Bun |
 | 71 | packages/evals/src/extensions.eval.ts | #193 | RESOLVED | **vitest pool pinned to forks (Bun-safe); bun x vitest in README** |
 | 72 | packages/evals/src/smoke.eval.ts | #194 | audited | Needs vitest |
@@ -189,6 +190,7 @@ packages/coding-agent/src/core/experimental.ts (#359)
 | 149 | packages/coding-agent/src/utils/clipboard.ts | #351 | audited | Fully compatible |
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
+| 152 | packages/coding-agent/src/utils/exif-orientation.ts | #360 | audited | Fully compatible |
 | 152 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible |
 | 152.5 | packages/coding-agent/src/core/experimental.ts | #359 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers process.env indexing parity) |
 | 150.5 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers Node-API native module + createRequire semantics + graceful-degradation path) |
