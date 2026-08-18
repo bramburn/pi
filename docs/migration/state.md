@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 15:00:00
+2026-08-19 16:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/child-process.ts (#336)
+packages/coding-agent/src/bun/cli.ts (#338)
 
 ## Statistics
 
-- Files audited: 144
+- Files audited: 145
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -171,6 +171,7 @@ packages/coding-agent/src/utils/child-process.ts (#336)
 | 142 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible |
 | 143 | packages/coding-agent/src/cli/experimental/commands/pi.ts | #333 | audited | Fully compatible |
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
+| 145 | packages/coding-agent/src/bun/cli.ts | #338 | audited | Bun-specific entry point (Bun-only chain) |
 | 142.5 | packages/coding-agent/src/cli/experimental/commands/client.ts | #330 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 141.5 | packages/coding-agent/src/cli/experimental/transport-address.ts | #327 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 142 | packages/coding-agent/src/cli/experimental/auth.ts | #329 | audited | Fully compatible |
