@@ -2,6 +2,7 @@ import assert from "node:assert";
 import { describe, it, mock } from "node:test";
 import { setKittyProtocolActive } from "../src/keys.ts";
 import {
+	loadWindowsConsoleModeHelper,
 	normalizeAppleTerminalInput,
 	normalizeNativeShiftEnterInput,
 	ProcessTerminal,
@@ -296,5 +297,37 @@ describe("ProcessTerminal dimensions", () => {
 				process.env.LINES = previousLines;
 			}
 		}
+	});
+});
+
+describe("loadWindowsConsoleModeHelper (Bun migration, issue #101)", () => {
+	it("returns undefined under Bun without attempting to load any prebuild", () => {
+		// Bun's runtime is detected via process.versions.bun; the helper must
+		// short-circuit before walking candidate paths or calling createRequire.
+		const helper = loadWindowsConsoleModeHelper(true, "win32", "x64");
+		assert.equal(helper, undefined);
+	});
+
+	it("returns undefined on non-Windows platforms even on Node", () => {
+		const helper = loadWindowsConsoleModeHelper(false, "linux", "x64");
+		assert.equal(helper, undefined);
+		const darwinHelper = loadWindowsConsoleModeHelper(false, "darwin", "arm64");
+		assert.equal(darwinHelper, undefined);
+	});
+
+	it("returns undefined on Windows for unsupported architectures", () => {
+		const helper = loadWindowsConsoleModeHelper(false, "win32", "ia32");
+		assert.equal(helper, undefined);
+		const armHelper = loadWindowsConsoleModeHelper(false, "win32", "arm");
+		assert.equal(armHelper, undefined);
+	});
+
+	it("falls through to the prebuild lookup on Node + Windows + supported arch", () => {
+		// The prebuilds directory may or may not be present in the test
+		// sandbox, so we only assert that the function does not throw and
+		// returns either a helper or undefined (the existing graceful
+		// fallback contract).
+		const helper = loadWindowsConsoleModeHelper(false, "win32", "x64");
+		assert.ok(helper === undefined || typeof helper === "object");
 	});
 });

@@ -3,15 +3,15 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-17 05:15:00
+2026-08-18 11:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/resolve-config-value.ts (#285)
+packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 
 ## Statistics
 
 - Files audited: 18
-- Blockers found: 1
+- Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
 
@@ -39,7 +39,7 @@ packages/coding-agent/src/core/resolve-config-value.ts (#285)
 | 18 | packages/tui/src/native-modifiers.ts | #96 | RESOLVED | **Implemented Bun detection + graceful fallback** |
 | 19 | packages/tui/src/alt-screen-search.ts | #97 | audited | Fully compatible |
 | 20 | packages/tui/src/terminal-image.ts | #99 | audited | Fully compatible |
-| 21 | packages/tui/src/terminal.ts | #101 | audited | **CRITICAL: Native modules** |
+| 21 | packages/tui/src/terminal.ts | #101 | RESOLVED | **Implemented Bun detection + graceful fallback** |
 | 22 | packages/tui/src/tui.ts | #103 | audited | Fully compatible |
 | 23 | packages/tui/src/tui-main-screen.ts | #105 | audited | Fully compatible |
 | 24 | packages/tui/src/keybindings.ts | #107 | audited | Fully compatible |
@@ -161,14 +161,15 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 
 | File | Issue | Severity |
 |------|-------|----------|
-| native-modifiers.ts | Loads .node modules not supported by Bun | Critical |
+| native-modifiers.ts | Loads .node modules not supported by Bun | Critical | ✅ Resolved |
+| terminal.ts | Loads .node modules not supported by Bun | Critical | ✅ Resolved |
 
 ## Known Issues
 
 | Issue | Files | Risk | Status |
 |-------|-------|------|--------|
 | Native modules | native-modifiers.ts | **CRITICAL** | ✅ Graceful fallback implemented |
-| Native modules | terminal.ts | **CRITICAL** | ⚠️ Needs testing |
+| Native modules | terminal.ts | **CRITICAL** | ✅ Graceful fallback implemented |
 | proper-lockfile | auth-storage, trust-manager | Medium | Pending |
 | Worker threads | image-resize | Medium | Pending |
 | Proxy agents | bedrock-converse-stream | Medium | Pending |

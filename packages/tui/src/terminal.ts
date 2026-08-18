@@ -8,6 +8,60 @@ import { StdinBuffer } from "./stdin-buffer.ts";
 
 const cjsRequire = createRequire(import.meta.url);
 
+/** Detect if running under Bun runtime - native .node modules are not supported */
+const isBun = typeof process.versions.bun !== "undefined";
+
+/**
+ * Shape of the optional Windows native helper that flips
+ * `ENABLE_VIRTUAL_TERMINAL_INPUT` on the stdin console handle so VT sequences
+ * (e.g. `\x1b[Z` for Shift+Tab) are reported instead of raw console events.
+ */
+export type WindowsConsoleModeHelper = {
+	enableVirtualTerminalInput?: () => boolean;
+};
+
+/**
+ * Try to load the Windows console mode native helper from the package's
+ * `native/win32/prebuilds/<arch>/` directory. Returns the helper on success
+ * and `undefined` when running on a non-Windows platform, on an unsupported
+ * architecture, or when no prebuild is present.
+ *
+ * Bun cannot load Node.js native addons (see
+ * https://bun.sh/docs/runtime/nodejs-apis#native-modules) so under Bun this
+ * function short-circuits without attempting to `require` any `.node` file.
+ *
+ * The `bunRuntime` and `platform` parameters are exposed for testing — they
+ * default to the actual runtime/platform and should not be overridden in
+ * production code.
+ */
+export function loadWindowsConsoleModeHelper(
+	bunRuntime: boolean = isBun,
+	platform: NodeJS.Platform = process.platform,
+	arch: string = process.arch,
+): WindowsConsoleModeHelper | undefined {
+	// Bun cannot load Node.js native .node modules (uses JavaScriptCore, not V8).
+	// Gracefully return undefined to keep enableWindowsVTInput() a no-op.
+	if (bunRuntime) return undefined;
+	if (platform !== "win32") return undefined;
+	if (arch !== "x64" && arch !== "arm64") return undefined;
+
+	const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+	const nativePath = path.join("native", "win32", "prebuilds", `win32-${arch}`, "win32-console-mode.node");
+	const candidates = [
+		path.join(moduleDir, "..", nativePath),
+		path.join(moduleDir, nativePath),
+		path.join(path.dirname(process.execPath), nativePath),
+	];
+	for (const modulePath of candidates) {
+		try {
+			return cjsRequire(modulePath) as WindowsConsoleModeHelper;
+		} catch {
+			// Try the next possible packaging location.
+		}
+	}
+	return undefined;
+}
+
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
 const TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1b]9;4;0\x07";
@@ -364,30 +418,12 @@ export class ProcessTerminal implements Terminal {
 	 * discards modifier state and Shift+Tab arrives as plain \t.
 	 */
 	private enableWindowsVTInput(): void {
-		if (process.platform !== "win32") return;
+		// Bun cannot load Node.js native .node modules; the helper is unreachable
+		// so skip the lookup entirely. On Node the helper is optional anyway.
+		if (isBun) return;
 		try {
-			const arch = process.arch;
-			if (arch !== "x64" && arch !== "arm64") return;
-
-			// Dynamic require so non-Windows and bundled/browser paths never load the
-			// native helper. In the npm package native/ is next to dist/; in compiled
-			// binary archives native/ is copied next to the executable.
-			const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-			const nativePath = path.join("native", "win32", "prebuilds", `win32-${arch}`, "win32-console-mode.node");
-			const candidates = [
-				path.join(moduleDir, "..", nativePath),
-				path.join(moduleDir, nativePath),
-				path.join(path.dirname(process.execPath), nativePath),
-			];
-			for (const modulePath of candidates) {
-				try {
-					const helper = cjsRequire(modulePath) as { enableVirtualTerminalInput?: () => boolean };
-					helper.enableVirtualTerminalInput?.();
-					return;
-				} catch {
-					// Try the next possible packaging location.
-				}
-			}
+			const helper = loadWindowsConsoleModeHelper();
+			helper?.enableVirtualTerminalInput?.();
 		} catch {
 			// Native helper not available — Shift+Tab won't be distinguishable from Tab.
 		}
