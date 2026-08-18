@@ -33,6 +33,7 @@ packages/coding-agent/src/core/runtime-credentials.ts (#383)
 | 12 | packages/server/src/server.ts | #84 | audited | Fully compatible |
 | 13 | packages/telemetry/src | #86 | audited | Fully compatible |
 | 14 | packages/ai/src/utils/provider-env.ts | #88 | audited | Already Bun-aware |
+| 14.5 | packages/ai/src/utils/provider-env.ts | #88 | audited | Already Bun-aware (close-out of audit track; research comment by Loop #6 covers CommonJS-require-from-ESM + /proc/self/environ read for the Bun sandbox-env fallback) |
 | 15 | packages/client/src/unix.ts | #90 | RESOLVED | **node:net fully implemented on Bun; drain-backpressure is callback-driven (cross-runtime safe)** |
 | 16 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point |
 | 16.5 | packages/ai/src/bun-oauth.ts | #92 | audited | Bun-specific entry point (close-out of audit track; research comment by Loop #6 covers per-loader lazy-lambda reference identity for the seven OAuth loaders) |
