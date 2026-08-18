@@ -128,7 +128,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 107 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible |
 | 108 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible |
 | 109 | packages/coding-agent/src/core/model-registry.ts | #263 | audited | Fully compatible |
-| 110 | packages/coding-agent/src/core/model-resolver.ts | #265 | audited | Fully compatible |
+| 110 | packages/coding-agent/src/core/model-resolver.ts | #265 | audited | Fully compatible (close-out of audit track) |
 | 111 | packages/coding-agent/src/core/model-runtime.ts | #267 | audited | Fully compatible (close-out of audit track) |
 | 112 | packages/coding-agent/src/core/output-guard.ts | #269 | audited | Fully compatible (close-out of audit track) |
 | 113 | packages/coding-agent/src/core/package-manager.ts | #271 | audited | Fully compatible (close-out of audit track) |
