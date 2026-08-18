@@ -79,8 +79,16 @@ async function resizeImageInWorker(
  * Resize an image to fit within the specified max dimensions and encoded file size.
  * Runs Photon in a worker thread so WASM decoding, resizing, and encoding do not
  * block the TUI event loop. If the worker cannot be loaded (for example in some
- * Bun compiled executable layouts), fall back to in-process resizing so image
- * reads still work.
+ * Bun compiled executable layouts, or if Bun's URL-based Worker entrypoint is
+ * not available in a given bundled shape), fall back to in-process resizing
+ * so image reads still work.
+ *
+ * The worker entrypoint is constructed via `new URL("./worker.ts", import.meta.url)`
+ * on both Node.js and Bun: Bun documents `node:worker_threads` Worker as
+ * accepting URL-based entrypoints (see https://bun.sh/docs/api/workers and
+ * https://nodejs.org/api/worker_threads.html). The pre-existing Bun branch that
+ * used a hardcoded `"./src/utils/image-resize-worker.ts"` string path was
+ * fragile under non-default CWDs and is removed (issue #70).
  */
 export async function resizeImage(
 	inputBytes: Uint8Array,
@@ -92,15 +100,6 @@ export async function resizeImage(
 		isTypeScriptRuntime ? "./image-resize-worker.ts" : "./image-resize-worker.js",
 		import.meta.url,
 	);
-
-	// Bun compiled executables resolve worker entrypoints by string path, not via
-	// new URL(..., import.meta.url). Try the string path first under Bun so the
-	// release binary uses the embedded worker instead of falling back in-process.
-	if (typeof process.versions.bun === "string") {
-		try {
-			return await resizeImageInWorker("./src/utils/image-resize-worker.ts", inputBytes, mimeType, options);
-		} catch {}
-	}
 
 	try {
 		return await resizeImageInWorker(workerUrl, inputBytes, mimeType, options);

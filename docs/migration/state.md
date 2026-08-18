@@ -23,7 +23,7 @@ packages/tui/src/terminal.ts (#101) - RESOLVED with explicit Bun detection
 | 2 | packages/coding-agent/src/config.ts | #64 | audited | Already Bun-aware |
 | 3 | packages/evals/src/pi-harness.ts | #66 | audited | perf_hooks compatible |
 | 4 | packages/coding-agent/src/utils/pi-user-agent.ts | #68 | audited | Already Bun-aware |
-| 5 | packages/coding-agent/src/utils/image-resize.ts | #70 | audited | Worker threads need testing |
+| 5 | packages/coding-agent/src/utils/image-resize.ts | #70 | RESOLVED | **Cross-runtime URL-based Worker entrypoint; WASM in-process fallback on error** |
 | 6 | packages/tui/src/tui.ts | #72 | audited | Fully compatible |
 | 7 | packages/agent/src/harness/env/nodejs.ts | #74 | audited | Fully compatible |
 | 8 | packages/ai/src/auth/oauth/load.ts | #76 | audited | Already Bun-aware |
@@ -172,6 +172,6 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 | Native modules | terminal.ts | **CRITICAL** | ✅ Graceful fallback implemented |
 | proper-lockfile | auth-storage | Medium | ✅ Resolved (Bun → in-process lock) |
 | proper-lockfile | trust-manager | Medium | ✅ Resolved (Bun → in-process lock) |
-| Worker threads | image-resize | Medium | Pending |
+| Worker threads | image-resize | Medium | ✅ Resolved (URL entrypoint cross-runtime) |
 | Proxy agents | bedrock-converse-stream | Medium | ✅ Resolved (Bun → native HTTP) |
 | Unix sockets | client/unix.ts | Medium | ✅ Resolved (Bun implements node:net) |
