@@ -98,6 +98,7 @@ packages/coding-agent/src/utils/clipboard-native.ts (#354)
 | 77 | packages/coding-agent/src/cli/args.ts | #200 | audited | Fully compatible |
 | 78 | packages/coding-agent/src/cli/auth-check.ts | #202 | audited | Fully compatible |
 | 79 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible |
+| 79.5 | packages/coding-agent/src/cli/auth-command.ts | #204 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers regex /iu flag parity) |
 | 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
 | 81 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible |
 | 81.5 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers cliModel! + conditional object spread) |
