@@ -218,6 +218,7 @@
 | 197 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/tree-selector.ts` | [#307](https://github.com/bramburn/pi/issues/307) | 0 | 2 | 3 |
 | 198 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/trust-selector.ts` | [#309](https://github.com/bramburn/pi/issues/309) | 0 | 1 | 1 |
 | 199 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/user-message-selector.ts` | [#310](https://github.com/bramburn/pi/issues/310) | 1 | 1 | 2 |
+| 200 | 2026-08-19 | `packages/coding-agent/src/modes/interactive/components/user-message.ts` | [#313](https://github.com/bramburn/pi/issues/313) | 0 | 1 | 1 |
 
 ## Notes
 
