@@ -212,6 +212,7 @@
 | 191 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/show-images-selector.ts` | [#295](https://github.com/bramburn/pi/issues/295) | 0 | 0 | 1 |
 | 192 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/skill-invocation-message.ts` | [#297](https://github.com/bramburn/pi/issues/297) | 0 | 1 | 2 |
 | 193 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/status-indicator.ts` | [#299](https://github.com/bramburn/pi/issues/299) | 0 | 1 | 1 |
+| 194 | 2026-08-18 | `packages/coding-agent/src/modes/interactive/components/theme-selector.ts` | [#301](https://github.com/bramburn/pi/issues/301) | 0 | 2 | 1 |
 
 ## Notes
 
