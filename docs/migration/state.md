@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 08:00:00
+2026-08-20 09:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/frontmatter.ts (#363)
+packages/coding-agent/src/core/extensions/index.ts (#365)
 
 ## Statistics
 
-- Files audited: 153
+- Files audited: 154
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -193,6 +193,7 @@ packages/coding-agent/src/utils/frontmatter.ts (#363)
 | 150 | packages/coding-agent/src/utils/clipboard-native.ts | #354 | audited | Fully compatible |
 | 151 | packages/coding-agent/src/utils/deprecation.ts | #357 | audited | Fully compatible |
 | 152 | packages/coding-agent/src/utils/exif-orientation.ts | #360 | audited | Fully compatible |
+| 154 | packages/coding-agent/src/core/extensions/index.ts | #365 | audited | Fully compatible |
 | 153 | packages/coding-agent/src/utils/frontmatter.ts | #363 | audited | Fully compatible |
 | 153 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible |
 | 153.5 | packages/coding-agent/src/core/export-html/index.ts | #362 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers hex/rgb regex parseColor match-group parity) |
