@@ -3,6 +3,9 @@ import { existsSync, type FSWatcher, readFileSync, type Stats, statSync, unwatch
 import { dirname, join, resolve } from "path";
 import { closeWatcher, FS_WATCH_RETRY_DELAY_MS, watchWithErrorHandler } from "../utils/fs-watch.ts";
 
+/** Detect if running under Bun runtime - fs.watchFile firing semantics differ slightly (issue #255). */
+const isBunRuntime = typeof process.versions.bun !== "undefined";
+
 export type GitPaths = {
 	repoDir: string;
 	commonGitDir: string;
@@ -116,6 +119,10 @@ export class FooterDataProvider {
 	private refreshInFlight = false;
 	private refreshPending = false;
 	private disposed = false;
+	/** Last (mtimeMs, size) of HEAD after a successful refresh — used to dedup spurious watchFile fires under Bun (issue #255). */
+	private lastHeadSignature: { mtimeMs: number; size: number } | null = null;
+	/** Same for tables.list in reftable repos. */
+	private lastTablesListSignature: { mtimeMs: number; size: number } | null = null;
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
@@ -227,6 +234,25 @@ export class FooterDataProvider {
 				return;
 			}
 			this.cachedBranch = nextBranch;
+			// Persist the HEAD signature so future watchFile fires can dedup
+			// (issue #255). Silently fall through if HEAD does not exist or
+			// is unreadable; the next listener callback will retry.
+			if (this.gitPaths) {
+				try {
+					const stats = statSync(this.gitPaths.headPath);
+					this.lastHeadSignature = { mtimeMs: stats.mtimeMs, size: stats.size };
+				} catch {
+					// ignore — HEAD may be missing transiently
+				}
+				if (this.reftableTablesListPath) {
+					try {
+						const stats = statSync(this.reftableTablesListPath);
+						this.lastTablesListSignature = { mtimeMs: stats.mtimeMs, size: stats.size };
+					} catch {
+						// ignore
+					}
+				}
+			}
 		} finally {
 			this.refreshInFlight = false;
 			if (this.refreshPending && !this.disposed) {
@@ -325,11 +351,20 @@ export class FooterDataProvider {
 		if (pollGitHead) {
 			this.headWatchFilePath = this.gitPaths.headPath;
 			this.headWatchFileListener = (current, previous) => {
-				if (
+				const statsChanged =
 					current.mtimeMs !== previous.mtimeMs ||
 					current.ctimeMs !== previous.ctimeMs ||
-					current.size !== previous.size
-				) {
+					current.size !== previous.size;
+				// Stronger dedup for Bun (issue #255): skip the refresh if the
+				// stats pair matches what we last successfully observed for HEAD,
+				// even if `current` differs from `previous`. This keeps the
+				// listener cheap under Bun's watchFile firing semantics.
+				const matchesLastSeen =
+					isBunRuntime &&
+					this.lastHeadSignature !== null &&
+					current.mtimeMs === this.lastHeadSignature.mtimeMs &&
+					current.size === this.lastHeadSignature.size;
+				if (statsChanged && !matchesLastSeen) {
 					this.scheduleRefresh();
 				}
 			};
@@ -368,11 +403,19 @@ export class FooterDataProvider {
 					return;
 				}
 				watchFile(tablesListPath, { interval: 250 }, (current, previous) => {
-					if (
+					const statsChanged =
 						current.mtimeMs !== previous.mtimeMs ||
 						current.ctimeMs !== previous.ctimeMs ||
-						current.size !== previous.size
-					) {
+						current.size !== previous.size;
+					// Stronger dedup for Bun (issue #255): skip the refresh if the
+					// stats pair matches what we last successfully observed for
+					// tables.list, even under Bun's noisier firing semantics.
+					const matchesLastSeen =
+						isBunRuntime &&
+						this.lastTablesListSignature !== null &&
+						current.mtimeMs === this.lastTablesListSignature.mtimeMs &&
+						current.size === this.lastTablesListSignature.size;
+					if (statsChanged && !matchesLastSeen) {
 						this.scheduleRefresh();
 					}
 				});

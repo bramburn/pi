@@ -123,7 +123,7 @@ packages/tui/src/components/stack.ts (#292)
 | 102 | packages/coding-agent/src/core/export-html/tool-renderer.ts | #249 | audited | Fully compatible |
 | 103 | packages/coding-agent/src/core/extensions/runner.ts | #251 | audited | Fully compatible |
 | 104 | packages/coding-agent/src/core/extensions/wrapper.ts | #253 | audited | Fully compatible |
-| 105 | packages/coding-agent/src/core/footer-data-provider.ts | #255 | audited | Fully compatible |
+| 105 | packages/coding-agent/src/core/footer-data-provider.ts | #255 | RESOLVED | **Bun: stronger watchFile dedup via persistent mtime/size signature** |
 | 106 | packages/coding-agent/src/core/http-dispatcher.ts | #257 | RESOLVED | **Bun path: skip undici.setGlobalDispatcher; Node path: full undici install** |
 | 107 | packages/coding-agent/src/core/messages.ts | #259 | audited | Fully compatible |
 | 108 | packages/coding-agent/src/core/model-config.ts | #261 | audited | Fully compatible |
@@ -180,5 +180,6 @@ The next phase is to audit `packages/tui/src/components/*.ts` files.
 | proper-lockfile | auth-storage | Medium | ✅ Resolved (Bun → in-process lock) |
 | proper-lockfile | trust-manager | Medium | ✅ Resolved (Bun → in-process lock) |
 | Worker threads | image-resize | Medium | ✅ Resolved (URL entrypoint cross-runtime) |
+| fs.watchFile firing | footer-data-provider | Medium | ✅ Resolved (mtime/size dedup) |
 | Proxy agents | bedrock-converse-stream | Medium | ✅ Resolved (Bun → native HTTP) |
 | Unix sockets | client/unix.ts | Medium | ✅ Resolved (Bun implements node:net) |

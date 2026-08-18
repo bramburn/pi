@@ -263,3 +263,39 @@ describe("FooterDataProvider reftable branch detection", () => {
 		}
 	});
 });
+
+describe("FooterDataProvider watchFile dedup (Bun migration, issue #255)", () => {
+	let originalCwd: string;
+	let tempDir: string;
+
+	beforeEach(() => {
+		originalCwd = process.cwd();
+		tempDir = mkdtempSync(join(tmpdir(), "footer-bun-"));
+	});
+
+	afterEach(() => {
+		process.chdir(originalCwd);
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("persists a head signature after a successful refresh so spurious watchFile fires dedup", async () => {
+		const repoDir = createPlainRepo(tempDir);
+		process.chdir(repoDir);
+
+		const provider = new FooterDataProvider(repoDir);
+		try {
+			const providerWithInternals = provider as unknown as {
+				refreshGitBranchAsync(): Promise<void>;
+				lastHeadSignature: { mtimeMs: number; size: number } | null;
+			};
+			await providerWithInternals.refreshGitBranchAsync();
+			const sig = providerWithInternals.lastHeadSignature;
+			expect(sig).not.toBeNull();
+			if (!sig) throw new Error("expected lastHeadSignature to be set");
+			expect(typeof sig.mtimeMs).toBe("number");
+			expect(typeof sig.size).toBe("number");
+		} finally {
+			provider.dispose();
+		}
+	});
+});
