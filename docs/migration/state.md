@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 20:00:00
+2026-08-19 21:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/agent-session.ts (#344)
+packages/coding-agent/src/utils/changelog.ts (#345)
 
 ## Statistics
 
@@ -112,6 +112,7 @@ packages/coding-agent/src/core/agent-session.ts (#344)
 | 91 | packages/coding-agent/src/client/transcript.ts | #228 | audited | Fully compatible |
 | 92 | packages/coding-agent/src/core/agent-session-runtime.ts | #230 | audited | Fully compatible |
 | 93 | packages/coding-agent/src/core/agent-session-services.ts | #232 | audited | Fully compatible |
+| 93.5 | packages/coding-agent/src/core/agent-session-services.ts | #232 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 94 | packages/coding-agent/src/core/auth-guidance.ts | #234 | audited | Fully compatible |
 | 95 | packages/coding-agent/src/core/bash-executor.ts | #236 | audited | Fully compatible |
 | 96 | packages/coding-agent/src/core/cache-stats.ts | #238 | audited | Fully compatible |
@@ -175,6 +176,7 @@ packages/coding-agent/src/core/agent-session.ts (#344)
 | 144 | packages/coding-agent/src/utils/child-process.ts | #336 | audited | Fully compatible |
 | 145 | packages/coding-agent/src/utils/ansi.ts | #339 | audited | Fully compatible |
 | 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
+| 147 | packages/coding-agent/src/utils/changelog.ts | #345 | audited | Fully compatible |
 | 146.5 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 147.5 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (close-out of audit track; research comment by Loop #6; deep-read of exportToJsonl block confirms only the audited surfaces) |
