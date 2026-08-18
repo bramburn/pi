@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 20:00:00
+2026-08-20 21:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/image-process.ts (#381)
+packages/coding-agent/src/core/runtime-credentials.ts (#383)
 
 ## Statistics
 
-- Files audited: 159
+- Files audited: 160
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -213,6 +213,7 @@ packages/coding-agent/src/utils/image-process.ts (#381)
 | 157 | packages/coding-agent/src/utils/paths.ts | #375 | audited | Fully compatible |
 | 158 | packages/coding-agent/src/utils/photon.ts | #378 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/utils/image-process.ts | #381 | audited | Fully compatible |
+| 160 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible |
 | 159 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible |
 | 159.5 | packages/coding-agent/src/core/project-trust.ts | #380 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers await Promise microtask scheduling) |
 | 158 | packages/coding-agent/src/core/models-store.ts | #377 | audited | Fully compatible |
