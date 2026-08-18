@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-19 07:00:00
+2026-08-19 08:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/experimental/command-options.ts (#324)
+packages/coding-agent/src/cli/experimental/cli.ts (#326)
 
 ## Statistics
 
-- Files audited: 140
+- Files audited: 141
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -162,6 +162,7 @@ packages/coding-agent/src/cli/experimental/command-options.ts (#324)
 | 138 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible |
 | 139 | packages/coding-agent/src/cli/experimental/command.ts | #322 | audited | Fully compatible |
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
+| 141 | packages/coding-agent/src/cli/experimental/cli.ts | #326 | audited | Fully compatible |
 | 138.5 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 132.5 | packages/coding-agent/src/cli/list-models.ts | #218 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 131.5 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
