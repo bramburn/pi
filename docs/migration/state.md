@@ -150,6 +150,7 @@ packages/coding-agent/src/migrations.ts (#302)
 | 127 | packages/coding-agent/src/core/event-bus.ts | #298 | audited | Fully compatible |
 | 128 | packages/coding-agent/src/core/diagnostics.ts | #300 | audited | Fully compatible (type-declaration module) |
 | 129 | packages/coding-agent/src/migrations.ts | #302 | audited | Fully compatible |
+| 129.5 | packages/coding-agent/src/core/cache-stats.ts | #238 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 128.5 | packages/coding-agent/src/core/compaction/branch-summarization.ts | #240 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 128.6 | packages/coding-agent/src/core/defaults.ts | #242 | audited | Fully compatible (close-out of audit track) |
 | 127.5 | packages/coding-agent/src/core/bash-executor.ts | #236 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
