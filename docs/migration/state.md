@@ -158,6 +158,7 @@ packages/coding-agent/src/cli/experimental/command-options.ts (#324)
 | 135 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible |
 | 136 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible |
 | 137 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible |
+| 137.5 | packages/coding-agent/src/cli/credential-print.ts | #318 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 138 | packages/coding-agent/src/cli/config-selector.ts | #320 | audited | Fully compatible |
 | 139 | packages/coding-agent/src/cli/experimental/command.ts | #322 | audited | Fully compatible |
 | 140 | packages/coding-agent/src/cli/experimental/command-options.ts | #324 | audited | Fully compatible |
