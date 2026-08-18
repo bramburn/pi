@@ -152,6 +152,7 @@ packages/coding-agent/src/cli/initial-message.ts (#306)
 | 129 | packages/coding-agent/src/migrations.ts | #302 | audited | Fully compatible |
 | 130 | packages/coding-agent/src/core/auth-guidance.ts | #304 | audited | Fully compatible |
 | 131 | packages/coding-agent/src/cli/initial-message.ts | #306 | audited | Fully compatible |
+| 131.5 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 130.5 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 130.6 | packages/coding-agent/src/cli/session-picker.ts | #222 | audited | Fully compatible (close-out of audit track) |
 | 129.5 | packages/coding-agent/src/core/cache-stats.ts | #238 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
