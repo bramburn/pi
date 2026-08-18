@@ -155,6 +155,7 @@ packages/coding-agent/src/cli/experimental/commands/client.ts (#330)
 | 132 | packages/coding-agent/src/client/transcript.ts | #308 | audited | Fully compatible |
 | 133 | packages/coding-agent/src/cli/file-processor.ts | #311 | audited | Fully compatible |
 | 134 | packages/coding-agent/src/cli/args.ts | #312 | audited | Fully compatible |
+| 134.5 | packages/coding-agent/src/cli/args.ts | #312 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 135 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible |
 | 135.5 | packages/coding-agent/src/cli/auth-check.ts | #314 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 136 | packages/coding-agent/src/cli/auth-command.ts | #316 | audited | Fully compatible |
