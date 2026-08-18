@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-18 22:00:00
+2026-08-18 23:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli/initial-message.ts (#306)
+packages/coding-agent/src/client/transcript.ts (#308)
 
 ## Statistics
 
-- Files audited: 131
+- Files audited: 132
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -152,6 +152,7 @@ packages/coding-agent/src/cli/initial-message.ts (#306)
 | 129 | packages/coding-agent/src/migrations.ts | #302 | audited | Fully compatible |
 | 130 | packages/coding-agent/src/core/auth-guidance.ts | #304 | audited | Fully compatible |
 | 131 | packages/coding-agent/src/cli/initial-message.ts | #306 | audited | Fully compatible |
+| 132 | packages/coding-agent/src/client/transcript.ts | #308 | audited | Fully compatible |
 | 131.5 | packages/coding-agent/src/client/remote-session.ts | #226 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 130.5 | packages/coding-agent/src/cli/project-trust.ts | #220 | audited | Fully compatible (close-out of audit track; research comment by Loop #3) |
 | 130.6 | packages/coding-agent/src/cli/session-picker.ts | #222 | audited | Fully compatible (close-out of audit track) |
