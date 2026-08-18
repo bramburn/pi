@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-20 00:00:00
+2026-08-20 01:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/compaction/index.ts (#350)
+packages/coding-agent/src/utils/clipboard.ts (#351)
 
 ## Statistics
 
@@ -101,6 +101,7 @@ packages/coding-agent/src/core/compaction/index.ts (#350)
 | 80 | packages/coding-agent/src/cli/config-selector.ts | #206 | audited | Fully compatible |
 | 81 | packages/coding-agent/src/cli/credential-print.ts | #208 | audited | Fully compatible |
 | 82 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible |
+| 82.5 | packages/coding-agent/src/cli/experimental/command-options.ts | #210 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 83 | packages/coding-agent/src/cli/experimental/transport-address.ts | #212 | audited | Fully compatible |
 | 84 | packages/coding-agent/src/cli/file-processor.ts | #214 | audited | Fully compatible |
 | 84.5 | packages/coding-agent/src/cli/file-processor.ts | #214 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers chalk v5 ANSI parity + stderr-flush order) |
@@ -181,6 +182,7 @@ packages/coding-agent/src/core/compaction/index.ts (#350)
 | 146 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible |
 | 147 | packages/coding-agent/src/utils/changelog.ts | #345 | audited | Fully compatible |
 | 148 | packages/coding-agent/src/utils/clipboard-image.ts | #348 | audited | Fully compatible |
+| 149 | packages/coding-agent/src/utils/clipboard.ts | #351 | audited | Fully compatible |
 | 146.5 | packages/coding-agent/src/utils/abort.ts | #342 | audited | Fully compatible (close-out of audit track; research comment by Loop #6) |
 | 147 | packages/coding-agent/src/core/agent-session.ts | #344 | audited | Fully compatible (surface-level audit; 3,344-line file, node:fs + node:path + process.cwd only) |
 | 148 | packages/coding-agent/src/core/compaction/compaction.ts | #347 | audited | Fully compatible (surface-level audit; 969-line pure-TS file, no node:* or process.* imports) |
