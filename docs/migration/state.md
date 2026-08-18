@@ -218,6 +218,7 @@ packages/coding-agent/src/core/session-cwd.ts (#389)
 | 160 | packages/coding-agent/src/utils/image-convert.ts | #384 | audited | Fully compatible |
 | 161 | packages/coding-agent/src/utils/fs-watch.ts | #387 | audited | Fully compatible |
 | 162 | packages/coding-agent/src/core/session-cwd.ts | #389 | audited | Fully compatible |
+| 162.5 | packages/coding-agent/src/core/session-cwd.ts | #389 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers existsSync + throw new Error subclass parity) |
 | 161 | packages/coding-agent/src/core/sdk.ts | #386 | audited | Fully compatible |
 | 161.5 | packages/coding-agent/src/core/sdk.ts | #386 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers setDefaultStreamFn top-level side-effect + module-initialization order) |
 | 160 | packages/coding-agent/src/core/runtime-credentials.ts | #383 | audited | Fully compatible |
