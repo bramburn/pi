@@ -271,6 +271,8 @@ packages/agent/src/harness/tools/index.ts (#500)
 | 207.5 | packages/agent/src/harness/tools/image.ts | #497 | audited | Fully compatible (close-out of audit track; pure Uint8Array binary parsing, no imports, no node:* imports) |
 | 208 | packages/agent/src/harness/tools/index.ts | #500 | audited | Fully compatible |
 | 209 | packages/agent/src/harness/tools/path-utils.ts | #500 | audited | Fully compatible |
+| 209.5 | packages/agent/src/harness/tools/path-utils.ts | #500 | audited | Fully compatible (close-out of audit track; ExecutionEnv abstraction, String.normalize, standard regex, no node:* imports) |
+| 208.5 | packages/agent/src/harness/tools/index.ts | #500 | audited | Fully compatible (close-out of audit track; import type barrel, zero runtime code) |
 | 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |
 | 204.5 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible (close-out of audit track; ExecutionEnv abstraction, TextEncoder/TextDecoder, standard async, no node:* imports) |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
