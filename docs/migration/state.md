@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 12:00:00
+2026-08-21 13:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/sleep.ts (#406)
+packages/coding-agent/src/utils/syntax-highlight.ts (#408)
 
 ## Statistics
 
@@ -225,6 +225,7 @@ packages/coding-agent/src/utils/sleep.ts (#406)
 | 166 | packages/coding-agent/src/utils/open-browser.ts | #400 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/utils/shell.ts | #403 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/utils/sleep.ts | #406 | audited | Fully compatible |
+| 169 | packages/coding-agent/src/utils/syntax-highlight.ts | #408 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
