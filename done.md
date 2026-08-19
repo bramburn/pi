@@ -265,6 +265,7 @@
 | 244 | 2026-08-21 | `packages/coding-agent/src/config.ts` | [#427](https://github.com/bramburn/pi/issues/427) | 0 | 1 | 1 |
 | 245 | 2026-08-21 | `packages/coding-agent/src/cli.ts` | [#429](https://github.com/bramburn/pi/issues/429) | 0 | 1 | 1 |
 | 246 | 2026-08-22 | `packages/agent/src/harness/agent-harness.ts` | [#431](https://github.com/bramburn/pi/issues/431) | 0 | 1 | 1 |
+| 247 | 2026-08-22 | `packages/agent/src/harness/compaction/branch-summarization.ts` | [#433](https://github.com/bramburn/pi/issues/433) | 0 | 1 | 1 |
 
 ## Notes
 
