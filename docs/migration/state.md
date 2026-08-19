@@ -258,6 +258,7 @@ packages/agent/src/harness/session/jsonl/types.ts (#469)
 | 197 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible |
 | 197.5 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible (close-out of audit track; abstracted fs interface, structuredClone, atomic rename, promise-tail serialisation, no node:* imports) |
 | 198 | packages/agent/src/harness/session/jsonl/types.ts | #469 | audited | Fully compatible |
+| 198.5 | packages/agent/src/harness/session/jsonl/types.ts | #469 | audited | Fully compatible (close-out of audit track; pure type-only file, zero runtime code) |
 | 196.5 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible (close-out of audit track; abstracted fs interface, uuidv7, in-memory Set race prevention, no node:* imports) |
 | 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible |
