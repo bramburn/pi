@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-23 02:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/tools/image.ts (#497)
+packages/agent/src/harness/tools/index.ts (#500)
 
 ## Statistics
 
@@ -269,6 +269,8 @@ packages/agent/src/harness/tools/image.ts (#497)
 | 206.5 | packages/agent/src/harness/tools/file-mutation-queue.ts | #494 | audited | Fully compatible (close-out of audit track; pure TS WeakMap/Map Promise serialisation queue, ExecutionEnv abstraction, no node:* imports) |
 | 207 | packages/agent/src/harness/tools/image.ts | #497 | audited | Fully compatible |
 | 207.5 | packages/agent/src/harness/tools/image.ts | #497 | audited | Fully compatible (close-out of audit track; pure Uint8Array binary parsing, no imports, no node:* imports) |
+| 208 | packages/agent/src/harness/tools/index.ts | #500 | audited | Fully compatible |
+| 209 | packages/agent/src/harness/tools/path-utils.ts | #500 | audited | Fully compatible |
 | 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |
 | 204.5 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible (close-out of audit track; ExecutionEnv abstraction, TextEncoder/TextDecoder, standard async, no node:* imports) |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
