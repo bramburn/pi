@@ -265,6 +265,7 @@ packages/agent/src/harness/tools/file-mutation-queue.ts (#494)
 | 205 | packages/agent/src/harness/tools/edit-diff.ts | #491 | audited | Fully compatible |
 | 205.5 | packages/agent/src/harness/tools/edit-diff.ts | #491 | audited | Fully compatible (close-out of audit track; diff npm package is pure JS, works on Bun; standard string operations) |
 | 206 | packages/agent/src/harness/tools/file-mutation-queue.ts | #494 | audited | Fully compatible |
+| 206.5 | packages/agent/src/harness/tools/file-mutation-queue.ts | #494 | audited | Fully compatible (close-out of audit track; pure TS WeakMap/Map Promise serialisation queue, ExecutionEnv abstraction, no node:* imports) |
 | 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |
 | 204.5 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible (close-out of audit track; ExecutionEnv abstraction, TextEncoder/TextDecoder, standard async, no node:* imports) |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
