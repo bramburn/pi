@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-22 19:00:00
+2026-08-22 20:00:00
 
 ## Last Reviewed File
-packages/agent/src/agent.ts (#475)
+packages/agent/src/harness/env/nodejs.ts (#477)
 
 ## Statistics
 
@@ -256,6 +256,7 @@ packages/agent/src/agent.ts (#475)
 | 197 | packages/agent/src/types.ts | #468 | audited | Fully compatible |
 | 198 | packages/agent/src/agent-loop.ts | #471 | audited | Fully compatible |
 | 199 | packages/agent/src/stream-fn.ts | #474 | audited | Fully compatible |
+| 200 | packages/agent/src/harness/env/nodejs.ts | #477 | audited | Fully compatible |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
 | 200.5 | packages/agent/src/agent.ts | #475 | audited | Fully compatible (close-out of audit track; pure TS Agent class, AbortController, Set, standard async, no node:* imports) |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
