@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 23:00:00
+2026-08-22 00:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/cli.ts (#428)
+packages/agent/src/harness/agent-harness.ts (#430)
 
 ## Statistics
 
@@ -236,6 +236,7 @@ packages/coding-agent/src/cli.ts (#428)
 | 177 | packages/coding-agent/src/bun/restore-sandbox-env.ts | #424 | audited | Fully compatible |
 | 178 | packages/coding-agent/src/config.ts | #426 | audited | Already Bun-aware |
 | 179 | packages/coding-agent/src/cli.ts | #428 | audited | Fully compatible |
+| 180 | packages/agent/src/harness/agent-harness.ts | #430 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
