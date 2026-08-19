@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-22 03:00:00
+2026-08-22 04:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/compaction/utils.ts (#436)
+packages/agent/src/harness/events.ts (#438)
 
 ## Statistics
 
@@ -240,6 +240,7 @@ packages/agent/src/harness/compaction/utils.ts (#436)
 | 181 | packages/agent/src/harness/compaction/branch-summarization.ts | #432 | audited | Fully compatible |
 | 182 | packages/agent/src/harness/compaction/compaction.ts | #434 | audited | Fully compatible |
 | 183 | packages/agent/src/harness/compaction/utils.ts | #436 | audited | Fully compatible |
+| 184 | packages/agent/src/harness/events.ts | #438 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
