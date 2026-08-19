@@ -1,0 +1,17 @@
+{
+  "loopScope": "project",
+  "taskScope": "session",
+  "debug": true,
+  "autoClear": "on_list_complete",
+  "sortOrder": "id",
+  "hiddenAt": "bottom",
+  "maxVisible": 10,
+  "showAll": false,
+  "taskThreshold": 5,
+  "urgentFlushThresholds": {
+    "defer": 86400000,
+    "normal": 300000,
+    "urgent": 30000,
+    "critical": 0
+  }
+}
