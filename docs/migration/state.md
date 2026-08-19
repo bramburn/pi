@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-22 23:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/tools/bash.ts (#486)
+packages/agent/src/harness/utils/shell-output.ts (#489)
 
 ## Statistics
 
@@ -260,6 +260,7 @@ packages/agent/src/harness/tools/bash.ts (#486)
 | 201 | packages/agent/src/harness/skills.ts | #480 | audited | Fully compatible |
 | 202 | packages/agent/src/harness/system-prompt.ts | #483 | audited | Fully compatible |
 | 203 | packages/agent/src/harness/tools/bash.ts | #486 | audited | Fully compatible |
+| 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
 | 201 | packages/agent/src/harness/session/testing/conformance.ts | #479 | audited | Fully compatible |
 | 201.5 | packages/agent/src/harness/session/testing/conformance.ts | #479 | audited | Fully compatible (close-out of audit track; node:assert/strict available via Bun Node.js compat layer; await using ESM resource management supported) |
