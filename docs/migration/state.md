@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 08:00:00
+2026-08-21 09:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/open-browser.ts (#400)
+packages/coding-agent/src/core/skills.ts (#402)
 
 ## Statistics
 
-- Files audited: 164
+- Files audited: 165
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -223,6 +223,7 @@ packages/coding-agent/src/utils/open-browser.ts (#400)
 | 165 | packages/coding-agent/src/utils/management-http.ts | #398 | audited | Fully compatible |
 | 165.5 | packages/coding-agent/src/utils/management-http.ts | #398 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers fetch + AbortController.abort() + AbortSignal.timeout parity) |
 | 166 | packages/coding-agent/src/utils/open-browser.ts | #400 | audited | Fully compatible |
+| 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 164.5 | packages/coding-agent/src/utils/json.ts | #396 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers String.prototype.replace with regex alternation + identity function-form replacer) |
 | 164 | packages/coding-agent/src/core/settings-manager.ts | #395 | audited | proper-lockfile use (migration pattern: in-process lock on Bun) |
 | 164.5 | packages/coding-agent/src/core/settings-manager.ts | #395 | audited | proper-lockfile use RESOLVED (in-process lock on Bun; matches the row 9 RESOLVED pattern from auth-storage and trust-manager) |
