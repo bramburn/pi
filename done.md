@@ -261,6 +261,7 @@
 | 240 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/external-editor.ts` | [#419](https://github.com/bramburn/pi/issues/419) | 1 | 1 | 1 |
 | 241 | 2026-08-21 | `packages/coding-agent/src/bun/cli.ts` | [#421](https://github.com/bramburn/pi/issues/421) | 0 | 1 | 1 |
 | 242 | 2026-08-21 | `packages/coding-agent/src/client/index.ts` | [#423](https://github.com/bramburn/pi/issues/423) | 0 | 1 | 1 |
+| 243 | 2026-08-21 | `packages/coding-agent/src/bun/restore-sandbox-env.ts` | [#425](https://github.com/bramburn/pi/issues/425) | 0 | 1 | 1 |
 
 ## Notes
 
