@@ -3,14 +3,14 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 10:00:00
+2026-08-21 11:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/shell.ts (#403)
+packages/coding-agent/src/core/slash-commands.ts (#405)
 
 ## Statistics
 
-- Files audited: 165
+- Files audited: 166
 - Blockers found: 0
 - Compatibility issues: 1
 - Issues created: 18
@@ -224,6 +224,7 @@ packages/coding-agent/src/utils/shell.ts (#403)
 | 165.5 | packages/coding-agent/src/utils/management-http.ts | #398 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers fetch + AbortController.abort() + AbortSignal.timeout parity) |
 | 166 | packages/coding-agent/src/utils/open-browser.ts | #400 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/utils/shell.ts | #403 | audited | Fully compatible |
+| 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
 | 164.5 | packages/coding-agent/src/utils/json.ts | #396 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers String.prototype.replace with regex alternation + identity function-form replacer) |
