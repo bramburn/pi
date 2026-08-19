@@ -285,6 +285,7 @@
 | 264 | 2026-08-22 | `packages/agent/src/agent-loop.ts` | [#473](https://github.com/bramburn/pi/issues/473) | 0 | 1 | 1 |
 | 265 | 2026-08-22 | `packages/agent/src/stream-fn.ts` | [#476](https://github.com/bramburn/pi/issues/476) | 0 | 1 | 1 |
 | 266 | 2026-08-22 | `packages/agent/src/harness/env/nodejs.ts` | [#478](https://github.com/bramburn/pi/issues/478) | 0 | 1 | 1 |
+| 267 | 2026-08-22 | `packages/agent/src/harness/skills.ts` | [#482](https://github.com/bramburn/pi/issues/482) | 0 | 1 | 1 |
 
 ## Notes
 
