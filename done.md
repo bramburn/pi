@@ -287,6 +287,7 @@
 | 266 | 2026-08-22 | `packages/agent/src/harness/env/nodejs.ts` | [#478](https://github.com/bramburn/pi/issues/478) | 0 | 1 | 1 |
 | 267 | 2026-08-22 | `packages/agent/src/harness/skills.ts` | [#482](https://github.com/bramburn/pi/issues/482) | 0 | 1 | 1 |
 | 268 | 2026-08-22 | `packages/agent/src/harness/system-prompt.ts` | [#485](https://github.com/bramburn/pi/issues/485) | 0 | 1 | 1 |
+| 269 | 2026-08-22 | `packages/agent/src/harness/tools/bash.ts` | [#487](https://github.com/bramburn/pi/issues/487) | 1 | 1 | 1 |
 
 ## Notes
 
