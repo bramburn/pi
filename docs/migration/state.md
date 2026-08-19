@@ -257,6 +257,7 @@ packages/agent/src/agent.ts (#475)
 | 198 | packages/agent/src/agent-loop.ts | #471 | audited | Fully compatible |
 | 199 | packages/agent/src/stream-fn.ts | #474 | audited | Fully compatible |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
+| 200.5 | packages/agent/src/agent.ts | #475 | audited | Fully compatible (close-out of audit track; pure TS Agent class, AbortController, Set, standard async, no node:* imports) |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
 | 197 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible |
 | 197.5 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible (close-out of audit track; abstracted fs interface, structuredClone, atomic rename, promise-tail serialisation, no node:* imports) |
