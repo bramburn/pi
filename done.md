@@ -258,6 +258,7 @@
 | 237 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/thinking-selector.ts` | [#413](https://github.com/bramburn/pi/issues/413) | 0 | 1 | 1 |
 | 238 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/model-catalog-refresh.ts` | [#414](https://github.com/bramburn/pi/issues/414) | 1 | 1 | 1 |
 | 239 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/model-search.ts` | [#417](https://github.com/bramburn/pi/issues/417) | 0 | 1 | 1 |
+| 240 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/external-editor.ts` | [#419](https://github.com/bramburn/pi/issues/419) | 1 | 1 | 1 |
 
 ## Notes
 
