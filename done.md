@@ -273,6 +273,7 @@
 | 252 | 2026-08-22 | `packages/agent/src/harness/prompt-templates.ts` | [#443](https://github.com/bramburn/pi/issues/443) | 0 | 1 | 1 |
 | 253 | 2026-08-22 | `packages/agent/src/harness/reducer.ts` | [#445](https://github.com/bramburn/pi/issues/445) | 0 | 1 | 1 |
 | 254 | 2026-08-22 | `packages/agent/src/harness/result.ts` | [#447](https://github.com/bramburn/pi/issues/447) | 0 | 1 | 1 |
+| 255 | 2026-08-22 | `packages/agent/src/harness/session/index.ts` | [#449](https://github.com/bramburn/pi/issues/449) | 0 | 1 | 1 |
 
 ## Notes
 
