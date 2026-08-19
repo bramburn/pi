@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-22 13:00:00
+2026-08-22 14:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/session/session.ts (#456)
+packages/agent/src/harness/session/jsonl/codec.ts (#458)
 
 ## Statistics
 
@@ -250,6 +250,7 @@ packages/agent/src/harness/session/session.ts (#456)
 | 191 | packages/agent/src/harness/session/jsonl.ts | #452 | audited | Fully compatible |
 | 192 | packages/agent/src/harness/session/memory.ts | #454 | audited | Fully compatible |
 | 193 | packages/agent/src/harness/session/session.ts | #456 | audited | Fully compatible |
+| 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
