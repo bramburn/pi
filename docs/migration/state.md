@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-23 00:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/tools/edit.ts (#490)
+packages/agent/src/harness/tools/edit-diff.ts (#491)
 
 ## Statistics
 
@@ -261,6 +261,7 @@ packages/agent/src/harness/tools/edit.ts (#490)
 | 202 | packages/agent/src/harness/system-prompt.ts | #483 | audited | Fully compatible |
 | 203 | packages/agent/src/harness/tools/bash.ts | #486 | audited | Fully compatible |
 | 204 | packages/agent/src/harness/tools/edit.ts | #490 | audited | Fully compatible |
+| 205 | packages/agent/src/harness/tools/edit-diff.ts | #491 | audited | Fully compatible |
 | 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |
 | 204.5 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible (close-out of audit track; ExecutionEnv abstraction, TextEncoder/TextDecoder, standard async, no node:* imports) |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
