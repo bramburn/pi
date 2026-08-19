@@ -251,6 +251,7 @@
 | 230 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/session-selector.ts` | [#397](https://github.com/bramburn/pi/issues/397) | 1 | 1 | 1 |
 | 231 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/session-selector-search.ts` | [#399](https://github.com/bramburn/pi/issues/399) | 0 | 1 | 1 |
 | 232 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/settings-selector.ts` | [#401](https://github.com/bramburn/pi/issues/401) | 0 | 1 | 1 |
+| 233 | 2026-08-21 | `packages/coding-agent/src/modes/interactive/components/show-images-selector.ts` | [#404](https://github.com/bramburn/pi/issues/404) | 0 | 1 | 1 |
 
 ## Notes
 

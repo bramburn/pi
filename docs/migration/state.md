@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 09:00:00
+2026-08-21 10:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/core/skills.ts (#402)
+packages/coding-agent/src/utils/shell.ts (#403)
 
 ## Statistics
 
@@ -223,6 +223,7 @@ packages/coding-agent/src/core/skills.ts (#402)
 | 165 | packages/coding-agent/src/utils/management-http.ts | #398 | audited | Fully compatible |
 | 165.5 | packages/coding-agent/src/utils/management-http.ts | #398 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers fetch + AbortController.abort() + AbortSignal.timeout parity) |
 | 166 | packages/coding-agent/src/utils/open-browser.ts | #400 | audited | Fully compatible |
+| 167 | packages/coding-agent/src/utils/shell.ts | #403 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
 | 164.5 | packages/coding-agent/src/utils/json.ts | #396 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers String.prototype.replace with regex alternation + identity function-form replacer) |
