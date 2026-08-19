@@ -495,6 +495,29 @@ export const VERSION: string = pkg.version || "0.0.0";
 // can show that the user is running the fork rather than the upstream build.
 export const FORK_NAME: string = "bramburn";
 
+export type RuntimeVersions = { bun?: string; deno?: string; node?: string };
+
+/**
+ * Detect the current JavaScript runtime name.
+ * Checks for Bun first, then Deno, then falls back to Node's release name.
+ */
+export function getRuntimeName(
+	versions: RuntimeVersions = process.versions,
+	releaseName: string = process.release.name,
+): string {
+	if (versions.bun) return "bun";
+	if (versions.deno) return "deno";
+	return releaseName || "unknown";
+}
+
+/**
+ * Format a Pi version string with the current runtime.
+ * e.g., "0.84.2 (bun)" or "0.84.2 (node)"
+ */
+export function formatVersionWithRuntime(version: string): string {
+	return `${version} (${getRuntimeName()})`;
+}
+
 // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;

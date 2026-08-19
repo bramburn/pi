@@ -37,6 +37,7 @@ import {
 	ENV_SESSION_DIR,
 	expandTildePath,
 	FORK_NAME,
+	formatVersionWithRuntime,
 	getAgentDir,
 	getPackageDir,
 	VERSION,
@@ -627,7 +628,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("parseArgs");
 
 	if (parsed.version) {
-		console.log(`pi ${VERSION} [${FORK_NAME}]`);
+		console.log(`pi ${formatVersionWithRuntime(VERSION)} [${FORK_NAME}]`);
 		process.exit(0);
 	}
 
