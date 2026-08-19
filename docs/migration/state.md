@@ -6,7 +6,7 @@ Detailed state tracking for the Bun migration effort.
 2026-08-22 14:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/session/jsonl/codec.ts (#458)
+packages/agent/src/harness/session/jsonl/errors.ts (#459)
 
 ## Statistics
 
@@ -251,6 +251,7 @@ packages/agent/src/harness/session/jsonl/codec.ts (#458)
 | 192 | packages/agent/src/harness/session/memory.ts | #454 | audited | Fully compatible |
 | 193 | packages/agent/src/harness/session/session.ts | #456 | audited | Fully compatible |
 | 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
+| 195 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible |
 | 194.5 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible (close-out of audit track; pure TS JSONL codec, zero runtime API surface, no node:* imports or native modules) |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
