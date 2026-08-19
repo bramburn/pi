@@ -261,6 +261,7 @@ packages/agent/src/agent-loop.ts (#471)
 | 198 | packages/agent/src/harness/session/jsonl/types.ts | #469 | audited | Fully compatible |
 | 198.5 | packages/agent/src/harness/session/jsonl/types.ts | #469 | audited | Fully compatible (close-out of audit track; pure type-only file, zero runtime code) |
 | 199 | packages/agent/src/agent-loop.ts | #471 | audited | Fully compatible |
+| 199.5 | packages/agent/src/agent-loop.ts | #471 | audited | Fully compatible (close-out of audit track; pure TS agent loop, EventStream, AbortSignal, standard async, no node:* imports) |
 | 196.5 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible (close-out of audit track; abstracted fs interface, uuidv7, in-memory Set race prevention, no node:* imports) |
 | 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible |
