@@ -270,6 +270,7 @@
 | 249 | 2026-08-22 | `packages/agent/src/harness/compaction/utils.ts` | [#437](https://github.com/bramburn/pi/issues/437) | 0 | 1 | 1 |
 | 250 | 2026-08-22 | `packages/agent/src/harness/events.ts` | [#439](https://github.com/bramburn/pi/issues/439) | 0 | 1 | 1 |
 | 251 | 2026-08-22 | `packages/agent/src/harness/messages.ts` | [#441](https://github.com/bramburn/pi/issues/441) | 0 | 1 | 1 |
+| 252 | 2026-08-22 | `packages/agent/src/harness/prompt-templates.ts` | [#443](https://github.com/bramburn/pi/issues/443) | 0 | 1 | 1 |
 
 ## Notes
 

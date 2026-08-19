@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-22 05:00:00
+2026-08-22 06:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/messages.ts (#440)
+packages/agent/src/harness/prompt-templates.ts (#442)
 
 ## Statistics
 
@@ -242,6 +242,7 @@ packages/agent/src/harness/messages.ts (#440)
 | 183 | packages/agent/src/harness/compaction/utils.ts | #436 | audited | Fully compatible |
 | 184 | packages/agent/src/harness/events.ts | #438 | audited | Fully compatible |
 | 185 | packages/agent/src/harness/messages.ts | #440 | audited | Fully compatible |
+| 186 | packages/agent/src/harness/prompt-templates.ts | #442 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
