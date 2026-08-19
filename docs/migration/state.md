@@ -265,6 +265,7 @@ packages/agent/src/harness/session/testing/types.ts (#484)
 | 202 | packages/agent/src/harness/session/testing/index.ts | #481 | audited | Fully compatible |
 | 202.5 | packages/agent/src/harness/session/testing/index.ts | #481 | audited | Fully compatible (close-out of audit track; pure barrel re-export, import type only) |
 | 203 | packages/agent/src/harness/session/testing/types.ts | #484 | audited | Fully compatible |
+| 203.5 | packages/agent/src/harness/session/testing/types.ts | #484 | audited | Fully compatible (close-out of audit track; pure type-only file, import type only) |
 | 200.5 | packages/agent/src/agent.ts | #475 | audited | Fully compatible (close-out of audit track; pure TS Agent class, AbortController, Set, standard async, no node:* imports) |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
 | 197 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible |
