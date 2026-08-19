@@ -259,6 +259,7 @@ packages/agent/src/harness/session/testing/conformance.ts (#479)
 | 200 | packages/agent/src/harness/env/nodejs.ts | #477 | audited | Fully compatible |
 | 200 | packages/agent/src/agent.ts | #475 | audited | Fully compatible |
 | 201 | packages/agent/src/harness/session/testing/conformance.ts | #479 | audited | Fully compatible |
+| 201.5 | packages/agent/src/harness/session/testing/conformance.ts | #479 | audited | Fully compatible (close-out of audit track; node:assert/strict available via Bun Node.js compat layer; await using ESM resource management supported) |
 | 200.5 | packages/agent/src/agent.ts | #475 | audited | Fully compatible (close-out of audit track; pure TS Agent class, AbortController, Set, standard async, no node:* imports) |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
 | 197 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible |
