@@ -281,6 +281,7 @@
 | 260 | 2026-08-22 | `packages/agent/src/harness/session/state.ts` | [#461](https://github.com/bramburn/pi/issues/461) | 0 | 1 | 1 |
 | 261 | 2026-08-22 | `packages/agent/src/harness/session/types.ts` | [#464](https://github.com/bramburn/pi/issues/464) | 0 | 1 | 1 |
 | 262 | 2026-08-22 | `packages/agent/src/harness/telemetry.ts` | [#467](https://github.com/bramburn/pi/issues/467) | 0 | 1 | 1 |
+| 263 | 2026-08-22 | `packages/agent/src/types.ts` | [#470](https://github.com/bramburn/pi/issues/470) | 0 | 1 | 1 |
 
 ## Notes
 
