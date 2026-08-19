@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-21 16:00:00
+2026-08-21 17:00:00
 
 ## Last Reviewed File
-packages/coding-agent/src/utils/version-check.ts (#415)
+packages/coding-agent/src/utils/windows-self-update.ts (#416)
 
 ## Statistics
 
@@ -229,6 +229,7 @@ packages/coding-agent/src/utils/version-check.ts (#415)
 | 170 | packages/coding-agent/src/utils/tool-result-images.ts | #410 | audited | Fully compatible |
 | 171 | packages/coding-agent/src/utils/tools-manager.ts | #412 | audited | Fully compatible |
 | 172 | packages/coding-agent/src/utils/version-check.ts | #415 | audited | Fully compatible |
+| 173 | packages/coding-agent/src/utils/windows-self-update.ts | #416 | audited | Fully compatible |
 | 168 | packages/coding-agent/src/core/slash-commands.ts | #405 | audited | Fully compatible |
 | 167 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible |
 | 167.5 | packages/coding-agent/src/core/skills.ts | #402 | audited | Fully compatible (close-out of audit track; research comment by Loop #6 covers npm ignore package + IgnoreMatcher.ignores parity) |
