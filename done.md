@@ -278,6 +278,7 @@
 | 257 | 2026-08-22 | `packages/agent/src/harness/session/jsonl.ts` | [#453](https://github.com/bramburn/pi/issues/453) | 0 | 1 | 1 |
 | 258 | 2026-08-22 | `packages/agent/src/harness/session/memory.ts` | [#455](https://github.com/bramburn/pi/issues/455) | 0 | 1 | 1 |
 | 259 | 2026-08-22 | `packages/agent/src/harness/session/session.ts` | [#457](https://github.com/bramburn/pi/issues/457) | 0 | 1 | 1 |
+| 260 | 2026-08-22 | `packages/agent/src/harness/session/state.ts` | [#461](https://github.com/bramburn/pi/issues/461) | 0 | 1 | 1 |
 
 ## Notes
 
