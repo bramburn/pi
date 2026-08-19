@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-23 00:00:00
+2026-08-23 01:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/tools/edit-diff.ts (#491)
+packages/agent/src/harness/tools/edit-diff.ts (#493)
 
 ## Statistics
 
@@ -261,6 +261,7 @@ packages/agent/src/harness/tools/edit-diff.ts (#491)
 | 202 | packages/agent/src/harness/system-prompt.ts | #483 | audited | Fully compatible |
 | 203 | packages/agent/src/harness/tools/bash.ts | #486 | audited | Fully compatible |
 | 204 | packages/agent/src/harness/tools/edit.ts | #490 | audited | Fully compatible |
+| 205 | packages/agent/src/harness/tools/edit-diff.ts | #493 | audited | Fully compatible |
 | 205 | packages/agent/src/harness/tools/edit-diff.ts | #491 | audited | Fully compatible |
 | 205.5 | packages/agent/src/harness/tools/edit-diff.ts | #491 | audited | Fully compatible (close-out of audit track; diff npm package is pure JS, works on Bun; standard string operations) |
 | 204 | packages/agent/src/harness/utils/shell-output.ts | #489 | audited | Fully compatible |

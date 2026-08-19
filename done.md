@@ -289,6 +289,7 @@
 | 268 | 2026-08-22 | `packages/agent/src/harness/system-prompt.ts` | [#485](https://github.com/bramburn/pi/issues/485) | 0 | 1 | 1 |
 | 269 | 2026-08-22 | `packages/agent/src/harness/tools/bash.ts` | [#487](https://github.com/bramburn/pi/issues/487) | 1 | 1 | 1 |
 | 270 | 2026-08-23 | `packages/agent/src/harness/tools/edit.ts` | [#492](https://github.com/bramburn/pi/issues/492) | 0 | 1 | 1 |
+| 271 | 2026-08-23 | `packages/agent/src/harness/tools/edit-diff.ts` | [#495](https://github.com/bramburn/pi/issues/495) | 0 | 1 | 1 |
 
 ## Notes
 
