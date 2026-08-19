@@ -3,10 +3,10 @@
 Detailed state tracking for the Bun migration effort.
 
 ## Last Updated
-2026-08-22 15:00:00
+2026-08-22 16:00:00
 
 ## Last Reviewed File
-packages/agent/src/harness/session/jsonl/storage.ts (#465)
+packages/agent/src/harness/telemetry.ts (#466)
 
 ## Statistics
 
@@ -252,8 +252,10 @@ packages/agent/src/harness/session/jsonl/storage.ts (#465)
 | 193 | packages/agent/src/harness/session/session.ts | #456 | audited | Fully compatible |
 | 194 | packages/agent/src/harness/session/state.ts | #460 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/types.ts | #462 | audited | Fully compatible |
+| 196 | packages/agent/src/harness/telemetry.ts | #466 | audited | Fully compatible |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
 | 197 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible |
+| 197.5 | packages/agent/src/harness/session/jsonl/storage.ts | #465 | audited | Fully compatible (close-out of audit track; abstracted fs interface, structuredClone, atomic rename, promise-tail serialisation, no node:* imports) |
 | 196.5 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible (close-out of audit track; abstracted fs interface, uuidv7, in-memory Set race prevention, no node:* imports) |
 | 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible |
