@@ -253,6 +253,7 @@ packages/agent/src/harness/session/jsonl/repo.ts (#463)
 | 194 | packages/agent/src/harness/session/state.ts | #460 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/types.ts | #462 | audited | Fully compatible |
 | 196 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible |
+| 196.5 | packages/agent/src/harness/session/jsonl/repo.ts | #463 | audited | Fully compatible (close-out of audit track; abstracted fs interface, uuidv7, in-memory Set race prevention, no node:* imports) |
 | 194 | packages/agent/src/harness/session/jsonl/codec.ts | #458 | audited | Fully compatible |
 | 195 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible |
 | 195.5 | packages/agent/src/harness/session/jsonl/errors.ts | #459 | audited | Fully compatible (close-out of audit track; pure TS error utilities, Error cause option, no runtime API surface) |
