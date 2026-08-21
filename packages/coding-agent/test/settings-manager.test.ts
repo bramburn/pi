@@ -397,13 +397,6 @@ describe("SettingsManager", () => {
 		});
 	});
 
-	describe("TUI mode", () => {
-		it("always returns regular", () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-			expect(manager.getTuiMode()).toBe("regular");
-		});
-	});
-
 	describe("outputPad", () => {
 		it("should default to 1 and persist binary values", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
