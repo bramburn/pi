@@ -1,5 +1,9 @@
 # Development Rules
 
+## Planned Features
+
+- **Per-session default model** — allow each `.pi-session` file to carry its own preferred `defaultModel`, overriding the global setting. Currently `defaultModel` is global-only (`setDefaultModelAndProvider` writes to `~/.pi/settings.json`). Plan: `docs/per-session-model-plan.md`.
+
 ## Conversational Style
 
 - Keep answers short and concise

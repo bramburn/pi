@@ -26,6 +26,9 @@ markers after each sync.
 - Fork-local fixes preserved across upstream merges:
   - **Per-sibling `toolResult` emission** in parallel tool batches (no
     orphans when one sibling stalls). `packages/agent/src/agent-loop.ts`.
+  - **Per-session default model** (planned, not yet implemented) — allow each
+    `.pi-session` file to carry its own `defaultModel`, overriding the global
+    setting. See `docs/per-session-model-plan.md` for the architecture plan.
   - **Scrollback-jump guard** while streaming with the viewport scrolled up.
     The pre-v0.84 fix targeted the old class-based `TuiMainScreen`; upstream
     v0.84.2 rewrote the TUI in a functional architecture that gates

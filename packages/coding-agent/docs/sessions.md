@@ -19,6 +19,22 @@ Use `/session` in interactive mode to see the current session file, session ID, 
 
 For the JSONL file format and SessionManager API, see [Session Format](session-format.md).
 
+## Per-Session Default Model
+
+Each session file can carry a preferred model declaration. When a session is created or resumed, pi uses that model as the default instead of the global `defaultModel` setting.
+
+**Current behavior:** `defaultModel` is global — stored in `~/.pi/settings.json` and written by the model selector. Switching models in the TUI changes the default for all future sessions.
+
+**Planned behavior:** The session file's header will carry an optional `model` field:
+
+```json
+{"type":"session","version":3,"id":"uuid","timestamp":"...","cwd":"/path/to/project","model":{"provider":"anthropic","modelId":"claude-opus-4-8"}}
+```
+
+Model selection in the TUI will write to the session file header instead of global settings. CLI `--model` / `--models` flags still take precedence.
+
+See [Per-Session Model Plan](/docs/per-session-model-plan.md) for the full architecture analysis and implementation plan.
+
 ## Session Commands
 
 | Command | Description |
