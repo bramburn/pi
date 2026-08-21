@@ -14,6 +14,10 @@
 
 - Fixed Z.AI Coding Plan defaults referencing the removed GLM-5.1 model ([#8096](https://github.com/earendil-works/pi/issues/8096)).
 
+### Removed
+
+- Removed TUI fullscreen mode: the `--tui-mode fullscreen` CLI flag, `tuiMode`, `fullscreenExitOutput`, and `fullscreenScrollbar` settings, fullscreen layout and renderer, and all related documentation.
+
 ## [0.84.2] - 2026-08-14
 
 ### New Features

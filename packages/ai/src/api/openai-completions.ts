@@ -75,8 +75,7 @@ function urlHostMatchesDomain(rawUrl: string, domain: string): boolean {
 		const hostname = new URL(rawUrl).hostname.toLowerCase();
 		const normalizedDomain = domain.toLowerCase();
 		return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
-	}
-	catch {
+	} catch {
 		return false;
 	}
 }
