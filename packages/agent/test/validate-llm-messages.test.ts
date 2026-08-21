@@ -1,9 +1,4 @@
-import {
-	type AssistantMessage,
-	type Message,
-	type ToolResultMessage,
-	type UserMessage,
-} from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { validateLlmMessages } from "../src/agent-loop.ts";
 
@@ -59,11 +54,7 @@ describe("validateLlmMessages", () => {
 	});
 
 	it("passes for valid user-assistant-toolResult sequence", () => {
-		const messages: Message[] = [
-			userMsg("do something"),
-			assistantMsg(["call_1"]),
-			toolResultMsg("call_1"),
-		];
+		const messages: Message[] = [userMsg("do something"), assistantMsg(["call_1"]), toolResultMsg("call_1")];
 		expect(() => validateLlmMessages(messages)).not.toThrow();
 	});
 
@@ -73,11 +64,7 @@ describe("validateLlmMessages", () => {
 	});
 
 	it("passes when last message is toolResult", () => {
-		const messages: Message[] = [
-			userMsg("do it"),
-			assistantMsg(["call_1"]),
-			toolResultMsg("call_1"),
-		];
+		const messages: Message[] = [userMsg("do it"), assistantMsg(["call_1"]), toolResultMsg("call_1")];
 		expect(() => validateLlmMessages(messages)).not.toThrow();
 	});
 
@@ -93,10 +80,7 @@ describe("validateLlmMessages", () => {
 	});
 
 	it("throws when last message is assistant", () => {
-		const messages: Message[] = [
-			userMsg("hello"),
-			assistantMsg([]),
-		];
+		const messages: Message[] = [userMsg("hello"), assistantMsg([])];
 		expect(() => validateLlmMessages(messages)).toThrowError(
 			/Extension produced invalid message sequence.*last message has role "assistant"/s,
 		);

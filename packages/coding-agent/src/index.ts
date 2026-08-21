@@ -252,13 +252,11 @@ export {
 export {
 	type CompactionSettings,
 	type DefaultProjectTrust,
-	type FullscreenExitOutput,
 	type ImageSettings,
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,
 	type SettingsManagerCreateOptions,
-	type TuiMode,
 } from "./core/settings-manager.ts";
 // Skills
 export {

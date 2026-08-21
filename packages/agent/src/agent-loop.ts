@@ -956,11 +956,11 @@ export function validateLlmMessages(messages: Message[]): void {
 			if (toolResult.toolCallId && !assistantToolCallIds.has(toolResult.toolCallId)) {
 				throw new Error(
 					`Extension produced invalid message sequence: ` +
-					`toolResult for tool call "${toolResult.toolCallId}" (tool: ${toolResult.toolName}) ` +
-					`has no matching assistant toolCall. ` +
-					`This is usually caused by an extension's context hook removing or modifying ` +
-					`assistant messages that contained tool calls. ` +
-					`Check your active extensions or disable them with /extensions.`,
+						`toolResult for tool call "${toolResult.toolCallId}" (tool: ${toolResult.toolName}) ` +
+						`has no matching assistant toolCall. ` +
+						`This is usually caused by an extension's context hook removing or modifying ` +
+						`assistant messages that contained tool calls. ` +
+						`Check your active extensions or disable them with /extensions.`,
 				);
 			}
 		}
@@ -971,10 +971,10 @@ export function validateLlmMessages(messages: Message[]): void {
 	if (lastMsg && lastMsg.role === "assistant") {
 		throw new Error(
 			`Extension produced invalid message sequence: ` +
-			`the last message has role "assistant". ` +
-			`LLM providers require the conversation to end with a user or toolResult message. ` +
-			`This is usually caused by an extension's context hook inserting an assistant-typed ` +
-			`message at the end. Check your active extensions or disable them with /extensions.`,
+				`the last message has role "assistant". ` +
+				`LLM providers require the conversation to end with a user or toolResult message. ` +
+				`This is usually caused by an extension's context hook inserting an assistant-typed ` +
+				`message at the end. Check your active extensions or disable them with /extensions.`,
 		);
 	}
 }

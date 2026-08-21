@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the fullscreen TUI mode: the `tui.altScreen.*` default keybindings and the alternate-screen renderer are now unused by pi but remain available for external callers.
+
 ## [0.84.2] - 2026-08-14
 
 ### Added
