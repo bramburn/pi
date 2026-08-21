@@ -12,10 +12,10 @@ const testTheme: SettingsListTheme = {
 
 const items = [
 	{
-		id: "tui-mode",
-		label: "TUI mode",
-		currentValue: "regular",
-		values: ["regular", "fullscreen"],
+		id: "output-pad",
+		label: "Output padding",
+		currentValue: "1",
+		values: ["0", "1", "2"],
 	},
 ];
 
@@ -31,13 +31,13 @@ describe("SettingsList", () => {
 			{ enableSearch: true },
 		);
 
-		for (const character of "TUI mode") list.handleInput(character);
+		for (const character of "Output padding") list.handleInput(character);
 
 		assert.deepStrictEqual(changes, []);
-		assert.match(list.render(80)[0] ?? "", /TUI mode/);
+		assert.match(list.render(80)[0] ?? "", /Output padding/);
 
 		list.handleInput("\r");
-		assert.deepStrictEqual(changes, [{ id: "tui-mode", value: "fullscreen" }]);
+		assert.deepStrictEqual(changes, [{ id: "output-pad", value: "2" }]);
 	});
 
 	it("keeps Space as a change shortcut before a search query is entered", () => {
@@ -53,6 +53,6 @@ describe("SettingsList", () => {
 
 		list.handleInput(" ");
 
-		assert.deepStrictEqual(changes, [{ id: "tui-mode", value: "fullscreen" }]);
+		assert.deepStrictEqual(changes, [{ id: "output-pad", value: "2" }]);
 	});
 });

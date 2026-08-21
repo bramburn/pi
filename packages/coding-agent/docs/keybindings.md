@@ -84,38 +84,6 @@ The dedicated history actions always change history entries, regardless of the c
 | `tui.select.confirm` | `enter` | Confirm selection |
 | `tui.select.cancel` | `escape`, `ctrl+c` | Cancel selection |
 
-### TUI Fullscreen Viewport
-
-These actions apply when interactive mode uses `--tui-mode fullscreen` and target the primary transcript scroll region. Two-finger trackpad and mouse-wheel input scroll the region under the pointer, falling back to the transcript over the fixed editor/status/footer dock. Clicking an OSC 8 hyperlink opens it in the default handler. Dragging with the primary mouse button selects text and copies it to the clipboard; holding at the transcript's top or bottom edge auto-scrolls into off-screen content. See [Terminal setup](terminal-setup.md) for terminal-specific mouse and trackpad behavior.
-
-Fullscreen transcript bindings take precedence over editor bindings. The default unmodified navigation keys therefore control the transcript in fullscreen mode, while their `ctrl` variants continue to control the editor. Outside fullscreen mode, both variants control the editor.
-
-| Key | Default mode | Fullscreen mode |
-|-----|--------------|-----------------|
-| `home`, `end` | Editor | Transcript |
-| `ctrl+home`, `ctrl+end` | Editor | Editor |
-| `pageUp`, `pageDown` | Editor | Transcript |
-| `ctrl+pageUp`, `ctrl+pageDown` | Editor | Editor |
-
-This routing remains configurable through the ordinary action bindings. For example, `"tui.altScreen.pageUp": "ctrl+pageUp"` makes `pageUp` control the editor and `ctrl+pageUp` control the transcript in fullscreen mode. Bind `tui.altScreen.halfPageUp` and `tui.altScreen.halfPageDown` for half-page steps, or bind `tui.altScreen.lineUp` and `tui.altScreen.lineDown` for single-line steps. Setting `"tui.altScreen.pageUp": []` disables that transcript shortcut entirely. User bindings replace the defaults for that action.
-
-| Keybinding id | Default | Description |
-|--------|---------|-------------|
-| `tui.altScreen.pageUp` | `pageUp` | Scroll the transcript up by one page |
-| `tui.altScreen.pageDown` | `pageDown` | Scroll the transcript down by one page |
-| `tui.altScreen.halfPageUp` | *(none)* | Scroll the transcript up by half a page |
-| `tui.altScreen.halfPageDown` | *(none)* | Scroll the transcript down by half a page |
-| `tui.altScreen.lineUp` | *(none)* | Scroll the transcript up by one line |
-| `tui.altScreen.lineDown` | *(none)* | Scroll the transcript down by one line |
-| `tui.altScreen.previousPrompt` | `ctrl+shift+up` | Jump to the previous marked message |
-| `tui.altScreen.nextPrompt` | `ctrl+shift+down` | Jump to the next marked message |
-| `tui.altScreen.search` | `ctrl+shift+f` | Search the rendered transcript |
-| `tui.altScreen.searchNext` | `enter`, `ctrl+g` | Select the next search match while searching |
-| `tui.altScreen.searchPrevious` | `shift+enter`, `ctrl+shift+g` | Select the previous search match while searching |
-| `tui.altScreen.searchClose` | `escape` | Close transcript search |
-| `tui.altScreen.top` | `home` | Scroll to the beginning of the transcript |
-| `tui.altScreen.bottom` | `end` | Scroll to the transcript end and follow new output |
-
 ### Application
 
 | Keybinding id | Default | Description |

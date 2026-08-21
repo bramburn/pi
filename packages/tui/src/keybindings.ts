@@ -156,7 +156,6 @@ export const TUI_KEYBINDINGS = {
 		defaultKeys: ["escape", "ctrl+c"],
 		description: "Cancel selection",
 	},
-	// These intentionally shadow the unmodified editor bindings in fullscreen mode.
 	"tui.altScreen.pageUp": {
 		defaultKeys: "pageUp",
 		description: "Scroll viewport up one page",
