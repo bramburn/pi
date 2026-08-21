@@ -66,10 +66,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.m
 npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
 npm run build         # Refresh model data, then build all packages
 npm run build:offline # Rebuild using existing model data without network access
+npm run build:both    # Build Node.js and Bun targets in one shot (skips whichever runtime is missing)
+npm run build:bun     # Build only the Bun binary (pi.exe on Windows, pi on Unix)
 npm run check         # Lint, format, and type check
 ./test.sh             # Run tests (skips LLM-dependent tests without API keys)
 ./pi-test.sh          # Run pi from sources (can be run from any directory)
 ```
+
+`npm run build:both` is the entry point for verifying the two build paths
+end-to-end. It detects `node` and `bun` on `PATH` and reports each target as
+`BUILT`, `SKIPPED (reason)`, or `FAILED (reason)`. See
+[AGENTS.md § Building the Project (Node.js + Bun)](AGENTS.md#building-the-project-nodejs--bun)
+for the full output format and platform wrappers.
 
 ## Building standalone binaries from release source
 
