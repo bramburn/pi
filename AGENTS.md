@@ -83,6 +83,7 @@ When reviewing PRs:
 When creating issues:
 
 - Add `pkg:*` labels for affected packages (`pkg:agent`, `pkg:ai`, `pkg:coding-agent`, `pkg:tui`); use all that apply.
+- **This repo is a fork of `earendil-works/pi`.** The `earendil-works/pi` repo blocks write access for external contributors — `gh issue create` silently fails with HTTP 403. Always create issues on the fork (`bramburn/pi`) unless the user explicitly confirms the upstream repo is writable.
 
 When posting issue/PR comments:
 
@@ -233,6 +234,237 @@ package on tag push. Two structural rules from the current implementation:
   OTP (see *Known issues* in README.md). Switch to npm trusted publishing
   via OIDC (`id-token: write` + `npm-publish` environment) once the npm
   scope is configured, matching upstream's approach.
+
+## Bun Development
+
+### Building with Bun
+
+Use `bun run --cwd <pkg>` for all builds in this repo. `bun` is the primary dev
+runtime; Node.js is only needed when Bun-specific behavior needs testing.
+
+```powershell
+# Install deps (621 packages, exits 1 due to husky hook — benign)
+bun install
+
+# Build packages in dependency order
+bun run --cwd packages/tui build
+bun run --cwd packages/telemetry build
+bun run --cwd packages/ai build        # needs @smithy/types + shx (see below)
+bun run --cwd packages/agent build
+bun run --cwd packages/session-backends/sqlite-node build
+bun run --cwd packages/protocol build
+bun run --cwd packages/client build
+bun run --cwd packages/server build
+bun run --cwd packages/coding-agent build
+
+# Build the standalone Bun binary (pi.exe)
+bun run --cwd packages/coding-agent build:binary
+# Output: packages/coding-agent/dist/pi.exe
+```
+
+### Known Bun install quirks
+
+- `@smithy/types` and `shx` get moved to `.old_modules-*` during `bun install`'s
+  npm lockfile migration and are not reinstalled. Fix: `bun add @smithy/types shx`.
+- `bun install` warns about nested `overrides` in `package.json` — this is
+  cosmetic; all overrides are respected.
+- `bun install` exits 1 because the `husky` post-install hook fails in a non-git
+  context. The install itself succeeds.
+
+### tsgo via Bun
+
+`tsgo` works via Bun directly:
+
+```bash
+bun run node_modules/@typescript/native-preview/bin/tsgo.js --version
+bun run node_modules/@typescript/native-preview/bin/tsgo.js -p tsconfig.build.json
+```
+
+### Bun package layout
+
+Bun does **not hoist workspace dependencies** to the workspace root
+(`packages/node_modules/`). Each workspace package has its own `node_modules/`.
+The `copy-binary-assets` script uses `node_modules/...` (relative to
+`packages/coding-agent/`) instead of `../../node_modules/...` (npm hoisting path).
+Do not reintroduce the `../../node_modules/` pattern in shell scripts.
+
+### PowerShell BOM trap
+
+PowerShell's `Set-Content` adds a UTF-8 BOM (`EF BB BF`) to files by default.
+`JSON.parse` in Node.js and Bun rejects BOM-prefixed JSON. **Never use
+`Set-Content` or `Out-File` to write JSON files.** Use Node.js instead:
+
+```javascript
+// Correct — no BOM
+const fs = require('fs');
+fs.writeFileSync('package.json', JSON.stringify(data, null, 2), 'utf8');
+```
+
+### Testing the Bun binary
+
+`pi-bun` is available on PATH via `C:\Users\bramburn\.pi\agent\bin\pi-bun.cmd`.
+This wrapper calls `packages/coding-agent/dist/pi.exe` directly:
+
+```powershell
+pi-bun --version     # -> pi 0.84.2-b1 (bun) [bramburn]
+pi-bun --list-models
+pi-bun --help
+```
+
+Rebuild the binary after any source change:
+
+```powershell
+bun run --cwd packages/coding-agent build:binary
+```
+
+### Remaining Bun runtime issues
+
+These are tracked as `migration:bun` issues on `bramburn/pi` and do not block
+the build:
+
+- `#524` — `process.report.getReport()` not implemented (windows-self-update)
+- `#525` — `process.stdin.setRawMode` silently no-ops (migrations)
+- `#526` — `createRequire` + CJS native addon (clipboard-native)
+- `#527` — `createRequire` + CJS WASM package (photon)
+- `#780` — `copy-binary-assets` npm-hoisting path (fixed in source)
+
+## Building the Project (Node.js + Bun)
+
+Use `scripts/build-both.mjs` (or the matching npm script `build:both`) to
+build both the Node.js and Bun targets in one shot. The script detects
+which runtimes are on `PATH`, runs the build for each target that is
+both enabled and supported, and reports per-target status with a reason
+for any skip or failure.
+
+```powershell
+npm run build:both            # build both, skip whichever runtime is missing
+npm run build:bun             # build only the Bun binary
+
+# Same scripts, but via the platform wrapper:
+node scripts/build-both.mjs --node-only
+node scripts/build-both.mjs --clean
+.\scripts\build-both.ps1 --node-only
+bash scripts/build-both.sh --bun-only
+```
+
+### What "built" means here
+
+- **Node target** — runs `npm run build`, which compiles TypeScript via
+  `tsgo` into `dist/` for every workspace package in dependency order.
+  Expected artifact: `packages/coding-agent/dist/cli.js`.
+- **Bun target** — runs `bun run --cwd packages/coding-agent build:binary`,
+  which compiles all packages and then `bun build --compile`s a
+  standalone binary. Expected artifact: `packages/coding-agent/dist/pi`
+  (or `pi.exe` on Windows).
+
+The Node target requires `node` on `PATH`. The Bun target requires
+`bun` on `PATH`. The script itself runs in Node, so the Node target
+is almost always available. The Bun target is skipped (not failed) when
+`bun` is missing.
+
+### Output format
+
+The script prints a runtime-detection block, a per-target build log,
+and a summary. Every target ends in one of three states:
+
+- `BUILT    -> <artifact path>` — build succeeded and the expected
+  artifact exists on disk.
+- `SKIPPED  (<reason>)` — target was not built. Reasons: `--skip-node`,
+  `--skip-bun`, `node not found on PATH`, `bun not found on PATH`.
+- `FAILED   (<reason>)` — build exited non-zero or the expected
+  artifact is missing. The script exits with code `1` in this case.
+
+Example (both runtimes present):
+
+```
+[build-both] Runtime detection
+[build-both] -------------------
+[build-both] node  v22.21.1  C:\nvm4w\nodejs\node.exe
+[build-both] bun   1.3.14    C:\Users\bramburn\.bun\bin\bun.exe
+
+[build-both] Node target (v22.21.1)
+[build-both] ------------------------
+[build-both] $ node-build: npm run build
+... npm run build output elided ...
+
+[build-both] Bun target (1.3.14)
+[build-both] ---------------------
+[build-both] $ bun-build: bun run --cwd packages/coding-agent build:binary
+... bun build output elided ...
+
+[build-both] Summary
+[build-both] ---------
+[build-both] node  v22.21.1  C:\nvm4w\nodejs\node.exe
+[build-both] bun   1.3.14    C:\Users\bramburn\.bun\bin\bun.exe
+[build-both]
+[build-both] Node  (npm run build)  BUILT    -> packages/coding-agent/dist/cli.js
+[build-both] Bun   (build:binary)   BUILT    -> packages/coding-agent/dist/pi.exe
+[build-both] 2 built, 0 skipped, 0 failed.
+```
+
+Example with only Node (no Bun on this machine):
+
+```
+[build-both] Runtime detection
+[build-both] -------------------
+[build-both] node  v22.21.1  C:\nvm4w\nodejs\node.exe
+[build-both] bun   not found on PATH  (install from https://bun.sh to enable the Bun target)
+
+[build-both] Bun target
+[build-both] ------------
+[build-both] Bun   SKIPPED  bun not found on PATH  (install from https://bun.sh to enable the Bun target)
+
+[build-both] Summary
+[build-both] ---------
+[build-both] node  v22.21.1  C:\nvm4w\nodejs\node.exe
+[build-both] bun   not found on PATH
+[build-both]
+[build-both] Node  (npm run build)  BUILT    -> packages/coding-agent/dist/cli.js
+[build-both] Bun   (build:binary)   SKIPPED  (bun not found on PATH)
+[build-both] 1 built, 1 skipped, 0 failed.
+```
+
+### Exit codes
+
+- `0` — all enabled builds succeeded (skipped targets do not fail the script)
+- `1` — one or more enabled builds failed
+- `2` — invalid arguments
+- `3` — script is not located inside a pi-monorepo checkout
+
+### Flags
+
+- `--node-only` — build only the Node target (implies `--skip-bun`)
+- `--bun-only` — build only the Bun target (implies `--skip-node`)
+- `--skip-node` — skip the Node target
+- `--skip-bun` — skip the Bun target
+- `--clean` — run `npm run clean --workspaces` before building
+- `--quiet` — suppress per-step command lines (only the section headers
+  and per-target status are printed)
+- `-h`, `--help` — show the help text
+
+### Platform wrappers
+
+For convenience the orchestrator is also wrapped as:
+
+- `scripts/build-both.sh` — bash on Unix / macOS / Git Bash on Windows
+- `scripts/build-both.ps1` — PowerShell on Windows
+
+Both wrappers `cd` to the repository root and forward every argument
+to `node scripts/build-both.mjs`. They exist so you can invoke
+`.\scripts\build-both.ps1 --node-only` or `bash scripts/build-both.sh --bun-only`
+without remembering the `node` invocation.
+
+### When to use which
+
+- **`npm run build`** (or `npm run build:both -- --node-only`) — Node
+  only; the default for the test pipeline and `npm run check` callers.
+- **`npm run build:bun`** — Bun binary only; quick iteration on the
+  `build:binary` step without re-doing the Node package builds twice.
+- **`npm run build:both`** — both targets; use this when you want to
+  verify the two build paths end-to-end on the same tree.
+- **`node scripts/build-binaries.mjs --all`** (existing) — all six
+  cross-platform binaries via `build-binaries.sh`. Different scope
+  (release artifacts) and not run by `build:both`.
 
 ## User Override
 
