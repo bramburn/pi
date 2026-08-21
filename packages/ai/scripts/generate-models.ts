@@ -1552,6 +1552,31 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
+		// ZAI GLM 4.7 hosted on Cerebras — not in models.dev catalog but referenced
+		// by `defaultModelPerProvider.cerebras` in
+		// `packages/coding-agent/src/core/model-resolver.ts` and the
+		// `built-in defaults exist in generated provider catalogs` test.
+		// Spec mirrors the existing cerebras gpt-oss-120b entry (same provider
+		// and baseUrl, OpenAI-compatible API) with the larger context/maxTokens
+		// of the ZAI-hosted GLM 4.7.
+		models.push({
+			id: "zai-glm-4.7",
+			name: "GLM 4.7",
+			api: "openai-completions",
+			provider: "cerebras",
+			baseUrl: "https://api.cerebras.ai/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 204800,
+			maxTokens: 131072,
+		});
+
 		// Process Cloudflare Workers AI models
 		if (data["cloudflare-workers-ai"]?.models) {
 			for (const [modelId, model] of Object.entries(data["cloudflare-workers-ai"].models)) {
