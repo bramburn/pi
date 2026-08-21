@@ -281,7 +281,7 @@ export function compositeTuiLine(
 	return visibleWidth(result) <= totalWidth ? result : sliceByColumn(result, 0, totalWidth, true);
 }
 
-export type TuiMode = "regular" | "fullscreen";
+export type TuiMode = "regular";
 
 export interface TuiStopOptions {
 	/** Leave renderer output in place for another TUI taking over the same terminal. */
