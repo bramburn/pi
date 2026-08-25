@@ -6,6 +6,7 @@
  */
 
 import { createInterface } from "node:readline";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
@@ -63,7 +64,7 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
-import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
+import { assertValidSessionId, getSessionDefaultFromHeader, SessionManager } from "./core/session-manager.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
@@ -464,6 +465,10 @@ function buildSessionOptions(
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
+	/** Session's preferred model (from session file header), overrides global default. */
+	sessionDefaultModel?: { provider: string; modelId: string },
+	/** Session's preferred thinking level (from session file header). */
+	sessionDefaultThinkingLevel?: ThinkingLevel,
 ): {
 	options: CreateAgentSessionOptions;
 	cliThinkingFromModel: boolean;
@@ -501,17 +506,30 @@ function buildSessionOptions(
 	}
 
 	if (!options.model && scopedModels.length > 0 && !hasExistingSession) {
-		// Check if saved default is in scoped models - use it if so, otherwise first scoped model
+		// Prefer session file default model over global default.
+		// Session default takes priority so each project can have its own preferred model.
+		const sessionPreferred = sessionDefaultModel
+			? modelRuntime.getModel(sessionDefaultModel.provider, sessionDefaultModel.modelId)
+			: undefined;
+		// Fall back to global saved default only when no session default exists.
 		const savedProvider = settingsManager.getDefaultProvider();
 		const savedModelId = settingsManager.getDefaultModel();
-		const savedModel = savedProvider && savedModelId ? modelRuntime.getModel(savedProvider, savedModelId) : undefined;
-		const savedInScope = savedModel ? scopedModels.find((sm) => modelsAreEqual(sm.model, savedModel)) : undefined;
+		const globalPreferred =
+			!sessionPreferred && savedProvider && savedModelId
+				? modelRuntime.getModel(savedProvider, savedModelId)
+				: undefined;
+		const preferred = sessionPreferred ?? globalPreferred;
+		const preferredInScope = preferred ? scopedModels.find((sm) => modelsAreEqual(sm.model, preferred)) : undefined;
 
-		if (savedInScope) {
-			options.model = savedInScope.model;
-			// Use thinking level from scoped model config if explicitly set
-			if (!parsed.thinking && savedInScope.thinkingLevel) {
-				options.thinkingLevel = savedInScope.thinkingLevel;
+		if (preferredInScope) {
+			options.model = preferredInScope.model;
+			// Use thinking level from scoped model config if explicitly set; prefer session default thinking level
+			if (!parsed.thinking) {
+				if (sessionDefaultThinkingLevel) {
+					options.thinkingLevel = sessionDefaultThinkingLevel;
+				} else if (preferredInScope.thinkingLevel) {
+					options.thinkingLevel = preferredInScope.thinkingLevel;
+				}
 			}
 		} else {
 			options.model = scopedModels[0].model;
@@ -804,6 +822,10 @@ export async function main(args: string[], options?: MainOptions) {
 			modelPatterns && modelPatterns.length > 0
 				? await resolveModelScope(modelPatterns, modelRuntime, { signal: AbortSignal.timeout(15_000) })
 				: [];
+
+		// Read per-session model preference from the session file header.
+		const sessionDefault = getSessionDefaultFromHeader(sessionManager.getHeader());
+
 		const {
 			options: sessionOptions,
 			cliThinkingFromModel,
@@ -814,6 +836,8 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager.buildSessionContext().messages.length > 0,
 			modelRuntime,
 			settingsManager,
+			sessionDefault?.model,
+			sessionDefault?.thinkingLevel,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
 

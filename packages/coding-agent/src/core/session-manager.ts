@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
 import {
@@ -36,11 +36,19 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	/** Preferred default model for this session (overrides global defaultModel). */
+	model?: { provider: string; modelId: string };
+	/** Preferred thinking level for this session. */
+	thinkingLevel?: ThinkingLevel;
 }
 
 export interface NewSessionOptions {
 	id?: string;
 	parentSession?: string;
+	/** Preferred default model for the new session. */
+	model?: { provider: string; modelId: string };
+	/** Preferred thinking level for the new session. */
+	thinkingLevel?: ThinkingLevel;
 }
 
 export interface SessionEntryBase {
@@ -357,6 +365,21 @@ function buildSessionPath(
 	}
 	path.reverse();
 	return path;
+}
+
+/**
+ * Extract the session's preferred model and thinking level from the session header.
+ * Returns null if header is null (e.g. in-memory session).
+ * Missing fields in the header return undefined (partial preference is allowed).
+ */
+export function getSessionDefaultFromHeader(
+	header: SessionHeader | null,
+): Pick<SessionHeader, "model" | "thinkingLevel"> | null {
+	if (!header) return null;
+	return {
+		model: header.model,
+		thinkingLevel: header.thinkingLevel,
+	};
 }
 
 function getSessionContextSettings(path: SessionEntry[]): Pick<SessionContext, "thinkingLevel" | "model"> {
@@ -940,6 +963,8 @@ export class SessionManager {
 			timestamp,
 			cwd: this.cwd,
 			parentSession: options?.parentSession,
+			model: options?.model,
+			thinkingLevel: options?.thinkingLevel,
 		};
 		this.fileEntries = [header];
 		this.byId.clear();
@@ -953,6 +978,25 @@ export class SessionManager {
 			this.sessionFile = join(this.getSessionDir(), `${fileTimestamp}_${this.sessionId}.jsonl`);
 		}
 		return this.sessionFile;
+	}
+
+	/**
+	 * Update the session's preferred default model and/or thinking level in the header.
+	 * Writes the change to disk immediately.
+	 */
+	setSessionDefault(options: {
+		model?: { provider: string; modelId: string } | undefined;
+		thinkingLevel?: ThinkingLevel | undefined;
+	}): void {
+		const header = this.fileEntries.find((e) => e.type === "session") as SessionHeader | undefined;
+		if (!header) return;
+		if (options.model !== undefined) {
+			header.model = options.model;
+		}
+		if (options.thinkingLevel !== undefined) {
+			header.thinkingLevel = options.thinkingLevel;
+		}
+		this._rewriteFile();
 	}
 
 	private _buildIndex(): void {
