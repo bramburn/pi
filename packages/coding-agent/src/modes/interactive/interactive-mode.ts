@@ -4627,7 +4627,7 @@ export class InteractiveMode {
 			const selector = new ModelSelectorComponent(
 				this.ui,
 				this.session.model,
-				this.settingsManager,
+				this.sessionManager,
 				this.session.modelRuntime,
 				this.session.scopedModels,
 				async (model) => {
