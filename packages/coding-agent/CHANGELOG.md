@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **DeepSeek Harness toggle** — new opt-in `deepseekHarness` setting that routes the agent's prompt and context through a deepseek-harness-style pipeline. The toggle is off by default and ships only the wiring (TUI `/settings` row, RPC `set_deepseek_harness` command, CLI `--deepseek-harness` flag, extension API `isDeepseekHarnessEnabled()`, and a built-in `MINIMAX_PROFILE` for the `minimax`/`minimax-cn` provider family). The four sub-pipelines (multi-attempt overflow recovery, tool-result re-pruning, replay-prefix summarisation, byte-budgeted AGENTS.md) ship in follow-up plans that wire into the existing `_refreshDeepseekHarnessPipeline()` hook in `AgentSession`. The compaction, tool execution, and agent loop paths are unchanged when the toggle is off. The CHANGELOG entry for each sub-pipeline will be added by that sub-pipeline's PR.
+
 ### Fork-local (bramburn)
 
 - Synced upstream v0.84.2 onto fork main (which already carried v0.84.1 from `sync/upstream-main-2026-08`). Version bumped to `0.84.2-b1`.

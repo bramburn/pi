@@ -14,6 +14,75 @@ export interface CompactionSettings {
 	keepRecentTokens?: number; // default: 20000
 }
 
+/**
+ * Settings for the opt-in "DeepSeek Harness" context-management bundle.
+ *
+ * When `enabled: true`, the agent uses a deepseek-harness-style
+ * pipeline: multi-attempt overflow recovery, tool-result re-pruning,
+ * replay-prefix summarisation (provider cache reuse), and
+ * byte-budgeted workspace instructions. All sub-toggles are optional
+ * and fall back to sensible defaults; the resolved settings layer
+ * user values on top of a built-in `MINIMAX_PROFILE` when the active
+ * provider is `minimax` or `minimax-cn`, then per-model and
+ * provider-wildcard overrides.
+ */
+export interface DeepseekHarnessSettings {
+	/** Master toggle. When true, the deepseek-harness-style pipeline is on. */
+	enabled?: boolean;
+	/** Compact when context > contextWindow * thresholdRatio. Default 0.8. */
+	thresholdRatio?: number;
+	/** Keep the most recent contextWindow * retainRatio verbatim. Default 0.16. */
+	retainRatio?: number;
+	/** Max overflow recovery attempts before surfacing an error. Default 2. */
+	maxOverflowRetries?: number;
+	/** Re-prune tool results every N turns. 0 disables. Default 5. */
+	toolResultPruneEveryN?: number;
+	/** Head chars kept when pruning tool results. Default 4096. */
+	toolResultHeadChars?: number;
+	/** Tail chars kept when pruning tool results. Default 1024. */
+	toolResultTailChars?: number;
+	/** Threshold (chars) at which a tool result is eligible for pruning. Default 8192. */
+	toolResultThresholdChars?: number;
+	/** Send the live conversation as the prefix of the summarisation call. */
+	replayPrefixSummarisation?: boolean;
+	/** Render workspace AGENTS.md inside a byte-budgeted <system-reminder>. */
+	budgetedInstructions?: boolean;
+	/** Per-model overrides keyed by "provider/model" (longest-prefix match). */
+	modelPolicies?: Record<string, Partial<DeepseekHarnessSettings>>;
+	/** Byte budget for the workspace instructions renderer. Default 20 KiB. */
+	maxBytesForInstructions?: number;
+}
+
+export const DEFAULT_DEEPSEEK_HARNESS: Required<Omit<DeepseekHarnessSettings, "modelPolicies">> = {
+	enabled: false,
+	thresholdRatio: 0.8,
+	retainRatio: 0.16,
+	maxOverflowRetries: 2,
+	toolResultPruneEveryN: 5,
+	toolResultHeadChars: 4096,
+	toolResultTailChars: 1024,
+	toolResultThresholdChars: 8192,
+	replayPrefixSummarisation: true,
+	budgetedInstructions: true,
+	maxBytesForInstructions: 20 * 1024,
+};
+
+export interface ResolvedDeepseekHarnessSettings {
+	enabled: boolean;
+	thresholdRatio: number;
+	retainRatio: number;
+	maxOverflowRetries: number;
+	toolResultPruneEveryN: number;
+	toolResultHeadChars: number;
+	toolResultTailChars: number;
+	toolResultThresholdChars: number;
+	replayPrefixSummarisation: boolean;
+	budgetedInstructions: boolean;
+	maxBytesForInstructions: number;
+	profile: "user" | "minimax";
+	modelPolicies: Record<string, Partial<DeepseekHarnessSettings>>;
+}
+
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
@@ -93,6 +162,7 @@ export interface Settings {
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
+	deepseekHarness?: DeepseekHarnessSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
@@ -787,6 +857,61 @@ export class SettingsManager {
 		};
 	}
 
+	/**
+	 * Resolved DeepSeek Harness settings. Layers user values on top of
+	 * the built-in `MINIMAX_PROFILE` when the active model is `minimax`
+	 * or `minimax-cn`, then per-model exact override, then
+	 * provider-wildcard override.
+	 */
+	getDeepseekHarnessSettings(model?: { provider: string; id: string }): ResolvedDeepseekHarnessSettings {
+		const user = this.settings.deepseekHarness ?? {};
+		const base: ResolvedDeepseekHarnessSettings = {
+			...DEFAULT_DEEPSEEK_HARNESS,
+			...user,
+			profile: "user",
+			modelPolicies: user.modelPolicies ?? {},
+		} as ResolvedDeepseekHarnessSettings;
+		if (!model || (model.provider !== "minimax" && model.provider !== "minimax-cn")) {
+			return base;
+		}
+		// Built-in MiniMax profile + user-level overrides. Loaded lazily to
+		// avoid a circular import (deepseek-harness-profile.ts imports the
+		// settings type).
+		const minimax = loadMinimaxProfile();
+		const merged: ResolvedDeepseekHarnessSettings = {
+			...base,
+			...minimax,
+			profile: "minimax",
+		};
+		const exact = user.modelPolicies?.[`${model.provider}/${model.id}`];
+		if (exact) Object.assign(merged, exact);
+		const wild = user.modelPolicies?.[`${model.provider}/*`];
+		if (wild) Object.assign(merged, wild);
+		return merged;
+	}
+
+	getDeepseekHarnessEnabled(): boolean {
+		return this.settings.deepseekHarness?.enabled ?? false;
+	}
+
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		if (!this.globalSettings.deepseekHarness) {
+			this.globalSettings.deepseekHarness = {};
+		}
+		this.globalSettings.deepseekHarness.enabled = enabled;
+		this.markModified("deepseekHarness", "enabled");
+		this.save();
+	}
+
+	setDeepseekHarnessField<K extends keyof DeepseekHarnessSettings>(key: K, value: DeepseekHarnessSettings[K]): void {
+		if (!this.globalSettings.deepseekHarness) {
+			this.globalSettings.deepseekHarness = {};
+		}
+		(this.globalSettings.deepseekHarness as Record<string, unknown>)[key as string] = value as unknown;
+		this.markModified("deepseekHarness", key as string);
+		this.save();
+	}
+
 	getBranchSummarySettings(): { reserveTokens: number; skipPrompt: boolean } {
 		return {
 			reserveTokens: this.settings.branchSummary?.reserveTokens ?? 16384,
@@ -1249,4 +1374,17 @@ export class SettingsManager {
 		this.markModified("warnings");
 		this.save();
 	}
+}
+
+/**
+ * Lazy import of the MiniMax profile to avoid a circular import
+ * (`deepseek-harness-profile.ts` imports the settings types from
+ * this file). The require is cached after the first call.
+ */
+let _minimaxProfileCache: Partial<DeepseekHarnessSettings> | undefined;
+function loadMinimaxProfile(): Partial<DeepseekHarnessSettings> {
+	if (_minimaxProfileCache !== undefined) return _minimaxProfileCache;
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	_minimaxProfileCache = require("./deepseek-harness-profile.ts").MINIMAX_PROFILE as Partial<DeepseekHarnessSettings>;
+	return _minimaxProfileCache;
 }

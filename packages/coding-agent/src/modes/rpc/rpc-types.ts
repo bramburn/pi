@@ -45,6 +45,7 @@ export type RpcCommand =
 	// Compaction
 	| { id?: string; type: "compact"; customInstructions?: string }
 	| { id?: string; type: "set_auto_compaction"; enabled: boolean }
+	| { id?: string; type: "set_deepseek_harness"; enabled: boolean }
 
 	// Retry
 	| { id?: string; type: "set_auto_retry"; enabled: boolean }
@@ -103,6 +104,7 @@ export interface RpcSessionState {
 	sessionId: string;
 	sessionName?: string;
 	autoCompactionEnabled: boolean;
+	deepseekHarnessEnabled: boolean;
 	messageCount: number;
 	pendingMessageCount: number;
 }

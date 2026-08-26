@@ -15,6 +15,8 @@ export interface Args {
 	apiKey?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
+	deepseekHarness?: boolean;
+	deepseekHarnessMaxOverflowRetries?: number;
 	thinking?: ThinkingLevel;
 	continue?: boolean;
 	resume?: boolean;
@@ -96,6 +98,11 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
 			result.appendSystemPrompt = result.appendSystemPrompt ?? [];
 			result.appendSystemPrompt.push(args[++i]);
+		} else if (arg === "--deepseek-harness") {
+			result.deepseekHarness = true;
+		} else if (arg === "--deepseek-harness-max-overflow-retries" && i + 1 < args.length) {
+			const v = parseInt(args[++i], 10);
+			if (Number.isFinite(v) && v >= 0) result.deepseekHarnessMaxOverflowRetries = v;
 		} else if (arg === "--name" || arg === "-n") {
 			if (i + 1 < args.length) {
 				result.name = args[++i];
@@ -250,6 +257,8 @@ ${chalk.bold("Options:")}
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
+  --deepseek-harness              Enable the deepseek-harness-style context pipeline (opt-in)
+  --deepseek-harness-max-overflow-retries <n>  Max compact-and-retry attempts on context overflow (default 2)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session

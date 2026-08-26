@@ -344,6 +344,8 @@ export interface ExtensionContext {
 	compact(options?: CompactOptions): void;
 	/** Get the current effective system prompt. */
 	getSystemPrompt(): string;
+	/** Whether the DeepSeek Harness context pipeline is enabled. */
+	isDeepseekHarnessEnabled(): boolean;
 }
 
 /**
@@ -1657,6 +1659,7 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;
 	getSystemPrompt: () => string;
+	isDeepseekHarnessEnabled: () => boolean;
 	getSystemPromptOptions?: () => BuildSystemPromptOptions;
 }
 

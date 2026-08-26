@@ -307,6 +307,13 @@ export interface SimpleStreamOptions extends StreamOptions {
 	deferred?: boolean | { window?: "15m" | "1h" | "24h" };
 	/** Custom token budgets for thinking levels (token-based providers only) */
 	thinkingBudgets?: ThinkingBudgets;
+	/**
+	 * Override the safety margin used when clamping max_tokens to the
+	 * available context window. Lower values allow longer responses
+	 * (more risk of overflow); higher values leave more headroom.
+	 * Default 4096.
+	 */
+	safetyMargin?: number;
 }
 
 // Generic StreamFunction with typed options.

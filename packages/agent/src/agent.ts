@@ -448,6 +448,11 @@ export class Agent {
 		return {
 			model: this._state.model,
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
+			// The DeepSeek Harness bundle lowers the safety margin from
+			// the default 4096 to 1024 (backed by the multi-attempt
+			// recovery loop). When the bundle is off we leave the
+			// safety margin undefined and the provider defaults apply.
+			safetyMargin: this.deepseekHarnessEnabled ? 1024 : 4096,
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
 			onResponse: this.onResponse,

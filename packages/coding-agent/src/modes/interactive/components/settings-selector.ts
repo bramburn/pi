@@ -51,6 +51,7 @@ const DEFAULT_PROJECT_TRUST_BY_LABEL = new Map(
 
 export interface SettingsConfig {
 	autoCompact: boolean;
+	deepseekHarness: boolean;
 	showImages: boolean;
 	imageWidthCells: number;
 	autoResizeImages: boolean;
@@ -85,6 +86,7 @@ export interface SettingsConfig {
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
+	onDeepseekHarnessChange: (enabled: boolean) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onImageWidthCellsChange: (width: number) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
@@ -483,6 +485,16 @@ export class SettingsSelectorComponent extends Container {
 
 		const items: SettingItem[] = [
 			{
+				id: "deepseek-harness",
+				label: "DeepSeek Harness",
+				description:
+					"Route prompts through the deepseek-harness-style pipeline: " +
+					"overflow retry, tool result re-pruning, replay-prefix " +
+					"summarisation, byte-budgeted AGENTS.md.",
+				currentValue: config.deepseekHarness ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
 				id: "autocompact",
 				label: "Auto-compact",
 				description: "Automatically compact context when it gets too large",
@@ -746,6 +758,9 @@ export class SettingsSelectorComponent extends Container {
 			getSettingsListTheme(),
 			(id, newValue) => {
 				switch (id) {
+					case "deepseek-harness":
+						callbacks.onDeepseekHarnessChange(newValue === "true");
+						break;
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
 						break;
