@@ -1,0 +1,75 @@
+{
+  "nextId": 8,
+  "loops": [
+    {
+      "id": "1",
+      "prompt": "keep a state file in the root of the repo called done.md, review each of the file we have 1 by 1 to critically evaluate the code for race conditions, ux/ui improvement, code review. only work on one evaluation per run. don't do changes, just create gh issues. add relevant labels where needed with detailed information. you can write .md in temp folder of this pc for content for the gh issues. don't write it in the repo.",
+      "trigger": {
+        "type": "cron",
+        "schedule": "*/15 * * * *"
+      },
+      "status": "active",
+      "recurring": true,
+      "createdAt": 1786833745967,
+      "updatedAt": 1787219111491,
+      "expiresAt": 1787438545967,
+      "fireCount": 349
+    },
+    {
+      "id": "3",
+      "prompt": "pick a gh issue that doesn't have label research (for first run create the label), then use perplexity skill to do research and as well as discuss solutions to undertake the work and bolster the problem. you can use natural language prompt and as well as short code snippets to ask perplexity to answer. This is to add further research content to the gh issues to bolster it and help make decision. include decisions, and where needed diagrams in markdown/mermaid into the comments for easy reviewing and picking for implementation. pick only 1 item at a time to work. when done add the label 'research' to it.",
+      "trigger": {
+        "type": "cron",
+        "schedule": "*/15 * * * *"
+      },
+      "status": "active",
+      "recurring": true,
+      "createdAt": 1786872820083,
+      "updatedAt": 1787219111467,
+      "expiresAt": 1787477620083,
+      "fireCount": 305
+    },
+    {
+      "id": "4",
+      "prompt": "Continue the Bun migration analysis loop.       Steps:    1. Read state file at `c:/dev/pi/docs/migration/state.md`    2. Find next un-audited TypeScript file in `c:/dev/pi/packages/*/src/`    3. Analyze for Bun compatibility:       - Node.js-specific APIs (process.binding, node:sqlite, etc.)       - Native dependencies (proper-lockfile, node-gyp, etc.)       - Bun-specific code (process.versions?.bun)    4. Use lsp-mcp skill for inspection: `lsp symbols <file>`, `lsp hover <symbol>`    5. Use perplexity skill for research: `browser perplexity \"<query>\"`    6. Create GH issue on bramburn/pi with `migration:bun` label       - Write to `C:/Users/bramburn/AppData/Local/Temp/bun-migration-*.md`       - Don't modify repo files    7. Update `c:/dev/pi/docs/migration/state.md`    8. If all files audited, stop the loop    Constraints:    - One file per iteration    - No code changes, only issues    - Use labels: `migration:bun`, `blocker:bun`, `compat:bun`",
+      "trigger": {
+        "type": "cron",
+        "schedule": "*/15 * * * *"
+      },
+      "status": "active",
+      "recurring": true,
+      "createdAt": 1786881070098,
+      "updatedAt": 1787219111442,
+      "expiresAt": 1787485870098,
+      "fireCount": 459
+    },
+    {
+      "id": "6",
+      "prompt": "pick a gh issue related to label `migration:bun`, read the issue, if it has no 'research' label then use perplexity skill to do research on implementing it into the code, add the research as a comment, then implement it the issue (if any), then test if it works (build and tests), add tests if needed for the new work, commit, comment on the issue and close. Work only on dev-bun branch. If you're working on a gh issue, mark it as 'in progress' then you know that others should not work on it, nor should you pick a gh issue that is 'in progress'",
+      "trigger": {
+        "type": "cron",
+        "schedule": "*/5 * * * *"
+      },
+      "status": "paused",
+      "recurring": true,
+      "createdAt": 1787045982060,
+      "updatedAt": 1787168543794,
+      "expiresAt": 1787650782060,
+      "fireCount": 712
+    },
+    {
+      "id": "7",
+      "prompt": "review the github issues especially migration:bun and add prioritising labels to them, if they are all prioritised, then look at labels that do not have prioritising labels nor the `migration:bun` labels.",
+      "trigger": {
+        "type": "cron",
+        "schedule": "0 * * * *"
+      },
+      "status": "active",
+      "recurring": true,
+      "createdAt": 1787046222980,
+      "updatedAt": 1787216411310,
+      "expiresAt": 1787651022980,
+      "fireCount": 88
+    }
+  ]
+}

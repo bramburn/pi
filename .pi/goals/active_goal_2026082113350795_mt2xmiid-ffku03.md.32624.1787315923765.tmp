@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "id": "mt2xmiid-ffku03",
+  "objective": "Remove TUI fullscreen mode: strip the `--tui-mode fullscreen` CLI flag, the `tuiMode`/`fullscreenExitOutput`/`fullscreenScrollbar` settings, the fullscreen layout branch in interactive-mode, the fullscreen UI in the settings selector, all associated tests, and all docs references. Document the removal in both CHANGELOGs. Ensure `npm run check` passes and CI is green. Open a PR.",
+  "status": "active",
+  "autoContinue": true,
+  "usage": {
+    "tokensUsed": 639239,
+    "activeSeconds": 197
+  },
+  "sisyphus": false,
+  "createdAt": "2026-08-21T12:35:07.957Z",
+  "updatedAt": "2026-08-21T12:38:43.764Z",
+  "activePath": ".pi/goals/active_goal_2026082113350795_mt2xmiid-ffku03.md",
+  "revision": 41,
+  "taskList": {
+    "tasks": [
+      {
+        "id": "research",
+        "title": "Inventory all fullscreen references across source, tests, and docs",
+        "status": "complete",
+        "completedAt": "2026-08-21T12:35:30.764Z"
+      },
+      {
+        "id": "remove-source",
+        "title": "Remove fullscreen source code: settings-manager, interactive-mode, settings-selector, args",
+        "status": "pending"
+      },
+      {
+        "id": "remove-tui",
+        "title": "Remove fullscreen TUI references: TuiMode type, alt-screen mode, keybindings",
+        "status": "pending"
+      },
+      {
+        "id": "remove-exports",
+        "title": "Remove FullscreenExitOutput and TuiMode exports from index.ts",
+        "status": "pending"
+      },
+      {
+        "id": "remove-tests",
+        "title": "Remove fullscreen test cases from settings-manager, settings-selector, interactive-tui, args, scrollbar-theme, regressions tests",
+        "status": "pending"
+      },
+      {
+        "id": "remove-docs",
+        "title": "Remove fullscreen docs: settings.md, keybindings.md, packages.md, README.md, usage.md, themes.md, terminal-setup.md",
+        "status": "pending"
+      },
+      {
+        "id": "update-changelogs",
+        "title": "Add Removed entries to tui/CHANGELOG.md and coding-agent/CHANGELOG.md",
+        "status": "pending"
+      },
+      {
+        "id": "verify-ci",
+        "title": "Run npm run check, fix any failures, verify CI is green",
+        "status": "pending"
+      },
+      {
+        "id": "pr",
+        "title": "Commit changes and open PR to main",
+        "status": "pending"
+      }
+    ],
+    "blockCompletion": true,
+    "proposedAt": "2026-08-21T12:35:04.952Z"
+  },
+  "currentTaskId": "remove-source"
+}
+
+# Goal Prompt
+
+Remove TUI fullscreen mode: strip the `--tui-mode fullscreen` CLI flag, the `tuiMode`/`fullscreenExitOutput`/`fullscreenScrollbar` settings, the fullscreen layout branch in interactive-mode, the fullscreen UI in the settings selector, all associated tests, and all docs references. Document the removal in both CHANGELOGs. Ensure `npm run check` passes and CI is green. Open a PR.
+
+## Progress
+
+- Status: running
+- Auto-continue: on
+- Sisyphus mode: no
+- Time spent: 3m17s
+- Tokens used: 639K (639,239) tokens
+## Tasks
+
+<!-- blockCompletion: true -->
+- [x] research: Inventory all fullscreen references across source, tests, and docs
+- [ ] remove-source: Remove fullscreen source code: settings-manager, interactive-mode, settings-selector, args
+- [ ] remove-tui: Remove fullscreen TUI references: TuiMode type, alt-screen mode, keybindings
+- [ ] remove-exports: Remove FullscreenExitOutput and TuiMode exports from index.ts
+- [ ] remove-tests: Remove fullscreen test cases from settings-manager, settings-selector, interactive-tui, args, scrollbar-theme, regressions tests
+- [ ] remove-docs: Remove fullscreen docs: settings.md, keybindings.md, packages.md, README.md, usage.md, themes.md, terminal-setup.md
+- [ ] update-changelogs: Add Removed entries to tui/CHANGELOG.md and coding-agent/CHANGELOG.md
+- [ ] verify-ci: Run npm run check, fix any failures, verify CI is green
+- [ ] pr: Commit changes and open PR to main
+

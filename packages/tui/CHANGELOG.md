@@ -2,9 +2,21 @@
 
 ## [Unreleased]
 
-### Removed
+### Fork-local (bramburn)
 
-- Removed the fullscreen TUI mode: the `tui.altScreen.*` default keybindings and the alternate-screen renderer are now unused by pi but remain available for external callers.
+- Removed fullscreen TUI mode
+
+### Fixed
+
+- Fixed main-screen rendering crashing when image-heavy output exceeded V8's string length limit ([#8028](https://github.com/earendil-works/pi/issues/8028)).
+
+## [0.84.3] - 2026-08-24
+
+### Fixed
+
+- Fixed duplicate fullscreen right-click paste in VS Code-based terminals on Windows ([#8186](https://github.com/earendil-works/pi/issues/8186)).
+- Fixed padded text exceeding narrow terminal widths ([#8252](https://github.com/earendil-works/pi/issues/8252)).
+- Fixed wrapped Markdown table links leaking color into borders and neighboring cells, including tables inside blockquotes ([#8335](https://github.com/earendil-works/pi/issues/8335)).
 
 ## [0.84.2] - 2026-08-14
 
