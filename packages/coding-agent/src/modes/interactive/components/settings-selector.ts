@@ -13,7 +13,12 @@ import {
 	Text,
 } from "@earendil-works/pi-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
-import type { DefaultProjectTrust, MermaidRenderingMode, WarningSettings } from "../../../core/settings-manager.ts";
+import type {
+	DefaultProjectTrust,
+	MermaidRenderingMode,
+	NewSessionModelPreference,
+	WarningSettings,
+} from "../../../core/settings-manager.ts";
 import {
 	getSelectListTheme,
 	getSettingsListTheme,
@@ -81,6 +86,24 @@ export interface SettingsConfig {
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
 	warnings: WarningSettings;
+	newSessionModel: NewSessionModelPreference;
+	/** Human label for the configured specific model (mode === "specific"). */
+	newSessionModelSpecificLabel?: string;
+	/** Human label for the last used model, when known. */
+	lastUsedModelLabel?: string;
+}
+
+export interface NewSessionModelSubmenuCallbacks {
+	/** Persist a new preference. */
+	onChange: (preference: NewSessionModelPreference) => void;
+	/**
+	 * Ask the host interactive mode to display the searchable model picker
+	 * so the user can pick the "specific" model. The callback receives the
+	 * selected model (provider + id) or undefined if the user cancelled.
+	 */
+	requestModelSelector: (onPicked: (selection: { provider: string; modelId: string } | undefined) => void) => void;
+	/** Resolve a human-readable label for a provider+modelId pair. */
+	resolveModelLabel: (provider: string, modelId: string) => string;
 }
 
 export interface SettingsCallbacks {
@@ -113,6 +136,15 @@ export interface SettingsCallbacks {
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
+	onNewSessionModelChange: (preference: NewSessionModelPreference) => void;
+	/**
+	 * Bridge to the host interactive mode so the "New session model →
+	 * Use specific model" submenu can open the searchable model picker
+	 * without leaving the settings list. The host is responsible for
+	 * re-opening the settings list (with the updated preference) once
+	 * the picker resolves.
+	 */
+	requestModelSelector: (onPicked: (selection: { provider: string; modelId: string } | undefined) => void) => void;
 	onCancel: () => void;
 }
 
@@ -223,6 +255,148 @@ class SelectSubmenu extends Container {
 	handleInput(data: string): void {
 		this.selectList.handleInput(data);
 	}
+}
+
+/**
+ * Settings submenu for choosing how a brand-new session picks its
+ * initial model. Mirrors the "use global default / use last used / use
+ * specific" trichotomy documented for the newSessionModel preference.
+ *
+ * "Use specific model" defers to the host interactive mode (via
+ * `requestModelSelector`) to open the same searchable model picker as
+ * /model. The host is responsible for re-opening the settings list once
+ * a model is picked.
+ */
+class NewSessionModelSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: NewSessionModelPreference;
+
+	constructor(
+		initial: NewSessionModelPreference,
+		preference: {
+			lastUsedLabel?: string;
+			specificLabel?: string;
+		},
+		callbacks: NewSessionModelSubmenuCallbacks,
+		onCancel: () => void,
+	) {
+		super();
+		this.state = cloneNewSessionModelPreference(initial);
+
+		const lastUsedDesc = preference.lastUsedLabel
+			? `Last used: ${preference.lastUsedLabel}`
+			: "No model has been selected yet; falls back to the global default";
+		const specificDesc = preference.specificLabel
+			? `Currently ${preference.specificLabel}`
+			: "Open the model picker to choose a model";
+
+		// Single-shot activation: each row's `submenu` callback fires
+		// `done` synchronously, which routes through this SettingsList's
+		// onChange (the id dispatch below) and then closes the submenu.
+		// We return a no-op Container because SettingsList assigns the
+		// return value to submenuComponent, but the outer submenu is
+		// closed via onCancel() in the dispatch, so the inner submenu
+		// is never reachable and the placeholder is orphaned.
+		const fireAndForget = (done: (value?: string) => void, value: string): Container => {
+			done(value);
+			return new Container();
+		};
+
+		const items: SettingItem[] = [
+			{
+				id: "mode-global",
+				label: "Use global default",
+				description: "Match the global default model (the same as before this setting existed)",
+				currentValue: this.state.mode === "global" ? "global" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "global"),
+			},
+			{
+				id: "mode-last-used",
+				label: "Use last used model",
+				description: lastUsedDesc,
+				currentValue: this.state.mode === "lastUsed" ? "lastUsed" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "lastUsed"),
+			},
+			{
+				id: "mode-specific",
+				label: "Use specific model",
+				description: specificDesc,
+				currentValue: this.state.mode === "specific" ? "specific" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "specific"),
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			items.length,
+			getSettingsListTheme(),
+			(id, _newValue) => {
+				if (id === "mode-global") {
+					this.state = { mode: "global" };
+					callbacks.onChange(this.state);
+					// HIGH-3: close the submenu so the user sees the
+					// updated main row instead of staring at an
+					// unchanged-looking submenu.
+					onCancel();
+					return;
+				}
+				if (id === "mode-last-used") {
+					this.state = { mode: "lastUsed" };
+					callbacks.onChange(this.state);
+					onCancel();
+					return;
+				}
+				if (id === "mode-specific") {
+					// Defer to the host to open the model picker. The
+					// `requestModelSelector` bridge in SettingsSelectorComponent
+					// closes the submenu (via `done()`) before opening the
+					// picker, so we don't call onCancel() here.
+					callbacks.requestModelSelector((selection) => {
+						if (selection) {
+							this.state = {
+								mode: "specific",
+								specific: { provider: selection.provider, modelId: selection.modelId },
+							};
+							callbacks.onChange(this.state);
+						}
+						// User cancelled: leave the preference untouched.
+					});
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+function cloneNewSessionModelPreference(pref: NewSessionModelPreference): NewSessionModelPreference {
+	return pref.specific
+		? { mode: pref.mode, specific: { provider: pref.specific.provider, modelId: pref.specific.modelId } }
+		: { mode: pref.mode };
+}
+
+function formatNewSessionModelValue(
+	pref: NewSessionModelPreference | undefined,
+	labels: { lastUsedModelLabel?: string; newSessionModelSpecificLabel?: string } = {},
+): string {
+	if (!pref) return "Use global default";
+	if (pref.mode === "global") return "Global default";
+	if (pref.mode === "lastUsed") {
+		return labels.lastUsedModelLabel ? `Last used: ${labels.lastUsedModelLabel}` : "Last used";
+	}
+	if (pref.mode === "specific") {
+		if (pref.specific) {
+			const label = labels.newSessionModelSpecificLabel ?? `${pref.specific.provider}/${pref.specific.modelId}`;
+			return `Specific: ${label}`;
+		}
+		return "Specific (unset)";
+	}
+	return "Use global default";
 }
 
 function themeItems(availableThemes: string[]): SelectItem[] {
@@ -615,6 +789,38 @@ export class SettingsSelectorComponent extends Container {
 						(value) => {
 							callbacks.onThinkingLevelChange(value as ThinkingLevel);
 							done(value);
+						},
+						() => done(),
+					),
+			},
+			{
+				id: "new-session-model",
+				label: "New session model",
+				description: "Which model brand-new sessions start with when no per-session default is set",
+				currentValue: formatNewSessionModelValue(config.newSessionModel, {
+					lastUsedModelLabel: config.lastUsedModelLabel,
+					newSessionModelSpecificLabel: config.newSessionModelSpecificLabel,
+				}),
+				submenu: (_currentValue, done) =>
+					new NewSessionModelSubmenu(
+						config.newSessionModel,
+						{
+							lastUsedLabel: config.lastUsedModelLabel,
+							specificLabel: config.newSessionModelSpecificLabel,
+						},
+						{
+							onChange: (preference) => {
+								callbacks.onNewSessionModelChange(preference);
+							},
+							requestModelSelector: (onPicked) => {
+								// Close the settings submenu, then have the
+								// host drive the model picker. The host is
+								// responsible for re-opening settings after
+								// the picker resolves.
+								done();
+								callbacks.requestModelSelector(onPicked);
+							},
+							resolveModelLabel: (provider, modelId) => `${provider}/${modelId}`,
 						},
 						() => done(),
 					),

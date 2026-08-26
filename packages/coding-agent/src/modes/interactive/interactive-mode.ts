@@ -313,6 +313,22 @@ export interface InteractiveModeOptions {
 	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
+	/**
+	 * Warnings about the new-session-model preference that could not be
+	 * honored (e.g. the configured `lastUsed` or `specific` model is no
+	 * longer in the catalog and the runtime fell back to the global
+	 * default). The runtime builds these as `AgentSessionRuntimeDiagnostic`
+	 * entries in `main.ts`; the orchestrator extracts the relevant
+	 * messages and passes them here so the TUI can surface them via
+	 * `showWarning(...)` after the session is constructed.
+	 *
+	 * Exposed as a flat string array (rather than the full diagnostic
+	 * shape) so the InteractiveMode does not need to import the
+	 * runtime-services type and so the orchestrator can decide which
+	 * diagnostics are user-facing without coupling the TUI to the
+	 * diagnostic taxonomy.
+	 */
+	newSessionModelWarnings?: string[];
 	/** Cwd to trust after reload if it gained a .pi directory during this implicitly trusted session. */
 	autoTrustOnReloadCwd?: string;
 	/** Initial message to send on startup (can include @file content) */
@@ -949,7 +965,14 @@ export class InteractiveMode {
 		});
 
 		// Show startup warnings
-		const { migratedProviders, modelFallbackMessage, initialMessage, initialImages, initialMessages } = this.options;
+		const {
+			migratedProviders,
+			modelFallbackMessage,
+			newSessionModelWarnings,
+			initialMessage,
+			initialImages,
+			initialMessages,
+		} = this.options;
 
 		if (migratedProviders && migratedProviders.length > 0) {
 			this.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
@@ -962,6 +985,16 @@ export class InteractiveMode {
 
 		if (modelFallbackMessage) {
 			this.showWarning(modelFallbackMessage);
+		}
+
+		// Surface the new-session-model fallback warnings in the TUI (these
+		// were previously only printed to stderr via reportDiagnostics in
+		// main.ts). Each warning is shown as a separate showWarning so the
+		// user can read them top-to-bottom in the status area.
+		if (newSessionModelWarnings && newSessionModelWarnings.length > 0) {
+			for (const warning of newSessionModelWarnings) {
+				if (warning) this.showWarning(warning);
+			}
 		}
 
 		void this.maybeWarnAboutAnthropicSubscriptionAuth();
@@ -4283,6 +4316,8 @@ export class InteractiveMode {
 
 	private showSettingsSelector(): void {
 		this.showSelector((done) => {
+			const preference = this.settingsManager.getNewSessionModelPreference() ?? { mode: "global" };
+			const lastUsed = this.settingsManager.getLastUsedModel();
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
@@ -4316,6 +4351,12 @@ export class InteractiveMode {
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
 					warnings: this.settingsManager.getWarnings(),
+					newSessionModel: preference,
+					lastUsedModelLabel: lastUsed ? `${lastUsed.provider}/${lastUsed.modelId}` : undefined,
+					newSessionModelSpecificLabel:
+						preference.mode === "specific" && preference.specific
+							? `${preference.specific.provider}/${preference.specific.modelId}`
+							: undefined,
 				},
 				{
 					onAutoCompactChange: (enabled) => {
@@ -4462,6 +4503,26 @@ export class InteractiveMode {
 					},
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);
+					},
+					onNewSessionModelChange: (newPreference) => {
+						this.settingsManager.setNewSessionModelPreference(newPreference);
+					},
+					requestModelSelector: (onPicked) => {
+						// Submenu calls this after closing itself. Show the
+						// model picker, then re-open settings so the user
+						// sees the new current value.
+						//
+						// Persistence of the picked model is owned by the
+						// submenu: the submenu's `callbacks.onChange` is wired
+						// to `onNewSessionModelChange` (see above), which is
+						// what actually calls `setNewSessionModelPreference`.
+						// The host just routes the picker result back into the
+						// submenu via `onPicked(selection)` and re-opens
+						// settings — no direct preference write here.
+						this.pickModelForNewSessionPreference((selection) => {
+							onPicked(selection);
+							this.showSettingsSelector();
+						});
 					},
 					onCancel: () => {
 						done();
@@ -4623,6 +4684,40 @@ export class InteractiveMode {
 	}
 
 	private showModelSelector(initialSearchInput?: string): void {
+		this.showModelSelectorWithCallback(initialSearchInput, async (model) => {
+			try {
+				await this.session.setModel(model);
+				this.footer.invalidate();
+				this.updateEditorBorderColor();
+				this.showStatus(`Model: ${model.id}`);
+				void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
+				this.checkDaxnutsEasterEgg(model);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+		});
+	}
+
+	/**
+	 * Open the same model picker used by `/model`, but drive it with a
+	 * caller-supplied onPick / onCancel so non-`/model` flows (e.g. the
+	 * "New session model → Use specific model" submenu) can reuse the UI
+	 * without calling `session.setModel`.
+	 *
+	 * @param skipHeaderWrite When true, the picker does NOT write the
+	 *   picked model into the current session header. The settings-driven
+	 *   "Use specific model" flow passes `true` because the user is
+	 *   configuring a global preference for future sessions, not switching
+	 *   the model of the session currently in progress. The `/model` flow
+	 *   leaves this as `false` (default) to preserve the existing
+	 *   header-write behaviour.
+	 */
+	private showModelSelectorWithCallback(
+		initialSearchInput: string | undefined,
+		onPick: (model: Model<any>) => Promise<void>,
+		onCancel?: () => void,
+		skipHeaderWrite?: boolean,
+	): void {
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
 				this.ui,
@@ -4631,27 +4726,48 @@ export class InteractiveMode {
 				this.session.modelRuntime,
 				this.session.scopedModels,
 				async (model) => {
+					done();
 					try {
-						await this.session.setModel(model);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-						done();
-						this.showStatus(`Model: ${model.id}`);
-						void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
-						this.checkDaxnutsEasterEgg(model);
-					} catch (error) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
+						await onPick(model);
+					} finally {
+						this.ui.requestRender();
 					}
 				},
 				() => {
 					done();
+					if (onCancel) onCancel();
 					this.ui.requestRender();
 				},
 				initialSearchInput,
+				skipHeaderWrite,
 			);
 			return { component: selector, focus: selector, dispose: () => selector.dispose() };
 		});
+	}
+
+	/**
+	 * Open the model picker for the "New session model → Use specific
+	 * model" submenu. The callback fires with the picked model or
+	 * undefined on cancel. The settings selector is responsible for
+	 * re-opening itself after this returns.
+	 *
+	 * Passes `skipHeaderWrite: true` so the picker does NOT mutate the
+	 * current session's header — the user is configuring a global
+	 * preference, not switching the current session's model.
+	 */
+	private pickModelForNewSessionPreference(
+		onPicked: (selection: { provider: string; modelId: string } | undefined) => void,
+	): void {
+		this.showModelSelectorWithCallback(
+			undefined,
+			async (model) => {
+				onPicked({ provider: model.provider, modelId: model.id });
+			},
+			() => {
+				onPicked(undefined);
+			},
+			/* skipHeaderWrite */ true,
+		);
 	}
 
 	private showModelsSelector(): void {

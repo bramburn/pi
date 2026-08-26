@@ -67,6 +67,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private readonly refreshAbortController = new AbortController();
 	private refreshTimeout?: ReturnType<typeof setTimeout>;
 	private closed = false;
+	/**
+	 * When true, `handleSelect` does NOT call `sessionManager.setSessionDefault(...)`.
+	 * Used by the settings-driven "Use specific model" picker (which writes
+	 * to the global preference, not the current session header). The `/model`
+	 * flow leaves this as `false` to preserve the existing header-write behaviour.
+	 */
+	private readonly skipHeaderWrite: boolean;
 
 	constructor(
 		tui: TUI,
@@ -77,6 +84,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		onSelect: (model: Model<any>) => void,
 		onCancel: () => void,
 		initialSearchInput?: string,
+		skipHeaderWrite?: boolean,
 	) {
 		super();
 
@@ -88,6 +96,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.scope = scopedModels.length > 0 ? "scoped" : "all";
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
+		this.skipHeaderWrite = skipHeaderWrite ?? false;
 
 		// Add top border
 		this.addChild(new DynamicBorder());
@@ -363,8 +372,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private handleSelect(model: Model<any>): void {
 		this.dispose();
-		// Save as the default for this session (writes to session file header)
-		this.sessionManager.setSessionDefault({ model: { provider: model.provider, modelId: model.id } });
+		// Save as the default for this session (writes to session file header).
+		// Skip when the caller is configuring a global preference (e.g. the
+		// "New session model → Use specific model" submenu): the user is
+		// picking the model for future sessions, not for this one.
+		if (!this.skipHeaderWrite) {
+			this.sessionManager.setSessionDefault({ model: { provider: model.provider, modelId: model.id } });
+		}
 		this.onSelectCallback(model);
 	}
 

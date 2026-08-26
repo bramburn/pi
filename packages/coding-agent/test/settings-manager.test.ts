@@ -546,4 +546,77 @@ describe("SettingsManager", () => {
 			expect(manager.getShellPath()).toBe(homedir());
 		});
 	});
+
+	describe("newSessionModel + lastUsedModel", () => {
+		it("returns undefined for newSessionModel when unset", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getNewSessionModelPreference()).toBeUndefined();
+		});
+
+		it("round-trips mode='lastUsed' across reload", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setNewSessionModelPreference({ mode: "lastUsed" });
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getNewSessionModelPreference()).toEqual({ mode: "lastUsed" });
+		});
+
+		it("round-trips mode='specific' with a chosen model", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setNewSessionModelPreference({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+			});
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getNewSessionModelPreference()).toEqual({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+			});
+		});
+
+		it("clones the preference so callers cannot mutate the stored object", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			const original: {
+				mode: "global" | "lastUsed" | "specific";
+				specific?: { provider: string; modelId: string };
+			} = {
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			};
+			manager.setNewSessionModelPreference(original);
+			original.specific = undefined;
+			original.mode = "global";
+
+			const stored = manager.getNewSessionModelPreference();
+			expect(stored).toEqual({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			});
+		});
+
+		it("returns undefined for lastUsedModel when unset", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getLastUsedModel()).toBeUndefined();
+		});
+
+		it("round-trips lastUsedModel across reload", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setLastUsedModel({ provider: "openai", modelId: "gpt-5" });
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getLastUsedModel()).toEqual({ provider: "openai", modelId: "gpt-5" });
+		});
+
+		it("setDefaultModelAndProvider keeps lastUsedModel untouched when not called", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setLastUsedModel({ provider: "openai", modelId: "gpt-5" });
+			manager.setDefaultModelAndProvider("anthropic", "claude-sonnet-4-5");
+			expect(manager.getLastUsedModel()).toEqual({ provider: "openai", modelId: "gpt-5" });
+			expect(manager.getDefaultModel()).toBe("claude-sonnet-4-5");
+		});
+	});
 });

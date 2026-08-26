@@ -1593,6 +1593,17 @@ export class AgentSession {
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		// `setLastUsedModel` is logically independent of the global default
+		// write above: if a transient error (e.g. lockfile contention) makes
+		// the default write fail, we still want the "most recent selection"
+		// tracking to be updated. The tracking is best-effort — failures
+		// here are not worth surfacing because the user's intended model
+		// change has already taken effect on this session.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: model.provider, modelId: model.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
+		}
 
 		// Re-clamp thinking level for new model's capabilities
 		this.setThinkingLevel(thinkingLevel);
@@ -1635,6 +1646,12 @@ export class AgentSession {
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
 		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
+		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: next.model.provider, modelId: next.model.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
+		}
 
 		// Apply thinking level.
 		// - Explicit scoped model thinking level overrides current session level
@@ -1663,6 +1680,12 @@ export class AgentSession {
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
+		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: nextModel.provider, modelId: nextModel.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
+		}
 
 		// Re-clamp thinking level for new model's capabilities
 		this.setThinkingLevel(thinkingLevel);

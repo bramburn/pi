@@ -58,6 +58,26 @@ export interface MarkdownSettings {
 	mermaid?: MermaidRenderingMode; // default: "streaming"
 }
 
+export type NewSessionModelMode = "global" | "lastUsed" | "specific";
+
+/**
+ * User-configurable preference for which model a brand-new session starts
+ * with when no per-session default is set in the session header.
+ *
+ * - "global": fall back to the global defaultModel (existing behaviour).
+ * - "lastUsed": use the most recently selected model (tracked by
+ *   setLastUsedModel on every model change). Falls back to "global" if
+ *   the user has never picked a model.
+ * - "specific": use a user-chosen model. The `specific` field is
+ *   required for this mode; if the chosen model is no longer available
+ *   the runtime falls back to "global" and surfaces a diagnostic.
+ */
+export interface NewSessionModelPreference {
+	mode: NewSessionModelMode;
+	/** Required when mode === "specific". */
+	specific?: { provider: string; modelId: string };
+}
+
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
@@ -88,6 +108,11 @@ export interface Settings {
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
+	/** New-session model preference; global-only. */
+	newSessionModel?: NewSessionModelPreference;
+	/** Most recently selected model (provider + modelId). Updated on every
+	 * setModel / cycleModel call. Global-only. */
+	lastUsedModel?: { provider: string; modelId: string };
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -698,6 +723,30 @@ export class SettingsManager {
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultProvider");
 		this.markModified("defaultModel");
+		this.save();
+	}
+
+	getNewSessionModelPreference(): NewSessionModelPreference | undefined {
+		return this.settings.newSessionModel;
+	}
+
+	setNewSessionModelPreference(preference: NewSessionModelPreference): void {
+		this.globalSettings.newSessionModel = { ...preference };
+		this.markModified("newSessionModel");
+		this.save();
+	}
+
+	getLastUsedModel(): { provider: string; modelId: string } | undefined {
+		const lastUsed = this.settings.lastUsedModel;
+		if (!lastUsed) return undefined;
+		const { provider, modelId } = lastUsed;
+		if (typeof provider !== "string" || typeof modelId !== "string") return undefined;
+		return { provider, modelId };
+	}
+
+	setLastUsedModel(model: { provider: string; modelId: string }): void {
+		this.globalSettings.lastUsedModel = { provider: model.provider, modelId: model.modelId };
+		this.markModified("lastUsedModel");
 		this.save();
 	}
 

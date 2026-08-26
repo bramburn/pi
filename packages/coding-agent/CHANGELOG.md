@@ -10,8 +10,18 @@
 - Kept the scrollback-jump-on-streaming fix (already in fork main as commit `9176d0044`; upstream v0.84.2 rewrote the TUI in a functional architecture that gates `fullRender(true)` on `firstChanged < prevViewportTop`, which already prevents the same scrollback-jump class — fork fix retained for compatibility with the historical class-based TUI fallback paths that still load the legacy module).
 - Re-applied the `validateLlmMessages()` extension-transform check in `packages/agent/src/agent-loop.ts`; the regression test `validate-llm-messages.test.ts` is restored. (The original `db6d3f17e` commit lived on a feature branch that was never merged to fork main, so the fix is being added here, not preserved.)
 
+### Added
+
+- New sessions now default to the most recently used model instead of the global `defaultModel`. Added a "New session model" entry to `/settings` with three modes: "Use global default", "Use last used model", and "Use specific model" (opens the same searchable picker as `/model`).
+
 ### Fixed
 
+- The "New session model → Use specific model" picker no longer rewrites the current session's header. `ModelSelectorComponent` accepts a new `skipHeaderWrite?: boolean` option; the settings-driven picker passes `true`. The `/model` flow keeps current behaviour.
+- New-session-model fallback warnings (e.g. "Last used model X/Y unavailable") are now surfaced in the TUI instead of only stderr, so users see the warning in-product when the resolved preference points at a model the runtime can no longer find.
+- "New session model" submenu rebuilt as a proper 3-way radio. Enter on any row applies the choice and closes the submenu (previously the active row was impossible to re-open). The right column now shows the resolved model for the "last used" and "specific" modes (e.g. `Last used: anthropic/claude-sonnet-4-5`).
+- `setSessionDefault` for the new-session header now lives inside `buildSessionOptions` (was previously in `main()`), so the function's contract matches the plan and is testable in isolation.
+- When the configured `newSessionModel` preference resolves to an unavailable model, `options.model` is left `undefined` so `findInitialModel`'s first-available-with-auth chain runs (was previously silently falling back to `globalPreferred`, masking the unavailability).
+- `setLastUsedModel` is now wrapped in a best-effort `try`/`catch` after `setDefaultModelAndProvider` in `setModel` and both cycle paths, so a transient save() failure on the global default no longer silently drops the last-used tracking.
 - Fixed Z.AI Coding Plan defaults referencing the removed GLM-5.1 model ([#8096](https://github.com/earendil-works/pi/issues/8096)).
 
 ### Removed

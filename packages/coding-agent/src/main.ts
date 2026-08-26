@@ -7,7 +7,7 @@
 
 import { createInterface } from "node:readline";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
+import { type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
@@ -459,12 +459,13 @@ async function createSessionManager(
 	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });
 }
 
-function buildSessionOptions(
+export function buildSessionOptions(
 	parsed: Args,
 	scopedModels: ScopedModel[],
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
+	sessionManager: SessionManager,
 	/** Session's preferred model (from session file header), overrides global default. */
 	sessionDefaultModel?: { provider: string; modelId: string },
 	/** Session's preferred thinking level (from session file header). */
@@ -505,39 +506,97 @@ function buildSessionOptions(
 		}
 	}
 
-	if (!options.model && scopedModels.length > 0 && !hasExistingSession) {
-		// Prefer session file default model over global default.
-		// Session default takes priority so each project can have its own preferred model.
+	if (!options.model && !hasExistingSession) {
+		// Resolve the preferred model for a new session.
+		// Precedence (highest first):
+		// 1. Per-session default (from session file header) — if the user
+		//    forked or resumed a session that pinned a model, that wins.
+		// 2. newSessionModel preference:
+		//    - "lastUsed": most recently selected model (any session).
+		//    - "specific": user-chosen model from /settings.
+		//    - "global" / unset: leave options.model undefined so the
+		//      createAgentSession → findInitialModel safety net can pick
+		//      a model later (plan §3).
 		const sessionPreferred = sessionDefaultModel
 			? modelRuntime.getModel(sessionDefaultModel.provider, sessionDefaultModel.modelId)
 			: undefined;
-		// Fall back to global saved default only when no session default exists.
-		const savedProvider = settingsManager.getDefaultProvider();
-		const savedModelId = settingsManager.getDefaultModel();
-		const globalPreferred =
-			!sessionPreferred && savedProvider && savedModelId
-				? modelRuntime.getModel(savedProvider, savedModelId)
-				: undefined;
-		const preferred = sessionPreferred ?? globalPreferred;
-		const preferredInScope = preferred ? scopedModels.find((sm) => modelsAreEqual(sm.model, preferred)) : undefined;
+		const newSessionPref = settingsManager.getNewSessionModelPreference();
+		const lastUsed = newSessionPref?.mode === "lastUsed" ? settingsManager.getLastUsedModel() : undefined;
+		const specific = newSessionPref?.mode === "specific" ? newSessionPref.specific : undefined;
+		const lastUsedModel = lastUsed ? modelRuntime.getModel(lastUsed.provider, lastUsed.modelId) : undefined;
+		const specificModel = specific ? modelRuntime.getModel(specific.provider, specific.modelId) : undefined;
 
-		if (preferredInScope) {
-			options.model = preferredInScope.model;
-			// Use thinking level from scoped model config if explicitly set; prefer session default thinking level
-			if (!parsed.thinking) {
-				if (sessionDefaultThinkingLevel) {
-					options.thinkingLevel = sessionDefaultThinkingLevel;
-				} else if (preferredInScope.thinkingLevel) {
-					options.thinkingLevel = preferredInScope.thinkingLevel;
+		let preferred: Model<any> | undefined;
+		if (sessionPreferred) {
+			preferred = sessionPreferred;
+		} else if (lastUsedModel) {
+			preferred = lastUsedModel;
+		} else if (specificModel) {
+			preferred = specificModel;
+		}
+		// When no preference resolves, `preferred` stays undefined so
+		// options.model is left undefined for findInitialModel (plan §3).
+
+		// Surface a soft diagnostic when a configured preference is no
+		// longer available, so the user knows the session needs a fallback.
+		if (newSessionPref?.mode === "lastUsed" && lastUsed && !lastUsedModel && !sessionPreferred) {
+			diagnostics.push({
+				type: "warning",
+				message: `Last used model ${lastUsed.provider}/${lastUsed.modelId} is no longer available; default model selection will be used instead.`,
+			});
+		}
+		if (newSessionPref?.mode === "specific" && specific && !specificModel && !sessionPreferred) {
+			diagnostics.push({
+				type: "warning",
+				message: `Configured new-session model ${specific.provider}/${specific.modelId} is no longer available; default model selection will be used instead.`,
+			});
+		}
+
+		// If we have a scoped model list, intersect with the scope.
+		if (scopedModels.length > 0) {
+			const preferredInScope = preferred
+				? scopedModels.find((sm) => modelsAreEqual(sm.model, preferred))
+				: undefined;
+			if (preferredInScope) {
+				options.model = preferredInScope.model;
+				if (!parsed.thinking) {
+					if (sessionDefaultThinkingLevel) {
+						options.thinkingLevel = sessionDefaultThinkingLevel;
+					} else if (preferredInScope.thinkingLevel) {
+						options.thinkingLevel = preferredInScope.thinkingLevel;
+					}
+				}
+			} else {
+				// Preferred model isn't in the scope. Use the first scoped
+				// model and inherit its thinking level if any.
+				options.model = scopedModels[0].model;
+				if (!parsed.thinking && scopedModels[0].thinkingLevel) {
+					options.thinkingLevel = scopedModels[0].thinkingLevel;
 				}
 			}
-		} else {
-			options.model = scopedModels[0].model;
-			// Use thinking level from first scoped model if explicitly set
-			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
-				options.thinkingLevel = scopedModels[0].thinkingLevel;
+		} else if (preferred) {
+			// No scoped models; honor the preferred model directly so the
+			// preference (lastUsed / specific) wins over the implicit
+			// first-available fallback further down the stack.
+			options.model = preferred;
+			if (!parsed.thinking && sessionDefaultThinkingLevel) {
+				options.thinkingLevel = sessionDefaultThinkingLevel;
 			}
 		}
+	}
+
+	// For a brand-new session, persist the resolved model into the
+	// session header so the model-selector, /tree, and forks all see a
+	// consistent "current" model. Plan §4. Skipped when:
+	//  - we're resuming an existing session (header is already set)
+	//  - the header already pinned a model (don't overwrite)
+	//  - no model was resolved (findInitialModel will pick later)
+	// Covers all resolution paths: --model CLI, lastUsed, specific, and
+	// the scoped-models[0] fallback.
+	if (!hasExistingSession && options.model && !sessionDefaultModel) {
+		sessionManager.setSessionDefault({
+			model: { provider: options.model.provider, modelId: options.model.id },
+		});
 	}
 
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
@@ -825,6 +884,7 @@ export async function main(args: string[], options?: MainOptions) {
 
 		// Read per-session model preference from the session file header.
 		const sessionDefault = getSessionDefaultFromHeader(sessionManager.getHeader());
+		const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
 
 		const {
 			options: sessionOptions,
@@ -833,13 +893,18 @@ export async function main(args: string[], options?: MainOptions) {
 		} = buildSessionOptions(
 			parsed,
 			scopedModels,
-			sessionManager.buildSessionContext().messages.length > 0,
+			hasExistingSession,
 			modelRuntime,
 			settingsManager,
+			sessionManager,
 			sessionDefault?.model,
 			sessionDefault?.thinkingLevel,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
+
+		// Note: the setSessionDefault call for fresh sessions lives inside
+		// buildSessionOptions (plan §4) so the function's contract is
+		// self-contained.
 
 		if (parsed.apiKey) {
 			if (!sessionOptions.model) {
@@ -960,6 +1025,18 @@ export async function main(args: string[], options?: MainOptions) {
 		printTimings();
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
+		// Surface the new-session-model fallback warnings in the TUI, not just stderr.
+		// Without this, a user whose `newSessionModel` preference points at a model the
+		// runtime can no longer find would see a one-line stderr message and then
+		// launch the TUI on the silent fallback with no in-product explanation.
+		const newSessionModelWarnings = runtime.diagnostics
+			.filter(
+				(diagnostic) =>
+					diagnostic.type === "warning" &&
+					(diagnostic.message.includes("is no longer available") ||
+						diagnostic.message.includes("default model selection will be used")),
+			)
+			.map((diagnostic) => diagnostic.message);
 		const interactiveMode = new InteractiveMode(runtime, {
 			migratedProviders,
 			modelFallbackMessage,
@@ -969,6 +1046,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
 			initialThemeSetting: parsed.useTheme,
+			newSessionModelWarnings,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();
