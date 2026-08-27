@@ -314,6 +314,14 @@ export interface SimpleStreamOptions extends StreamOptions {
 	 * Default 4096.
 	 */
 	safetyMargin?: number;
+	/**
+	 * Marks the call as a one-shot maintenance request (DeepSeek Harness
+	 * Phase 3, item 12). Providers use this to namespace the prompt
+	 * cache so the call does not pollute the user-facing cache. The
+	 * Anthropic provider sets `cacheSessionId = undefined`; the OpenAI
+	 * provider sets `prompt_cache_key = "compaction"`.
+	 */
+	purpose?: "compaction" | "session-title";
 }
 
 // Generic StreamFunction with typed options.

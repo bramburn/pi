@@ -272,6 +272,14 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Default: "parallel"
 	 */
 	toolExecution?: ToolExecutionMode;
+	/**
+	 * Whether the DeepSeek Harness context pipeline is enabled.
+	 * When true, the agent loop lowers the safety margin for
+	 * `clampMaxTokensToContext` from 4096 to 1024. The session
+	 * calls `agent.setDeepseekHarnessEnabled(enabled)` when the
+	 * user toggles the setting.
+	 */
+	deepseekHarnessEnabled?: boolean;
 
 	/**
 	 * Called before a tool is executed, after arguments have been validated.

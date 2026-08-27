@@ -127,6 +127,20 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/**
+	 * Optional ratio (0,1] of contextWindow above which compaction
+	 * triggers. Mutually exclusive with `reserveTokens`. When set,
+	 * `shouldCompact` uses `contextWindow * thresholdRatio` as the
+	 * trigger point.
+	 */
+	thresholdRatio?: number;
+	/**
+	 * Optional ratio (0,1] of contextWindow to keep verbatim (the
+	 * priced-tail retention). When set, the caller computes
+	 * `keepRecentTokens = floor(contextWindow * retainRatio)` before
+	 * passing it to `prepareCompaction`.
+	 */
+	retainRatio?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -633,6 +647,7 @@ export async function generateSummaryWithUsage(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	replayPrefix: boolean = false,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
 		Math.floor(0.8 * reserveTokens),
@@ -645,25 +660,49 @@ export async function generateSummaryWithUsage(
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
 
-	// Serialize conversation to text so model doesn't try to continue it
-	// Convert to LLM messages first (handles custom types like bashExecution, custom, etc.)
-	const llmMessages = convertToLlm(currentMessages);
-	const conversationText = serializeConversation(llmMessages);
-
-	// Build the prompt with conversation wrapped in tags
-	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
-	if (previousSummary) {
-		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+	// Build the summarisation request. Two paths:
+	//
+	// 1. **Replay prefix (default with the DeepSeek Harness bundle
+	//    on).** The live conversation is sent as the prefix of the
+	//    request, with the summarisation instruction appended as a new
+	//    user message. The provider's prompt cache hits for the
+	//    prefix portion (Anthropic prompt caching, OpenAI prompt
+	//    cache), so the cost and wall time drop dramatically for
+	//    long sessions.
+	//
+	// 2. **Legacy text-block (default when the bundle is off).** The
+	//    conversation is serialised into a single `<conversation>`
+	//    text block, plus a `<previous-summary>` block. The provider
+	//    sees the conversation as one large string; the entire
+	//    block is a cache-miss. This is the original behaviour and
+	//    is preserved for back-compat.
+	let summarizationMessages: ReturnType<typeof convertToLlm> | { role: "user"; content: { type: "text"; text: string }[]; timestamp: number }[];
+	if (replayPrefix) {
+		const llmMessages = convertToLlm(currentMessages);
+		summarizationMessages = [
+			...llmMessages,
+			{
+				role: "user" as const,
+				content: [{ type: "text" as const, text: previousSummary ? `${previousSummary}\n\n${basePrompt}` : basePrompt }],
+				timestamp: Date.now(),
+			},
+		];
+	} else {
+		const llmMessages = convertToLlm(currentMessages);
+		const conversationText = serializeConversation(llmMessages);
+		let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+		if (previousSummary) {
+			promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+		}
+		promptText += basePrompt;
+		summarizationMessages = [
+			{
+				role: "user" as const,
+				content: [{ type: "text" as const, text: promptText }],
+				timestamp: Date.now(),
+			},
+		];
 	}
-	promptText += basePrompt;
-
-	const summarizationMessages = [
-		{
-			role: "user" as const,
-			content: [{ type: "text" as const, text: promptText }],
-			timestamp: Date.now(),
-		},
-	];
 
 	const completionOptions = createSummarizationOptions(model, maxTokens, apiKey, headers, env, signal, thinkingLevel);
 
@@ -826,6 +865,7 @@ export async function compact(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	replayPrefix: boolean = false,
 ): Promise<CompactionResult> {
 	const {
 		firstKeptEntryId,
@@ -860,6 +900,7 @@ export async function compact(
 				env,
 				retry,
 				callbacks,
+				replayPrefix,
 			);
 			historyText = historyResult.text;
 			historyUsage = historyResult.usage;
@@ -896,6 +937,7 @@ export async function compact(
 			env,
 			retry,
 			callbacks,
+			replayPrefix,
 		);
 		summary = result.text;
 		summaryUsage = result.usage;

@@ -203,6 +203,19 @@ async function runLoop(
 			// Check for tool calls
 			const toolCalls = message.content.filter((c) => c.type === "toolCall");
 
+			// Graceful truncation notice: when the model hits the output
+			// cap on a text-only answer (no tool calls), append a trailing
+			// notice so the user knows the answer was cut off and can
+			// run /compact to continue. The DeepSeek Harness bundle
+			// additionally queues a follow-up compaction via the
+			// session's `_checkCompaction` path on the next turn.
+			if (message.stopReason === "length" && toolCalls.length === 0 && config.deepseekHarnessEnabled) {
+				message.content = [
+					...message.content,
+					{ type: "text", text: "\n\n_[Output truncated at the model limit. Run /compact to continue.]_" },
+				];
+			}
+
 			const toolResults: ToolResultMessage[] = [];
 			hasMoreToolCalls = false;
 			if (toolCalls.length > 0) {

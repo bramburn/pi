@@ -17,16 +17,16 @@ import {
 	InMemorySettingsStorage,
 	SettingsManager,
 } from "../../src/core/settings-manager.ts";
-import { getAgentDir, getConfigDirName } from "../../src/config.ts";
+import { getAgentDir } from "../../src/config.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 async function makeManager(): Promise<{ manager: SettingsManager; cleanup: () => Promise<void> }> {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-dh-test-"));
-	const agentDir = join(cwd, getConfigDirName());
+	const agentDir = getAgentDir();
 	const storage = new InMemorySettingsStorage();
-	const manager = SettingsManager.create(cwd, agentDir, { projectTrusted: true }, storage);
+	const manager = SettingsManager.fromStorage(storage, { projectTrusted: true });
 	return {
 		manager,
 		cleanup: async () => {

@@ -62,6 +62,8 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	pruneSession,
+	DEFAULT_PRUNER_CONFIG,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
@@ -1068,6 +1070,18 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			// The DeepSeek Harness bundle (decision matrix item 7)
+			// renders the AGENTS.md chain inside a byte-budgeted
+			// `<system-reminder>` envelope. Without the bundle, the
+			// legacy inline `<project_context>` path is preserved.
+			budgetedInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
+					.budgetedInstructions
+				: false,
+			maxBytesForInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
+					.maxBytesForInstructions
+				: undefined,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1090,6 +1104,8 @@ export class AgentSession {
 		}
 	}
 
+	private _prunerLastRunTurn: number = 0;
+
 	private async _handlePostAgentRun(): Promise<boolean> {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
@@ -1109,6 +1125,24 @@ export class AgentSession {
 				finalError: msg.errorMessage,
 			});
 			this._retryAttempt = 0;
+		}
+
+		// Tool-result re-pruner (item 3 of the decision matrix). Runs
+		// every N turns when the DeepSeek Harness bundle is enabled.
+		// The pruner walks the agent's current message array and
+		// rewrites over-budget tool results in place. `read` is exempt
+		// (item 10) to break the read → truncate → read loop.
+		const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+		if (dh.enabled && dh.toolResultPruneEveryN > 0) {
+			this._prunerLastRunTurn += 1;
+			if (this._prunerLastRunTurn >= dh.toolResultPruneEveryN) {
+				this._prunerLastRunTurn = 0;
+				const before = this.agent.state.messages.length;
+				const pruned = pruneSession(this.agent.state.messages, DEFAULT_PRUNER_CONFIG);
+				if (pruned.length === before) {
+					this.agent.state.messages = pruned;
+				}
+			}
 		}
 
 		if (await this._checkCompaction(msg)) {
@@ -1818,6 +1852,19 @@ export class AgentSession {
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
 
+			// When the DeepSeek Harness bundle is enabled, layer the
+			// ratio-based policy on top of the legacy absolute-token
+			// settings. The harness module's `shouldCompact` and
+			// `findCutPoint` use whichever values are present.
+			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+			if (dh.enabled) {
+				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+				}
+			}
+
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				// Check why we can't compact
@@ -2150,7 +2197,12 @@ export class AgentSession {
 				usage = extensionCompaction.usage;
 				details = extensionCompaction.details;
 			} else {
-				// Generate compaction result
+				// Generate compaction result. Replay-prefix summarisation
+				// (decision matrix item 12) sends the live conversation
+				// as the request prefix when the DeepSeek Harness bundle
+				// is enabled, reusing the provider's prompt cache for
+				// the conversation bytes.
+				const dhForReplay = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
 				const compactResult = await compact(
 					preparation,
 					requestModel,
@@ -2163,6 +2215,7 @@ export class AgentSession {
 					env,
 					this.settingsManager.getRetrySettings(),
 					this._summarizationRetryCallbacks({ source: "compaction", reason }),
+					dhForReplay.enabled && dhForReplay.replayPrefixSummarisation,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2268,6 +2321,7 @@ export class AgentSession {
 	 */
 	setDeepseekHarnessEnabled(enabled: boolean): void {
 		this._deepseekHarnessEnabled = enabled;
+		this.agent.setDeepseekHarnessEnabled(enabled);
 		this._refreshDeepseekHarnessPipeline();
 	}
 

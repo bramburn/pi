@@ -12,6 +12,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createHarness, type Harness } from "../harness.ts";
 
 describe("regression #001: DeepSeek Harness toggle surface", () => {
@@ -33,7 +34,7 @@ describe("regression #001: DeepSeek Harness toggle surface", () => {
 
 		// A trivial agent run completes without error and the
 		// mirror stays false.
-		harness.setResponses([{ role: "assistant", content: [{ type: "text", text: "ok" }] }]);
+		harness.setResponses([fauxAssistantMessage("ok")]);
 		await harness.session.prompt("hello");
 		expect(harness.session.deepseekHarnessEnabled).toBe(false);
 	});
@@ -47,7 +48,7 @@ describe("regression #001: DeepSeek Harness toggle surface", () => {
 
 		// The agent still runs cleanly. The next turn reads the
 		// new value.
-		harness.setResponses([{ role: "assistant", content: [{ type: "text", text: "ok" }] }]);
+		harness.setResponses([fauxAssistantMessage("ok")]);
 		await harness.session.prompt("hello");
 		expect(harness.session.deepseekHarnessEnabled).toBe(true);
 

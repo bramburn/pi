@@ -255,6 +255,19 @@ export interface AnthropicOptions extends StreamOptions {
 	 */
 	toolChoice?: "auto" | "any" | "none" | { type: "tool"; name: string };
 	/**
+	 * DeepSeek Harness Phase 3 (item 12): mark this as a
+	 * one-shot maintenance call. The provider reads this to
+	 * namespace the prompt cache (set `cacheSessionId` to
+	 * `undefined` so the cache write is not shared with
+	 * subsequent user turns).
+	 */
+	purpose?: "compaction" | "session-title";
+	/**
+	 * DeepSeek Harness Phase 1 (item 5): per-call override of
+	 * the safety margin used when clamping `max_tokens`.
+	 */
+	safetyMargin?: number;
+	/**
 	 * Pre-built Anthropic client instance. When provided, skips internal client
 	 * construction entirely. Use this to inject alternative SDK clients such as
 	 * `AnthropicVertex` that shares the same messaging API.
@@ -546,7 +559,15 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				}
 
 				const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
-				const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
+				// DeepSeek Harness Phase 3 (item 12): compaction calls are
+				// one-shot maintenance calls; don't pollute the user-facing
+				// prompt cache with the summarisation request. Setting
+				// `cacheSessionId` to `undefined` makes the cache write
+				// ephemeral and not shared with subsequent user turns.
+				const cacheSessionId =
+					cacheRetention === "none" || options?.purpose === "compaction"
+						? undefined
+						: options?.sessionId;
 
 				const created = createClient(
 					model,

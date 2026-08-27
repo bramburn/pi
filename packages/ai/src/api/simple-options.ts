@@ -17,7 +17,7 @@ import { estimateContextTokens } from "../utils/estimate.ts";
  * bundle additionally clamps via the live input size; see
  * `clampMaxTokensToContext` callers.
  */
-const CONTEXT_SAFETY_TOKENS = 1024;
+export const CONTEXT_SAFETY_TOKENS = 1024;
 const MIN_MAX_TOKENS = 1;
 
 export function clampMaxTokensToContext(
@@ -37,7 +37,7 @@ export function buildBaseOptions(
 	context: Context,
 	options?: SimpleStreamOptions,
 	apiKey?: string,
-): StreamOptions {
+): SimpleStreamOptions & StreamOptions {
 	const samplingParams =
 		model.samplingParams || options?.samplingParams
 			? { ...model.samplingParams, ...options?.samplingParams }
@@ -52,6 +52,15 @@ export function buildBaseOptions(
 			{ safetyMargin: options?.safetyMargin },
 		),
 		signal: options?.signal,
+		// DeepSeek Harness Phase 3 (item 12): propagate the
+		// `purpose` field so providers can namespace the prompt
+		// cache (Anthropic `cacheSessionId = undefined`,
+		// OpenAI `prompt_cache_key = "compaction"`).
+		purpose: options?.purpose,
+		// DeepSeek Harness Phase 1 (item 5): preserve the
+		// `safetyMargin` for downstream consumers (the runtime
+		// already passes it; the provider reads it again here).
+		safetyMargin: options?.safetyMargin,
 		telemetryContext: options?.telemetryContext,
 		apiKey: apiKey || options?.apiKey,
 		fetch: options?.fetch,

@@ -1914,6 +1914,7 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			isDeepseekHarnessEnabled: () => this.session.deepseekHarnessEnabled,
 		});
 
 		// Set up the extension shortcut handler on the default editor
