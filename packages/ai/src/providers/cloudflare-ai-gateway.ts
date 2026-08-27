@@ -5,7 +5,7 @@ import { CLOUDFLARE_AI_GATEWAY_MODELS } from "./cloudflare-ai-gateway.models.ts"
 import { cloudflareAIGatewayAuth } from "./cloudflare-auth.ts";
 import { cloudflareStreams } from "./cloudflare-stream.ts";
 
-export function cloudflareAIGatewayProvider(): Provider<"anthropic-messages" | "openai-responses"> {
+export function cloudflareAIGatewayProvider(): Provider<"anthropic-messages" | "openai-completions" | "openai-responses"> {
 	return createProvider({
 		id: "cloudflare-ai-gateway",
 		name: "Cloudflare AI Gateway",

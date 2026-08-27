@@ -1,9 +1,8 @@
-/**
+﻿/**
  * System prompt construction and project context loading
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
-import { renderWorkspaceContext } from "./system-prompt-render.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
 export interface BuildSystemPromptOptions {
@@ -23,14 +22,6 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
-	/**
-	 * When true, render the AGENTS.md chain inside a byte-budgeted
-	 * `<system-reminder>` envelope (decision matrix item 7). When
-	 * false, the legacy inline `<project_context>` path is used.
-	 */
-	budgetedInstructions?: boolean;
-	/** Byte budget for the AGENTS.md renderer. Default 20 KiB. */
-	maxBytesForInstructions?: number;
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -104,14 +95,21 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	};
 
 	const hasBash = tools.includes("bash");
+	const hasPowerShell = tools.includes("powershell");
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
 
 	// File exploration guidelines
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		addGuideline("Use bash for file operations like ls, rg, find");
+	if ((hasBash || hasPowerShell) && !hasGrep && !hasFind && !hasLs) {
+		if (hasBash && hasPowerShell) {
+			addGuideline("Use bash or PowerShell for file operations like listing, searching, and finding files");
+		} else if (hasPowerShell) {
+			addGuideline("Use PowerShell for file operations like listing, searching, and finding files");
+		} else {
+			addGuideline("Use bash for file operations like ls, rg, find");
+		}
 	}
 
 	for (const guideline of promptGuidelines ?? []) {
@@ -150,15 +148,8 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 		prompt += appendSection;
 	}
 
-	// Append project context files. When the DeepSeek Harness
-	// bundle is on, render the AGENTS.md chain inside a
-	// byte-budgeted `<system-reminder>` envelope (decision matrix
-	// item 7). Otherwise keep the legacy inline path for back-compat.
-	if (contextFiles.length > 0 && options.budgetedInstructions) {
-		const budget = options.maxBytesForInstructions ?? 20 * 1024;
-		const rendered = renderWorkspaceContext(contextFiles, budget);
-		prompt += `\n\n${rendered.text}`;
-	} else if (contextFiles.length > 0) {
+	// Append project context files
+	if (contextFiles.length > 0) {
 		prompt += "\n\n<project_context>\n\n";
 		prompt += "Project-specific instructions and guidelines:\n\n";
 		for (const { path: filePath, content } of contextFiles) {
