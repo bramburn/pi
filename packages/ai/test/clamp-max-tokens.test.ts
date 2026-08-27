@@ -9,11 +9,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import {
-	clampMaxTokensToContext,
-	buildBaseOptions,
-	CONTEXT_SAFETY_TOKENS,
-} from "../src/api/simple-options.ts";
+import { buildBaseOptions, CONTEXT_SAFETY_TOKENS, clampMaxTokensToContext } from "../src/api/simple-options.ts";
 import type { Context, Model } from "../src/types.ts";
 
 function makeModel(contextWindow: number, maxTokens: number): Model<any> {

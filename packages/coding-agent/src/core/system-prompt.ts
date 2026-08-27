@@ -3,8 +3,8 @@
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
-import { renderWorkspaceContext } from "./system-prompt-render.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
+import { renderWorkspaceContext } from "./system-prompt-render.ts";
 
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
@@ -164,7 +164,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 	if (contextFiles.length > 0 && options.budgetedInstructions) {
 		const budget = options.maxBytesForInstructions ?? 20 * 1024;
 		const rendered = renderWorkspaceContext(contextFiles, budget);
-		prompt += "\n\n" + rendered.text;
+		prompt += `\n\n${rendered.text}`;
 	} else if (contextFiles.length > 0) {
 		prompt += "\n\n<project_context>\n\n";
 		prompt += "Project-specific instructions and guidelines:\n\n";

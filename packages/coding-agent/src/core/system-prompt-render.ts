@@ -57,9 +57,7 @@ export function renderWorkspaceContext(
 	}
 
 	// Render with no budget first; if it fits, return as-is.
-	const fullBody = files
-		.map((f) => `Instructions from: ${f.path}\n\n${f.content}`)
-		.join("\n\n");
+	const fullBody = files.map((f) => `Instructions from: ${f.path}\n\n${f.content}`).join("\n\n");
 	const fullWrapped = `${SYSTEM_REMINDER_OPEN}\n${escapeSystemReminder(fullBody)}\n${SYSTEM_REMINDER_CLOSE}\n`;
 	if (utf8ByteLength(fullWrapped) <= maxBytes) {
 		return { text: fullWrapped, omitted: [], truncated: [] };
@@ -72,9 +70,7 @@ export function renderWorkspaceContext(
 	const kept = files.slice(0);
 	const omitted: Array<{ path: string }> = [];
 	while (kept.length > 0) {
-		const body = kept
-			.map((f) => `Instructions from: ${f.path}\n\n${f.content}`)
-			.join("\n\n");
+		const body = kept.map((f) => `Instructions from: ${f.path}\n\n${f.content}`).join("\n\n");
 		const wrapped = `${SYSTEM_REMINDER_OPEN}\n${escapeSystemReminder(body)}\n${SYSTEM_REMINDER_CLOSE}\n`;
 		if (utf8ByteLength(wrapped) <= maxBytes) break;
 		omitted.push({ path: kept.pop()!.path });
@@ -90,7 +86,15 @@ export function renderWorkspaceContext(
 		const originalBytes = utf8ByteLength(f.content);
 		const header = `Instructions from: ${f.path}\n\n`;
 		const footer = `\n\n[…truncated to fit byte budget…]`;
-		const avail = Math.max(0, maxBytes - utf8ByteLength(SYSTEM_REMINDER_OPEN) - utf8ByteLength(SYSTEM_REMINDER_CLOSE) - utf8ByteLength(header) - utf8ByteLength(footer) - 4);
+		const avail = Math.max(
+			0,
+			maxBytes -
+				utf8ByteLength(SYSTEM_REMINDER_OPEN) -
+				utf8ByteLength(SYSTEM_REMINDER_CLOSE) -
+				utf8ByteLength(header) -
+				utf8ByteLength(footer) -
+				4,
+		);
 		const truncated = truncateUtf8(f.content, avail);
 		const body = header + truncated + footer;
 		const wrapped = `${SYSTEM_REMINDER_OPEN}\n${escapeSystemReminder(body)}\n${SYSTEM_REMINDER_CLOSE}\n`;
@@ -114,18 +118,16 @@ export function renderWorkspaceContext(
 			continue;
 		}
 		// Truncate this file's content to fit the remaining budget.
-		const usedWithout = base + keptContents.reduce(
-			(s, k) => s + utf8ByteLength(`Instructions from: ${k.path}\n\n${k.content}\n\n`),
-			0,
-		) + utf8ByteLength(head);
+		const usedWithout =
+			base +
+			keptContents.reduce((s, k) => s + utf8ByteLength(`Instructions from: ${k.path}\n\n${k.content}\n\n`), 0) +
+			utf8ByteLength(head);
 		const remaining = Math.max(0, maxBytes - usedWithout);
 		const truncatedContent = truncateUtf8(f.content, remaining);
 		keptContents.push({ path: f.path, content: truncatedContent });
 		truncated.push({ path: f.path, originalBytes, includedBytes: utf8ByteLength(truncatedContent) });
 	}
-	const body = keptContents
-		.map((k) => `Instructions from: ${k.path}\n\n${k.content}`)
-		.join("\n\n");
+	const body = keptContents.map((k) => `Instructions from: ${k.path}\n\n${k.content}`).join("\n\n");
 	const wrapped = `${SYSTEM_REMINDER_OPEN}\n${escapeSystemReminder(body)}\n${SYSTEM_REMINDER_CLOSE}\n`;
 	return { text: wrapped, omitted, truncated };
 }

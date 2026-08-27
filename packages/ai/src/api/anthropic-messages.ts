@@ -565,9 +565,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				// `cacheSessionId` to `undefined` makes the cache write
 				// ephemeral and not shared with subsequent user turns.
 				const cacheSessionId =
-					cacheRetention === "none" || options?.purpose === "compaction"
-						? undefined
-						: options?.sessionId;
+					cacheRetention === "none" || options?.purpose === "compaction" ? undefined : options?.sessionId;
 
 				const created = createClient(
 					model,

@@ -45,12 +45,9 @@ export function buildBaseOptions(
 	return {
 		temperature: options?.temperature,
 		samplingParams,
-		maxTokens: clampMaxTokensToContext(
-			model,
-			context,
-			options?.maxTokens ?? model.maxTokens,
-			{ safetyMargin: options?.safetyMargin },
-		),
+		maxTokens: clampMaxTokensToContext(model, context, options?.maxTokens ?? model.maxTokens, {
+			safetyMargin: options?.safetyMargin,
+		}),
 		signal: options?.signal,
 		// DeepSeek Harness Phase 3 (item 12): propagate the
 		// `purpose` field so providers can namespace the prompt

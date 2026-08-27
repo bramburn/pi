@@ -17,8 +17,8 @@ import { describe, it } from "node:test";
 
 import {
 	DEFAULT_PRUNER_CONFIG,
-	pruneSession,
 	type PrunerConfig,
+	pruneSession,
 } from "../../../src/harness/compaction/tool-result-pruner.ts";
 import type { AgentMessage } from "../../../src/types.ts";
 
@@ -54,10 +54,7 @@ describe("pruneSession (Phase 2, item 3)", () => {
 	});
 
 	it("returns the input array unchanged when no result is over-budget", () => {
-		const messages: AgentMessage[] = [
-			toolResult("t1", "bash", "small output"),
-			bashResult("echo", "small"),
-		];
+		const messages: AgentMessage[] = [toolResult("t1", "bash", "small output"), bashResult("echo", "small")];
 		const pruned = pruneSession(messages);
 		assert.equal(pruned, messages);
 	});
@@ -102,9 +99,7 @@ describe("pruneSession (Phase 2, item 3)", () => {
 	});
 
 	it("respects BashExecutionMessage.excludeFromPrune: true", () => {
-		const messages: AgentMessage[] = [
-			{ ...bashResult("echo", "x".repeat(50_000)), excludeFromPrune: true },
-		];
+		const messages: AgentMessage[] = [{ ...bashResult("echo", "x".repeat(50_000)), excludeFromPrune: true }];
 		const pruned = pruneSession(messages);
 		assert.equal(pruned[0], messages[0]);
 	});

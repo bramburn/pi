@@ -11,13 +11,12 @@
  * surface is a no-op.
  */
 import { afterEach, describe, expect, it } from "vitest";
-
-import { createHarness, type Harness } from "../harness.ts";
 import {
 	DEFAULT_PRUNER_CONFIG,
-	pruneSession,
 	type PrunerConfig,
+	pruneSession,
 } from "../../../src/core/compaction/tool-result-pruner.ts";
+import { createHarness, type Harness } from "../harness.ts";
 
 describe("regression #005: pruner cadence", () => {
 	const harnesses: Harness[] = [];

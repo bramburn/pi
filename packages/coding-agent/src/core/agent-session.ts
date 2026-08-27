@@ -58,12 +58,12 @@ import {
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	DEFAULT_PRUNER_CONFIG,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
 	pruneSession,
-	DEFAULT_PRUNER_CONFIG,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
@@ -153,7 +153,13 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow"; attempt?: number; maxAttempts?: number; willRetry?: boolean }
+	| {
+			type: "compaction_start";
+			reason: "manual" | "threshold" | "overflow";
+			attempt?: number;
+			maxAttempts?: number;
+			willRetry?: boolean;
+	  }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
@@ -1075,12 +1081,10 @@ export class AgentSession {
 			// `<system-reminder>` envelope. Without the bundle, the
 			// legacy inline `<project_context>` path is preserved.
 			budgetedInstructions: this._deepseekHarnessEnabled
-				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
-					.budgetedInstructions
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined).budgetedInstructions
 				: false,
 			maxBytesForInstructions: this._deepseekHarnessEnabled
-				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
-					.maxBytesForInstructions
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined).maxBytesForInstructions
 				: undefined,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
@@ -1631,9 +1635,10 @@ export class AgentSession {
 	/**
 	 * Set model directly.
 	 * Validates that auth is configured, saves to session and settings.
+	 * @param options.persist - Also update the default model in settings (default: true)
 	 * @throws Error if no auth is configured for the model
 	 */
-	async setModel(model: Model<any>): Promise<void> {
+	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1642,7 +1647,9 @@ export class AgentSession {
 		const thinkingLevel = this._getThinkingLevelForModelSwitch();
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
-		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		if (options?.persist !== false) {
+			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		}
 		// `setLastUsedModel` is logically independent of the global default
 		// write above: if a transient error (e.g. lockfile contention) makes
 		// the default write fail, we still want the "most recent selection"
@@ -1655,8 +1662,9 @@ export class AgentSession {
 			// best-effort: ignore tracking-write failures
 		}
 
-		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		// Re-clamp thinking level for new model's capabilities (never persist here;
+		// session-level thinking clamps are not the same as a user-requested default)
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(model, previousModel, "set");
 	}
@@ -1753,8 +1761,9 @@ export class AgentSession {
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
 	 * Saves to session and settings only if the level actually changes.
+	 * @param options.persist - Also update the default thinking level in settings (default: true)
 	 */
-	setThinkingLevel(level: ThinkingLevel): void {
+	setThinkingLevel(level: ThinkingLevel, options?: { persist?: boolean }): void {
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
@@ -1766,7 +1775,7 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (this.supportsThinking() || effectiveLevel !== "off") {
+			if (options?.persist !== false && (this.supportsThinking() || effectiveLevel !== "off")) {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });

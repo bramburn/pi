@@ -10,9 +10,9 @@
  * are not exercised in this regression — they are tested in
  * their per-phase suites.
  */
-import { afterEach, describe, expect, it } from "vitest";
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "../harness.ts";
 
 describe("regression #001: DeepSeek Harness toggle surface", () => {

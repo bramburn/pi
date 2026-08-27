@@ -676,14 +676,18 @@ export async function generateSummaryWithUsage(
 	//    sees the conversation as one large string; the entire
 	//    block is a cache-miss. This is the original behaviour and
 	//    is preserved for back-compat.
-	let summarizationMessages: ReturnType<typeof convertToLlm> | { role: "user"; content: { type: "text"; text: string }[]; timestamp: number }[];
+	let summarizationMessages:
+		| ReturnType<typeof convertToLlm>
+		| { role: "user"; content: { type: "text"; text: string }[]; timestamp: number }[];
 	if (replayPrefix) {
 		const llmMessages = convertToLlm(currentMessages);
 		summarizationMessages = [
 			...llmMessages,
 			{
 				role: "user" as const,
-				content: [{ type: "text" as const, text: previousSummary ? `${previousSummary}\n\n${basePrompt}` : basePrompt }],
+				content: [
+					{ type: "text" as const, text: previousSummary ? `${previousSummary}\n\n${basePrompt}` : basePrompt },
+				],
 				timestamp: Date.now(),
 			},
 		];
