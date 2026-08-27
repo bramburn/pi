@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
+import type { TuiMode as RendererTuiMode, ScrollViewScrollbar, TerminalCapabilities } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -33,11 +34,17 @@ export interface RetrySettings {
 	provider?: ProviderRetrySettings;
 }
 
+export type TuiMode = RendererTuiMode;
+export type FullscreenExitOutput = "transcript" | "resume-hint";
+
 export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
 	clearOnShrink?: boolean; // default: false (clear empty rows when content shrinks)
 	showTerminalProgress?: boolean; // default: false (OSC 9;4 terminal progress indicators)
+	hyperlinks?: boolean | "auto";
+	images?: "kitty" | "iterm2" | "auto" | false;
+	trueColor?: boolean | "auto";
 }
 
 export interface ImageSettings {
@@ -132,6 +139,9 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
+	tuiMode?: TuiMode; // default: "regular"
+	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
+	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -1118,6 +1128,16 @@ export class SettingsManager {
 		return this.settings.thinkingBudgets;
 	}
 
+	getTerminalCapabilityOverrides(): Partial<TerminalCapabilities> {
+		const terminal = this.settings.terminal;
+		const images = terminal?.images;
+		return {
+			...(images === "kitty" || images === "iterm2" ? { images } : images === false ? { images: null } : {}),
+			...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
+			...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
+		};
+	}
+
 	getShowImages(): boolean {
 		return this.settings.terminal?.showImages ?? true;
 	}
@@ -1175,6 +1195,37 @@ export class SettingsManager {
 		}
 		this.globalSettings.terminal.showTerminalProgress = enabled;
 		this.markModified("terminal", "showTerminalProgress");
+		this.save();
+	}
+
+	getTuiMode(): TuiMode {
+		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
+	}
+
+	setTuiMode(mode: TuiMode): void {
+		this.globalSettings.tuiMode = mode;
+		this.markModified("tuiMode");
+		this.save();
+	}
+
+	getFullscreenExitOutput(): FullscreenExitOutput {
+		return this.settings.fullscreenExitOutput === "resume-hint" ? "resume-hint" : "transcript";
+	}
+
+	setFullscreenExitOutput(output: FullscreenExitOutput): void {
+		this.globalSettings.fullscreenExitOutput = output;
+		this.markModified("fullscreenExitOutput");
+		this.save();
+	}
+
+	getFullscreenScrollbar(): ScrollViewScrollbar {
+		const mode = this.settings.fullscreenScrollbar;
+		return mode === "always" || mode === "hidden" ? mode : "auto";
+	}
+
+	setFullscreenScrollbar(mode: ScrollViewScrollbar): void {
+		this.globalSettings.fullscreenScrollbar = mode;
+		this.markModified("fullscreenScrollbar");
 		this.save();
 	}
 
