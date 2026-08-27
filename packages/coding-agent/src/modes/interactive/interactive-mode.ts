@@ -1829,6 +1829,7 @@ export class InteractiveMode {
 
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.footer.setDeepseekHarnessEnabled(this.session.deepseekHarnessEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.outputPad = this.settingsManager.getOutputPad();
@@ -1946,6 +1947,7 @@ export class InteractiveMode {
 				})();
 			},
 			getSystemPrompt: () => this.session.systemPrompt,
+			isDeepseekHarnessEnabled: () => this.session.deepseekHarnessEnabled,
 		});
 
 		// Set up the extension shortcut handler on the default editor
@@ -4321,6 +4323,7 @@ export class InteractiveMode {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
+					deepseekHarness: this.settingsManager.getDeepseekHarnessEnabled(),
 					showImages: this.settingsManager.getShowImages(),
 					imageWidthCells: this.settingsManager.getImageWidthCells(),
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
@@ -4362,6 +4365,16 @@ export class InteractiveMode {
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
 						this.footer.setAutoCompactEnabled(enabled);
+					},
+					onDeepseekHarnessChange: (enabled) => {
+						this.settingsManager.setDeepseekHarnessEnabled(enabled);
+						this.session.setDeepseekHarnessEnabled(enabled);
+						this.footer.setDeepseekHarnessEnabled(enabled);
+						this.showStatus(
+							enabled
+								? "DeepSeek Harness: on. Long sessions will compact more often."
+								: "DeepSeek Harness: off. Compaction uses the default schedule.",
+						);
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);

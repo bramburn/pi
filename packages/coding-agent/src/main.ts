@@ -866,6 +866,16 @@ export async function main(args: string[], options?: MainOptions) {
 			},
 		});
 		const { settingsManager, modelRuntime, resourceLoader } = services;
+
+		// Apply CLI overrides for the DeepSeek Harness bundle. These run
+		// before the session is created so the session picks up the
+		// resolved settings on first read.
+		if (parsed.deepseekHarness === true) {
+			settingsManager.setDeepseekHarnessEnabled(true);
+		}
+		if (parsed.deepseekHarnessMaxOverflowRetries !== undefined) {
+			settingsManager.setDeepseekHarnessField("maxOverflowRetries", parsed.deepseekHarnessMaxOverflowRetries);
+		}
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
 			...projectTrustDiagnostics,
 			...services.diagnostics,

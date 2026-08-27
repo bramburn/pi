@@ -26,6 +26,12 @@ export interface BashExecutionMessage {
 	fullOutputPath?: string;
 	timestamp: number;
 	excludeFromContext?: boolean;
+	/**
+	 * When true, the DeepSeek Harness tool-result re-pruner (item 3
+	 * of the decision matrix) skips this row. Used by the `read`
+	 * tool to break the read → truncate → read loop (item 10).
+	 */
+	excludeFromPrune?: boolean;
 }
 
 export interface CustomMessage<T = unknown> {

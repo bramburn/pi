@@ -62,6 +62,8 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	pruneSession,
+	DEFAULT_PRUNER_CONFIG,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
@@ -151,7 +153,7 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
+	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow"; attempt?: number; maxAttempts?: number; willRetry?: boolean }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
@@ -326,7 +328,18 @@ export class AgentSession {
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
-	private _overflowRecoveryAttempted = false;
+	private _overflowRecoveryAttempts = 0;
+
+	// DeepSeek Harness bundle state. The master toggle is the user's
+	// `deepseekHarness.enabled` setting; `_deepseekHarnessEnabled` is
+	// the in-memory mirror that the runtime reads on every turn.
+	private _deepseekHarnessEnabled: boolean = false;
+	private _refreshDeepseekHarnessPipeline(): void {
+		// No-op for Phase 0. Subsequent phases (1-4) register their
+		// pipeline functions here. The phase-by-phase work is owned
+		// by the implementation plans for items 2, 3, 5, 6, 7, 10, 11,
+		// 12, 15 in the decision matrix.
+	}
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -389,6 +402,11 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+
+		// Seed the in-memory mirror of the DeepSeek Harness toggle from
+		// the user's settings.json. The setter is the public surface;
+		// the constructor only reads.
+		this._deepseekHarnessEnabled = this.settingsManager.getDeepseekHarnessEnabled();
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -611,7 +629,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
-			this._overflowRecoveryAttempted = false;
+			this._overflowRecoveryAttempts = 0;
 			const messageText = contentText(event.message.content, "");
 			if (messageText) {
 				// Check steering queue first
@@ -663,7 +681,7 @@ export class AgentSession {
 
 				const assistantMsg = event.message as AssistantMessage;
 				if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "length") {
-					this._overflowRecoveryAttempted = false;
+					this._overflowRecoveryAttempts = 0;
 				}
 
 				// Reset retry counter immediately on successful assistant response
@@ -1052,6 +1070,18 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			// The DeepSeek Harness bundle (decision matrix item 7)
+			// renders the AGENTS.md chain inside a byte-budgeted
+			// `<system-reminder>` envelope. Without the bundle, the
+			// legacy inline `<project_context>` path is preserved.
+			budgetedInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
+					.budgetedInstructions
+				: false,
+			maxBytesForInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined)
+					.maxBytesForInstructions
+				: undefined,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1074,6 +1104,8 @@ export class AgentSession {
 		}
 	}
 
+	private _prunerLastRunTurn: number = 0;
+
 	private async _handlePostAgentRun(): Promise<boolean> {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
@@ -1093,6 +1125,24 @@ export class AgentSession {
 				finalError: msg.errorMessage,
 			});
 			this._retryAttempt = 0;
+		}
+
+		// Tool-result re-pruner (item 3 of the decision matrix). Runs
+		// every N turns when the DeepSeek Harness bundle is enabled.
+		// The pruner walks the agent's current message array and
+		// rewrites over-budget tool results in place. `read` is exempt
+		// (item 10) to break the read → truncate → read loop.
+		const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+		if (dh.enabled && dh.toolResultPruneEveryN > 0) {
+			this._prunerLastRunTurn += 1;
+			if (this._prunerLastRunTurn >= dh.toolResultPruneEveryN) {
+				this._prunerLastRunTurn = 0;
+				const before = this.agent.state.messages.length;
+				const pruned = pruneSession(this.agent.state.messages, DEFAULT_PRUNER_CONFIG);
+				if (pruned.length === before) {
+					this.agent.state.messages = pruned;
+				}
+			}
 		}
 
 		if (await this._checkCompaction(msg)) {
@@ -1825,6 +1875,19 @@ export class AgentSession {
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
 
+			// When the DeepSeek Harness bundle is enabled, layer the
+			// ratio-based policy on top of the legacy absolute-token
+			// settings. The harness module's `shouldCompact` and
+			// `findCutPoint` use whichever values are present.
+			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+			if (dh.enabled) {
+				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+				}
+			}
+
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
 				// Check why we can't compact
@@ -2021,20 +2084,32 @@ export class AgentSession {
 				return await this._runAutoCompaction("overflow", false);
 			}
 
-			if (this._overflowRecoveryAttempted) {
+			// Multi-attempt recovery loop. When the DeepSeek Harness
+			// bundle is enabled, the user-configured
+			// `maxOverflowRetries` drives the budget; otherwise the
+			// legacy single-attempt behaviour is preserved.
+			const settings = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+			const maxAttempts = settings.enabled ? Math.max(1, settings.maxOverflowRetries) : 1;
+			if (this._overflowRecoveryAttempts >= maxAttempts) {
 				this._emit({
 					type: "compaction_end",
 					reason: "overflow",
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage:
-						"Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
+					errorMessage: `Context overflow recovery failed after ${maxAttempts} compact-and-retry attempt(s). Try reducing context or switching to a larger-context model.`,
 				});
 				return false;
 			}
 
-			this._overflowRecoveryAttempted = true;
+			this._overflowRecoveryAttempts += 1;
+			this._emit({
+				type: "compaction_start",
+				reason: "overflow",
+				attempt: this._overflowRecoveryAttempts,
+				maxAttempts,
+				willRetry,
+			});
 			// Remove the failed or truncated message from agent state. It remains in session history,
 			// but must not be included in the compact-and-retry context.
 			const messages = this.agent.state.messages;
@@ -2145,7 +2220,12 @@ export class AgentSession {
 				usage = extensionCompaction.usage;
 				details = extensionCompaction.details;
 			} else {
-				// Generate compaction result
+				// Generate compaction result. Replay-prefix summarisation
+				// (decision matrix item 12) sends the live conversation
+				// as the request prefix when the DeepSeek Harness bundle
+				// is enabled, reusing the provider's prompt cache for
+				// the conversation bytes.
+				const dhForReplay = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
 				const compactResult = await compact(
 					preparation,
 					requestModel,
@@ -2158,6 +2238,7 @@ export class AgentSession {
 					env,
 					this.settingsManager.getRetrySettings(),
 					this._summarizationRetryCallbacks({ source: "compaction", reason }),
+					dhForReplay.enabled && dhForReplay.replayPrefixSummarisation,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2255,6 +2336,21 @@ export class AgentSession {
 	/** Whether auto-compaction is enabled */
 	get autoCompactionEnabled(): boolean {
 		return this.settingsManager.getCompactionEnabled();
+	}
+
+	/**
+	 * Toggle the DeepSeek Harness context pipeline bundle. The next
+	 * turn reads the new value; the in-flight turn is unaffected.
+	 */
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		this._deepseekHarnessEnabled = enabled;
+		this.agent.setDeepseekHarnessEnabled(enabled);
+		this._refreshDeepseekHarnessPipeline();
+	}
+
+	/** Whether the DeepSeek Harness context pipeline is enabled */
+	get deepseekHarnessEnabled(): boolean {
+		return this._deepseekHarnessEnabled;
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
@@ -2464,6 +2560,7 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				isDeepseekHarnessEnabled: () => this._deepseekHarnessEnabled,
 				getSystemPromptOptions: () => this._baseSystemPromptOptions,
 			},
 			{

@@ -11,16 +11,12 @@
  * `~/.pi/settings.json`.
  */
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
-
-import {
-	InMemorySettingsStorage,
-	SettingsManager,
-} from "../../src/core/settings-manager.ts";
-import { getAgentDir } from "../../src/config.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "node:test";
+import { getAgentDir } from "../../src/config.ts";
+import { InMemorySettingsStorage, SettingsManager } from "../../src/core/settings-manager.ts";
 
 async function makeManager(): Promise<{ manager: SettingsManager; cleanup: () => Promise<void> }> {
 	const cwd = await mkdtemp(join(tmpdir(), "pi-dh-test-"));

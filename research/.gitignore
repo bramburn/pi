@@ -1,0 +1,16 @@
+# Research-only vendored references. NEVER commit vendored upstream code.
+# This folder is for local reading and analysis; reports written here are tracked,
+# but any cloned third-party repository content stays ignored.
+
+# Vendored upstream repositories (read-only local clones)
+deepseek-harness/
+# Add more ignored vendor folders below as research expands.
+
+# Generated sign-off artefacts. The data file, build script, test file,
+# and README inside research/decisions/ are tracked; only the produced
+# xlsx is ignored.
+decisions/decision-matrix-v1.xlsx
+
+# Python bytecode from running the build or tests.
+__pycache__/
+*.pyc
