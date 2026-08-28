@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import type { TerminalCapabilities } from "@earendil-works/pi-tui";
+import type { TerminalCapabilities, TuiMode } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -225,6 +225,7 @@ export interface Settings {
 	outputPad?: 0 | 1; // Horizontal padding for chat message output (default: 1)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
+	tuiMode?: TuiMode; // default: "regular"
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
@@ -1432,6 +1433,16 @@ export class SettingsManager {
 	setShowHardwareCursor(enabled: boolean): void {
 		this.globalSettings.showHardwareCursor = enabled;
 		this.markModified("showHardwareCursor");
+		this.save();
+	}
+
+	getTuiMode(): TuiMode {
+		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
+	}
+
+	setTuiMode(mode: TuiMode): void {
+		this.globalSettings.tuiMode = mode;
+		this.markModified("tuiMode");
 		this.save();
 	}
 

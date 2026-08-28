@@ -37,7 +37,9 @@ import {
 	Text,
 	TruncatedText,
 	type TUI,
+	TuiAltScreen,
 	TuiMainScreen,
+	type TuiMode,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -103,6 +105,7 @@ import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
+import { openBrowser } from "../../utils/open-browser.ts";
 import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -340,11 +343,13 @@ export interface InteractiveModeOptions {
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
 	/** TUI layout mode. */
+	tuiMode?: TuiMode;
 	/** Initial interactive theme setting for this invocation. */
 	initialThemeSetting?: string;
 }
 
 interface InteractiveTuiOptions {
+	tuiMode: TuiMode;
 	showHardwareCursor: boolean;
 	logDirectory: string;
 	terminal?: Terminal;
@@ -352,8 +357,25 @@ interface InteractiveTuiOptions {
 }
 
 /** Composition root for the interactive terminal renderer. */
-export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScreen {
+export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScreen | TuiAltScreen {
 	const terminal = options.terminal ?? new ProcessTerminal();
+	if (options.tuiMode === "fullscreen") {
+		const styleSearchMatch = (text: string) => theme.bg("searchMatchBg", theme.fg("searchMatchText", text));
+		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, {
+			searchMatchStyle: (text) => theme.underline(styleSearchMatch(text)),
+			searchCurrentMatchStyle: (text) => theme.bold(theme.inverse(styleSearchMatch(text))),
+			openUrl: openBrowser,
+			onRightClickPaste: options.onRightClickPaste,
+			copySelection: async (text) => {
+				try {
+					await copyToClipboard(text);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+		});
+	}
 	return new TuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
 }
 
@@ -390,7 +412,7 @@ export function createInteractiveTuiReference(getTui: () => TUI): TUI {
 
 export class InteractiveMode {
 	private runtimeHost: AgentSessionRuntime;
-	private renderer: TuiMainScreen;
+	private renderer: TuiMainScreen | TuiAltScreen;
 	private ui: TUI;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
@@ -531,7 +553,8 @@ export class InteractiveMode {
 
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
-		this.options = { ...options };
+		const tuiMode = options.tuiMode ?? this.settingsManager.getTuiMode();
+		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			this.resetExtensionUI();
@@ -542,6 +565,7 @@ export class InteractiveMode {
 		});
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
+			tuiMode,
 			showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 			logDirectory: getAgentDir(),
 			onRightClickPaste: this.onRightClickPaste,
