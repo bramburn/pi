@@ -7,6 +7,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {
@@ -990,13 +991,12 @@ export class SettingsManager {
 		if (!model || (model.provider !== "minimax" && model.provider !== "minimax-cn")) {
 			return base;
 		}
-		// Built-in MiniMax profile + user-level overrides. Loaded lazily to
-		// avoid a circular import (deepseek-harness-profile.ts imports the
-		// settings type).
-		const minimax = loadMinimaxProfile();
+		// Built-in MiniMax profile + user-level overrides. Top-level import is
+		// safe: `deepseek-harness-profile.ts` only does `import type` (erased at
+		// runtime), so there is no real circular import.
 		const merged: ResolvedDeepseekHarnessSettings = {
 			...base,
-			...minimax,
+			...MINIMAX_PROFILE,
 			profile: "minimax",
 		};
 		const exact = user.modelPolicies?.[`${model.provider}/${model.id}`];
@@ -1490,17 +1490,4 @@ export class SettingsManager {
 		this.markModified("warnings");
 		this.save();
 	}
-}
-
-/**
- * Lazy import of the MiniMax profile to avoid a circular import
- * (`deepseek-harness-profile.ts` imports the settings types from
- * this file). The require is cached after the first call.
- */
-let _minimaxProfileCache: Partial<DeepseekHarnessSettings> | undefined;
-function loadMinimaxProfile(): Partial<DeepseekHarnessSettings> {
-	if (_minimaxProfileCache !== undefined) return _minimaxProfileCache;
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	_minimaxProfileCache = require("./deepseek-harness-profile.ts").MINIMAX_PROFILE as Partial<DeepseekHarnessSettings>;
-	return _minimaxProfileCache;
 }
