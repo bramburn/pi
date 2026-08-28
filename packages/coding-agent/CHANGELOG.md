@@ -32,6 +32,8 @@
 ### Added
 
 - New sessions now default to the most recently used model instead of the global `defaultModel`. Added a "New session model" entry to `/settings` with three modes: "Use global default", "Use last used model", and "Use specific model" (opens the same searchable picker as `/model`).
+- New `--cwd <dir>` CLI flag: change the project working directory before any settings or resources are loaded. Resolves relative paths against the original cwd, errors out clearly when the path is missing or not a directory. Use case: `pi --cwd path/to/project` from a shell that is not already in the project root, or from a launcher that has its own cwd.
+- New `--no-deepseek-harness` CLI flag: disable the deepseek-harness context pipeline for a single run, overriding a `true` global setting. Pairs with the existing `--deepseek-harness` opt-in.
 
 ### Fixed
 
@@ -42,6 +44,9 @@
 - When the configured `newSessionModel` preference resolves to an unavailable model, `options.model` is left `undefined` so `findInitialModel`'s first-available-with-auth chain runs (was previously silently falling back to `globalPreferred`, masking the unavailability).
 - `setLastUsedModel` is now wrapped in a best-effort `try`/`catch` after `setDefaultModelAndProvider` in `setModel` and both cycle paths, so a transient save() failure on the global default no longer silently drops the last-used tracking.
 - Fixed Z.AI Coding Plan defaults referencing the removed GLM-5.1 model ([#8096](https://github.com/earendil-works/pi/issues/8096)).
+- Restored the `setCapabilityOverrides(settingsManager.getTerminalCapabilityOverrides())` call in `createStartupTui` that was dropped in the v0.84.3 cherry-pick merge (`0037e08e4`). User-set `terminal.images` / `terminal.trueColor` / `terminal.hyperlinks` overrides in `settings.json` are now applied to the TUI again.
+- Replaced the `require("./deepseek-harness-profile.ts")` lazy-load in `SettingsManager.getDeepseekHarnessSettings` with a direct `import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts"`. The previous `require` worked under tsgo (the source loader) but broke esbuild bundling, which is what `bun build:binary` uses, so the binary could not be built until this was fixed. The profile module only imports a TypeScript type from `settings-manager.ts`, which is erased at compile time, so the runtime import is cycle-free.
+- Interactive mode now prints a clear `Error: stdout is not a TTY. The interactive TUI needs a real terminal ...` and exits with code 1 when launched without a TTY and no `--print` / piped stdin / message. Previously it silently dropped into print mode and exited 0 with no output, which looked like a broken TUI.
 
 ### Removed
 
