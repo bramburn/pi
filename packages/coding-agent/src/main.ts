@@ -5,6 +5,7 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
@@ -79,6 +80,30 @@ import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
 
 /**
+ * Apply the `--cwd <dir>` CLI override before any `process.cwd()` read.
+ *
+ * Must be called before the bootstrap settings manager, migrations, package
+ * subcommands, or anything else that resolves a project root from
+ * `process.cwd()`. Resolves relative paths against the original cwd so
+ * `pi --cwd subdir` from a project still works. Exits with a clear error
+ * if the path is missing or not a directory.
+ */
+export function applyCwdOverride(cwdArg: string | undefined): void {
+	if (!cwdArg) return;
+	const resolved = resolvePath(cwdArg, process.cwd());
+	if (!existsSync(resolved)) {
+		console.error(chalk.red(`Error: --cwd path does not exist: ${cwdArg}`));
+		process.exit(1);
+	}
+	const stat = statSync(resolved);
+	if (!stat.isDirectory()) {
+		console.error(chalk.red(`Error: --cwd path is not a directory: ${cwdArg}`));
+		process.exit(1);
+	}
+	process.chdir(resolved);
+}
+
+/**
  * Read all content from piped stdin.
  * Returns undefined if stdin is a TTY (interactive terminal).
  */
@@ -143,6 +168,25 @@ function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
+}
+
+/**
+ * Decides whether an interactive run with a non-TTY stdout should fail fast
+ * with a clear error instead of silently dropping into print mode and exiting
+ * with no output (which looks like a broken TUI).
+ *
+ * Pure stdout commands (--help, --list-models) and any explicit opt-in to
+ * non-interactive behavior (--print, --mode, message/file args) are exempt.
+ */
+export function shouldBlockInteractiveNonTTY(parsed: Args, stdoutIsTTY: boolean): boolean {
+	return (
+		!stdoutIsTTY &&
+		!parsed.print &&
+		!parsed.mode &&
+		parsed.messages.length === 0 &&
+		parsed.fileArgs.length === 0 &&
+		!isPlainRuntimeMetadataCommand(parsed)
+	);
 }
 
 async function runAuthCommand(args: string[]): Promise<boolean> {
@@ -668,6 +712,10 @@ export async function main(args: string[], options?: MainOptions) {
 		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
 
+	// Apply --cwd before anything reads process.cwd(). parseArgs is pure and
+	// idempotent; the main flow re-parses at line 694 below.
+	applyCwdOverride(parseArgs(args).cwd);
+
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
 	const bootstrapSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
@@ -723,6 +771,22 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	let appMode = resolveAppMode(parsed, process.stdin.isTTY, process.stdout.isTTY);
+
+	// When the user did NOT explicitly opt in to non-interactive mode (no
+	// --print, no piped stdin, no initial message) but stdout still isn't a
+	// TTY, we are about to silently drop into print mode and exit with no
+	// output — which looks like a broken TUI. Surface a clear message so
+	// the user knows what to do.
+	if (shouldBlockInteractiveNonTTY(parsed, process.stdout.isTTY)) {
+		console.error(
+			chalk.red(
+				"Error: stdout is not a TTY. The interactive TUI needs a real terminal — run from Windows Terminal, ConEmu, or a plain cmd.exe window.\n" +
+					`Hint: pass --print (-p) for non-interactive single-shot mode, or remove any stdout redirect.`,
+			),
+		);
+		process.exit(1);
+	}
+
 	const shouldTakeOverStdout = appMode !== "interactive" && !isPlainRuntimeMetadataCommand(parsed);
 	if (shouldTakeOverStdout) {
 		takeOverStdout();
@@ -872,6 +936,9 @@ export async function main(args: string[], options?: MainOptions) {
 		// resolved settings on first read.
 		if (parsed.deepseekHarness === true) {
 			settingsManager.setDeepseekHarnessEnabled(true);
+		} else if (parsed.deepseekHarness === false) {
+			// --no-deepseek-harness overrides a true global setting for this run
+			settingsManager.setDeepseekHarnessEnabled(false);
 		}
 		if (parsed.deepseekHarnessMaxOverflowRetries !== undefined) {
 			settingsManager.setDeepseekHarnessField("maxOverflowRetries", parsed.deepseekHarnessMaxOverflowRetries);

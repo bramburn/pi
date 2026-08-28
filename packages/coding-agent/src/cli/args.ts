@@ -17,6 +17,7 @@ export interface Args {
 	appendSystemPrompt?: string[];
 	deepseekHarness?: boolean;
 	deepseekHarnessMaxOverflowRetries?: number;
+	cwd?: string;
 	thinking?: ThinkingLevel;
 	continue?: boolean;
 	resume?: boolean;
@@ -114,6 +115,8 @@ export function parseArgs(args: string[]): Args {
 			result.appendSystemPrompt.push(args[++i]);
 		} else if (arg === "--deepseek-harness") {
 			result.deepseekHarness = true;
+		} else if (arg === "--no-deepseek-harness") {
+			result.deepseekHarness = false;
 		} else if (arg === "--deepseek-harness-max-overflow-retries" && i + 1 < args.length) {
 			const v = parseInt(args[++i], 10);
 			if (Number.isFinite(v) && v >= 0) result.deepseekHarnessMaxOverflowRetries = v;
@@ -123,6 +126,8 @@ export function parseArgs(args: string[]): Args {
 			} else {
 				result.diagnostics.push({ type: "error", message: "--name requires a value" });
 			}
+		} else if (arg === "--cwd" && i + 1 < args.length) {
+			result.cwd = args[++i];
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
@@ -272,8 +277,10 @@ ${chalk.bold("Options:")}
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --deepseek-harness              Enable the deepseek-harness-style context pipeline (opt-in)
+  --no-deepseek-harness           Disable the deepseek-harness-style context pipeline for this run
   --deepseek-harness-max-overflow-retries <n>  Max compact-and-retry attempts on context overflow (default 2)
   --mode <mode>                  Output mode: text (default), json, or rpc
+  --cwd <dir>                    Change the project working directory before loading (must exist)
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
