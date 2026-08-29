@@ -86,6 +86,10 @@ export interface SettingsConfig {
 	defaultProjectTrust: DefaultProjectTrust;
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
+	/** What to render in the scrollback after the user exits fullscreen TUI. */
+	fullscreenExitOutput: "resume-hint" | "transcript";
+	/** When to show the fullscreen-mode scrollbar. */
+	fullscreenScrollbar: "always" | "hidden" | "auto";
 	warnings: WarningSettings;
 	newSessionModel: NewSessionModelPreference;
 	/** Human label for the configured specific model (mode === "specific"). */
@@ -137,6 +141,8 @@ export interface SettingsCallbacks {
 	onDefaultProjectTrustChange: (defaultProjectTrust: DefaultProjectTrust) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
+	onFullscreenExitOutputChange: (output: "resume-hint" | "transcript") => void;
+	onFullscreenScrollbarChange: (mode: "always" | "hidden" | "auto") => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
 	onNewSessionModelChange: (preference: NewSessionModelPreference) => void;
 	/**
@@ -954,6 +960,24 @@ export class SettingsSelectorComponent extends Container {
 			currentValue: config.showTerminalProgress ? "true" : "false",
 			values: ["true", "false"],
 		});
+		const terminalProgressIndex = items.findIndex((item) => item.id === "terminal-progress");
+		items.splice(terminalProgressIndex + 1, 0, {
+			id: "fullscreen-exit-output",
+			label: "Fullscreen exit output",
+			description:
+				"What to render in the scrollback after exiting fullscreen TUI. " +
+				"'transcript': keep the recent transcript visible. 'resume-hint': show a hint to resume.",
+			currentValue: config.fullscreenExitOutput,
+			values: ["resume-hint", "transcript"],
+		});
+		items.splice(terminalProgressIndex + 2, 0, {
+			id: "fullscreen-scrollbar",
+			label: "Fullscreen scrollbar",
+			description:
+				"When to show the fullscreen-mode scrollbar. 'always': always visible. 'hidden': never visible. 'auto': visible when content overflows.",
+			currentValue: config.fullscreenScrollbar,
+			values: ["auto", "always", "hidden"],
+		});
 
 		// Add borders
 		this.addChild(new DynamicBorder());
@@ -1051,6 +1075,12 @@ export class SettingsSelectorComponent extends Container {
 						break;
 					case "terminal-progress":
 						callbacks.onShowTerminalProgressChange(newValue === "true");
+						break;
+					case "fullscreen-exit-output":
+						callbacks.onFullscreenExitOutputChange(newValue as "resume-hint" | "transcript");
+						break;
+					case "fullscreen-scrollbar":
+						callbacks.onFullscreenScrollbarChange(newValue as "always" | "hidden" | "auto");
 						break;
 					case "theme":
 						callbacks.onThemeChange(newValue);

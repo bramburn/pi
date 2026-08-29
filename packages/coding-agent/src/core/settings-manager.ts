@@ -111,6 +111,10 @@ export interface TerminalSettings {
 	hyperlinks?: boolean | "auto";
 	images?: "kitty" | "iterm2" | "auto" | false;
 	trueColor?: boolean | "auto";
+	/** What to render in the scrollback after exiting fullscreen TUI. Default: "resume-hint". */
+	fullscreenExitOutput?: "resume-hint" | "transcript";
+	/** When to show the fullscreen-mode scrollbar. Default: "auto". */
+	fullscreenScrollbar?: "always" | "hidden" | "auto";
 }
 
 export interface ImageSettings {
@@ -1362,6 +1366,32 @@ export class SettingsManager {
 		}
 		this.globalSettings.terminal.showTerminalProgress = enabled;
 		this.markModified("terminal", "showTerminalProgress");
+		this.save();
+	}
+
+	getFullscreenExitOutput(): "resume-hint" | "transcript" {
+		return this.settings.terminal?.fullscreenExitOutput ?? "resume-hint";
+	}
+
+	setFullscreenExitOutput(output: "resume-hint" | "transcript"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenExitOutput = output;
+		this.markModified("terminal", "fullscreenExitOutput");
+		this.save();
+	}
+
+	getFullscreenScrollbar(): "always" | "hidden" | "auto" {
+		return this.settings.terminal?.fullscreenScrollbar ?? "auto";
+	}
+
+	setFullscreenScrollbar(mode: "always" | "hidden" | "auto"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenScrollbar = mode;
+		this.markModified("terminal", "fullscreenScrollbar");
 		this.save();
 	}
 
