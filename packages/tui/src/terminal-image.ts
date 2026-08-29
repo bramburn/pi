@@ -674,7 +674,11 @@ export function hyperlink(text: string, url: string): string {
 function shortenImagePath(filename: string): string {
 	const home = homedir();
 	if (home && (filename === home || filename.startsWith(`${home}/`) || filename.startsWith(`${home}\\`))) {
-		return `~${filename.slice(home.length)}`;
+		// On Windows, `path.join(homedir(), ...)` produces backslash separators,
+		// but terminal-image tests expect POSIX-style ~/... output regardless of
+		// platform. Normalize the suffix after the home prefix so the output is
+		// stable across platforms.
+		return `~${filename.slice(home.length).replaceAll("\\", "/")}`;
 	}
 	return filename;
 }
