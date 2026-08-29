@@ -12,7 +12,7 @@ describe("AgentSession lastUsedModel tracking", () => {
 		}
 	});
 
-	it("setModel updates lastUsedModel in addition to the global default", async () => {
+	it("setModel updates lastUsedModel without touching the global default", async () => {
 		const harness = await createHarness({
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
@@ -28,7 +28,10 @@ describe("AgentSession lastUsedModel tracking", () => {
 			provider: next.provider,
 			modelId: next.id,
 		});
-		expect(harness.settingsManager.getDefaultModel()).toBe(next.id);
+		// setModel is session-only by default; the global default is only updated
+		// when callers explicitly pass { persist: true }.
+		expect(harness.settingsManager.getDefaultModel()).toBeUndefined();
+		expect(harness.settingsManager.getDefaultProvider()).toBeUndefined();
 	});
 
 	it("cycleModel updates lastUsedModel", async () => {

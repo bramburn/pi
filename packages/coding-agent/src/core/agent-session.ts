@@ -1669,8 +1669,22 @@ export class AgentSession {
 
 	/**
 	 * Set model directly.
-	 * Validates that auth is configured, saves to session and settings.
-	 * @param options.persist - Also update the default model in settings (default: true)
+	 * Validates that auth is configured, saves to session and (when `persist: true`)
+	 * updates the persisted default.
+	 *
+	 * `setModel` is session-only by default: it writes a `model_change` entry to the
+	 * session and updates the `lastUsedModel` tracking hint, but does NOT change the
+	 * user's persisted `defaultProvider` / `defaultModel`. Pass `{ persist: true }`
+	 * to also promote the model to the persisted default.
+	 *
+	 * When persisting and a scoped model list (runtime or persisted) already exists,
+	 * the new model is appended to both lists so cycling continues to include the
+	 * newly chosen model. With no existing scope, the persisted scope list is left
+	 * untouched (no list is created) — matching the "do not create a scoped model
+	 * list when all models are available" semantics.
+	 *
+	 * @param options.persist - Also update the default model in settings and extend
+	 *   the scoped model list (default: false)
 	 * @throws Error if no auth is configured for the model
 	 */
 	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
@@ -1679,11 +1693,31 @@ export class AgentSession {
 		}
 
 		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
-		if (options?.persist !== false) {
+		if (options?.persist === true) {
 			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+
+			// When a scoped list already exists (runtime OR persisted), append the new
+			// model to both so cycling keeps it in the rotation. With no existing
+			// scope we leave the persisted list alone — it represents a user choice
+			// to expose every model, not an implicit permission to start one.
+			const hasRuntimeScope = this._scopedModels.length > 0;
+			const persistedEnabled = this.settingsManager.getEnabledModels();
+			const hasPersistedScope = persistedEnabled !== undefined;
+
+			if (hasRuntimeScope || hasPersistedScope) {
+				if (hasRuntimeScope && !this._scopedModels.some((sm) => modelsAreEqual(sm.model, model))) {
+					this._scopedModels.push({ model });
+				}
+				if (hasPersistedScope) {
+					const modelRef = `${model.provider}/${model.id}`;
+					if (!persistedEnabled.includes(modelRef)) {
+						this.settingsManager.setEnabledModels([...persistedEnabled, modelRef]);
+					}
+				}
+			}
 		}
 		// `setLastUsedModel` is logically independent of the global default
 		// write above: if a transient error (e.g. lockfile contention) makes
@@ -1733,12 +1767,11 @@ export class AgentSession {
 		const len = scopedModels.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const next = scopedModels[nextIndex];
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.model, next.thinkingLevel);
 
 		// Apply model
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
-		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
 		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
 		try {
 			this.settingsManager.setLastUsedModel({ provider: next.model.provider, modelId: next.model.id });
@@ -1750,7 +1783,9 @@ export class AgentSession {
 		// - Explicit scoped model thinking level overrides current session level
 		// - Undefined scoped model thinking level inherits the current session preference
 		// setThinkingLevel clamps to model capabilities.
-		this.setThinkingLevel(thinkingLevel);
+		// Cycling must NOT touch persisted state — defaults only move when the user
+		// explicitly opts in via setModel({ persist: true }).
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -1769,10 +1804,9 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(nextModel);
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
 		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
 		try {
 			this.settingsManager.setLastUsedModel({ provider: nextModel.provider, modelId: nextModel.id });
@@ -1781,7 +1815,8 @@ export class AgentSession {
 		}
 
 		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		// Cycling must NOT touch persisted state — see _cycleScopedModel.
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
@@ -1795,8 +1830,18 @@ export class AgentSession {
 	/**
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
-	 * Saves to session and settings only if the level actually changes.
-	 * @param options.persist - Also update the default thinking level in settings (default: true)
+	 * Saves to session and (when `persist: true`) updates the persisted default.
+	 *
+	 * Session-only by default: a thinking level change is reflected in the agent
+	 * state and recorded as a `thinking_level_change` session entry, but does NOT
+	 * update `defaultThinkingLevel` in settings. Pass `{ persist: true }` to also
+	 * promote the level to the persisted default.
+	 *
+	 * When persisting and the current model clamps the requested level to a
+	 * different effective level, the requested level is what gets persisted (so
+	 * switching back to a model that supports the original level restores it).
+	 *
+	 * @param options.persist - Also update the default thinking level in settings (default: false)
 	 */
 	setThinkingLevel(level: ThinkingLevel, options?: { persist?: boolean }): void {
 		const availableLevels = this.getAvailableThinkingLevels();
@@ -1810,8 +1855,10 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (options?.persist !== false && (this.supportsThinking() || effectiveLevel !== "off")) {
-				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
+			if (options?.persist === true && (this.supportsThinking() || level !== "off")) {
+				// Persist the user-requested level, not the clamped effective level,
+				// so the original preference survives model switches that re-clamp it.
+				this.settingsManager.setDefaultThinkingLevel(level);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
 			void this._extensionRunner.emit({
@@ -1854,9 +1901,34 @@ export class AgentSession {
 		return !!this.model?.reasoning;
 	}
 
-	private _getThinkingLevelForModelSwitch(explicitLevel?: ThinkingLevel): ThinkingLevel {
+	/**
+	 * Decide which thinking level to apply on a model switch.
+	 *
+	 * Resolution order:
+	 * 1. `explicitLevel` (caller-provided, e.g. scoped-model entry's thinking level).
+	 * 2. Per-model override from settings for the model being switched TO.
+	 * 3. Global `defaultThinkingLevel` from settings.
+	 * 4. Current session level, falling back to {@link DEFAULT_THINKING_LEVEL} when
+	 *    the current model doesn't support thinking.
+	 *
+	 * Per-model overrides take priority over both the global default and the
+	 * current session level — the user wants a specific level on a specific
+	 * model, so cycling to it should restore that preference even if the prior
+	 * session had a different level.
+	 */
+	private _getThinkingLevelForModelSwitch(newModel?: Model<any>, explicitLevel?: ThinkingLevel): ThinkingLevel {
 		if (explicitLevel !== undefined) {
 			return explicitLevel;
+		}
+		if (newModel) {
+			const perModel = this.settingsManager.getModelThinkingLevel(newModel.provider, newModel.id);
+			if (perModel) {
+				return perModel;
+			}
+			const globalDefault = this.settingsManager.getDefaultThinkingLevel();
+			if (globalDefault) {
+				return globalDefault;
+			}
 		}
 		if (!this.supportsThinking()) {
 			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
