@@ -2135,25 +2135,24 @@ export class AgentSession {
 			const settings = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
 			const maxAttempts = settings.enabled ? Math.max(1, settings.maxOverflowRetries) : 1;
 			if (this._overflowRecoveryAttempts >= maxAttempts) {
+				const overflow = isContextOverflow(assistantMessage, contextWindow);
+				const errorMessage =
+					!overflow && recoverableLength
+						? `Truncated response recovery failed after one compact-and-retry attempt.`
+						: `Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.`;
 				this._emit({
 					type: "compaction_end",
 					reason: "overflow",
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage: `Context overflow recovery failed after ${maxAttempts} compact-and-retry attempt(s). Try reducing context or switching to a larger-context model.`,
+					errorMessage,
 				});
 				return false;
 			}
 
 			this._overflowRecoveryAttempts += 1;
-			this._emit({
-				type: "compaction_start",
-				reason: "overflow",
-				attempt: this._overflowRecoveryAttempts,
-				maxAttempts,
-				willRetry,
-			});
+			// _runAutoCompaction emits its own compaction_start event with attempt/maxAttempts.
 			// Remove the failed or truncated message from agent state. It remains in session history,
 			// but must not be included in the compact-and-retry context.
 			const messages = this.agent.state.messages;
@@ -2206,6 +2205,7 @@ export class AgentSession {
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
+		let fromExtension = false;
 
 		try {
 			if (!this.model) {
@@ -2226,7 +2226,6 @@ export class AgentSession {
 			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
-			let fromExtension = false;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 				const extensionResult = (await this._extensionRunner.emit({
@@ -2358,17 +2357,28 @@ export class AgentSession {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
 			if (started) {
+				const fullErrorMessage =
+					reason === "overflow"
+						? `Context overflow recovery failed: ${errorMessage}`
+						: `Auto-compaction failed: ${errorMessage}`;
 				this._emit({
 					type: "compaction_end",
 					reason,
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage:
-						reason === "overflow"
-							? `Context overflow recovery failed: ${errorMessage}`
-							: `Auto-compaction failed: ${errorMessage}`,
+					errorMessage: fullErrorMessage,
 				});
+				if (this._extensionRunner) {
+					await this._extensionRunner.emit({
+						type: "session_compact_failed",
+						reason,
+						errorMessage: fullErrorMessage,
+						aborted: false,
+						willRetry: false,
+						fromExtension,
+					});
+				}
 			}
 			return false;
 		} finally {
