@@ -1,14 +1,14 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import type { TerminalCapabilities } from "@earendil-works/pi-tui";
+import type { TerminalCapabilities, TuiMode } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
-import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
+import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -111,6 +111,10 @@ export interface TerminalSettings {
 	hyperlinks?: boolean | "auto";
 	images?: "kitty" | "iterm2" | "auto" | false;
 	trueColor?: boolean | "auto";
+	/** What to render in the scrollback after exiting fullscreen TUI. Default: "resume-hint". */
+	fullscreenExitOutput?: "resume-hint" | "transcript";
+	/** When to show the fullscreen-mode scrollbar. Default: "auto". */
+	fullscreenScrollbar?: "always" | "hidden" | "auto";
 }
 
 export interface ImageSettings {
@@ -225,6 +229,7 @@ export interface Settings {
 	outputPad?: 0 | 1; // Horizontal padding for chat message output (default: 1)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
+	tuiMode?: TuiMode; // default: "regular"
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
@@ -991,12 +996,14 @@ export class SettingsManager {
 		if (!model || (model.provider !== "minimax" && model.provider !== "minimax-cn")) {
 			return base;
 		}
-		// Built-in MiniMax profile + user-level overrides. The profile module
-		// only imports a TypeScript type from this file, which is erased at
-		// compile time, so the runtime value is safe to reference directly.
+		// Built-in MiniMax profile layered UNDER user-level overrides
+		// (user wins). The profile module only imports a TypeScript type
+		// from this file, which is erased at compile time, so the
+		// runtime value is safe to reference directly.
 		const merged: ResolvedDeepseekHarnessSettings = {
 			...base,
 			...MINIMAX_PROFILE,
+			...user,
 			profile: "minimax",
 		};
 		const exact = user.modelPolicies?.[`${model.provider}/${model.id}`];
@@ -1362,6 +1369,32 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getFullscreenExitOutput(): "resume-hint" | "transcript" {
+		return this.settings.terminal?.fullscreenExitOutput ?? "resume-hint";
+	}
+
+	setFullscreenExitOutput(output: "resume-hint" | "transcript"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenExitOutput = output;
+		this.markModified("terminal", "fullscreenExitOutput");
+		this.save();
+	}
+
+	getFullscreenScrollbar(): "always" | "hidden" | "auto" {
+		return this.settings.terminal?.fullscreenScrollbar ?? "auto";
+	}
+
+	setFullscreenScrollbar(mode: "always" | "hidden" | "auto"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenScrollbar = mode;
+		this.markModified("terminal", "fullscreenScrollbar");
+		this.save();
+	}
+
 	getImageAutoResize(): boolean {
 		return this.settings.images?.autoResize ?? true;
 	}
@@ -1435,6 +1468,16 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getTuiMode(): TuiMode {
+		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
+	}
+
+	setTuiMode(mode: TuiMode): void {
+		this.globalSettings.tuiMode = mode;
+		this.markModified("tuiMode");
+		this.save();
+	}
+
 	getEditorPaddingX(): number {
 		return this.settings.editorPaddingX ?? 0;
 	}
@@ -1491,4 +1534,3 @@ export class SettingsManager {
 		this.save();
 	}
 }
-

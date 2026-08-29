@@ -10,11 +10,10 @@
  * exercised by the regression test that runs against a real
  * `~/.pi/settings.json`.
  */
-import { strict as assert } from "node:assert";
+import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
 import { getAgentDir } from "../../src/config.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../../src/core/settings-manager.ts";
 
@@ -36,18 +35,18 @@ describe("getDeepseekHarnessSettings", () => {
 		const { manager, cleanup } = await makeManager();
 		try {
 			const s = manager.getDeepseekHarnessSettings();
-			assert.equal(s.enabled, false);
-			assert.equal(s.thresholdRatio, 0.8);
-			assert.equal(s.retainRatio, 0.16);
-			assert.equal(s.maxOverflowRetries, 2);
-			assert.equal(s.toolResultPruneEveryN, 5);
-			assert.equal(s.toolResultHeadChars, 4096);
-			assert.equal(s.toolResultTailChars, 1024);
-			assert.equal(s.toolResultThresholdChars, 8192);
-			assert.equal(s.replayPrefixSummarisation, true);
-			assert.equal(s.budgetedInstructions, true);
-			assert.equal(s.maxBytesForInstructions, 20 * 1024);
-			assert.equal(s.profile, "user");
+			expect(s.enabled).toBe(false);
+			expect(s.thresholdRatio).toBe(0.8);
+			expect(s.retainRatio).toBe(0.16);
+			expect(s.maxOverflowRetries).toBe(2);
+			expect(s.toolResultPruneEveryN).toBe(5);
+			expect(s.toolResultHeadChars).toBe(4096);
+			expect(s.toolResultTailChars).toBe(1024);
+			expect(s.toolResultThresholdChars).toBe(8192);
+			expect(s.replayPrefixSummarisation).toBe(true);
+			expect(s.budgetedInstructions).toBe(true);
+			expect(s.maxBytesForInstructions).toBe(20 * 1024);
+			expect(s.profile).toBe("user");
 		} finally {
 			await cleanup();
 		}
@@ -60,11 +59,11 @@ describe("getDeepseekHarnessSettings", () => {
 			manager.setDeepseekHarnessField("thresholdRatio", 0.6);
 			manager.setDeepseekHarnessField("maxOverflowRetries", 5);
 			const s = manager.getDeepseekHarnessSettings();
-			assert.equal(s.enabled, true);
-			assert.equal(s.thresholdRatio, 0.6);
-			assert.equal(s.maxOverflowRetries, 5);
+			expect(s.enabled).toBe(true);
+			expect(s.thresholdRatio).toBe(0.6);
+			expect(s.maxOverflowRetries).toBe(5);
 			// Other fields keep their defaults.
-			assert.equal(s.retainRatio, 0.16);
+			expect(s.retainRatio).toBe(0.16);
 		} finally {
 			await cleanup();
 		}
@@ -78,12 +77,12 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax",
 				id: "MiniMax-M2.7",
 			});
-			assert.equal(s.profile, "minimax");
+			expect(s.profile).toBe("minimax");
 			// MiniMax profile defaults (overrides the 0.8 default).
-			assert.equal(s.thresholdRatio, 0.75);
-			assert.equal(s.retainRatio, 0.18);
-			assert.equal(s.maxOverflowRetries, 3);
-			assert.equal(s.toolResultPruneEveryN, 3);
+			expect(s.thresholdRatio).toBe(0.75);
+			expect(s.retainRatio).toBe(0.18);
+			expect(s.maxOverflowRetries).toBe(3);
+			expect(s.toolResultPruneEveryN).toBe(3);
 		} finally {
 			await cleanup();
 		}
@@ -97,8 +96,8 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax-cn",
 				id: "MiniMax-M2.5",
 			});
-			assert.equal(s.profile, "minimax");
-			assert.equal(s.thresholdRatio, 0.75);
+			expect(s.profile).toBe("minimax");
+			expect(s.thresholdRatio).toBe(0.75);
 		} finally {
 			await cleanup();
 		}
@@ -112,8 +111,8 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "anthropic",
 				id: "claude-sonnet-4-5",
 			});
-			assert.equal(s.profile, "user");
-			assert.equal(s.thresholdRatio, 0.8);
+			expect(s.profile).toBe("user");
+			expect(s.thresholdRatio).toBe(0.8);
 		} finally {
 			await cleanup();
 		}
@@ -129,7 +128,7 @@ describe("getDeepseekHarnessSettings", () => {
 				id: "MiniMax-M2.7",
 			});
 			// User's 0.5 wins over MiniMax profile's 0.75.
-			assert.equal(s.thresholdRatio, 0.5);
+			expect(s.thresholdRatio).toBe(0.5);
 		} finally {
 			await cleanup();
 		}
@@ -147,7 +146,7 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax",
 				id: "MiniMax-M2.7",
 			});
-			assert.equal(s.thresholdRatio, 0.5);
+			expect(s.thresholdRatio).toBe(0.5);
 		} finally {
 			await cleanup();
 		}
@@ -165,7 +164,7 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax",
 				id: "MiniMax-M3",
 			});
-			assert.equal(s.thresholdRatio, 0.75);
+			expect(s.thresholdRatio).toBe(0.75);
 		} finally {
 			await cleanup();
 		}
@@ -182,7 +181,7 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax",
 				id: "MiniMax-M3",
 			});
-			assert.equal(s.thresholdRatio, 0.6);
+			expect(s.thresholdRatio).toBe(0.6);
 		} finally {
 			await cleanup();
 		}
@@ -197,7 +196,7 @@ describe("getDeepseekHarnessSettings", () => {
 				provider: "minimax",
 				id: "MiniMax-M2.7",
 			});
-			assert.equal(s.enabled, false);
+			expect(s.enabled).toBe(false);
 		} finally {
 			await cleanup();
 		}
@@ -206,9 +205,9 @@ describe("getDeepseekHarnessSettings", () => {
 	it("getDeepseekHarnessEnabled returns false by default and the user value when set", async () => {
 		const { manager, cleanup } = await makeManager();
 		try {
-			assert.equal(manager.getDeepseekHarnessEnabled(), false);
+			expect(manager.getDeepseekHarnessEnabled()).toBe(false);
 			manager.setDeepseekHarnessEnabled(true);
-			assert.equal(manager.getDeepseekHarnessEnabled(), true);
+			expect(manager.getDeepseekHarnessEnabled()).toBe(true);
 		} finally {
 			await cleanup();
 		}
@@ -221,11 +220,11 @@ describe("getDeepseekHarnessSettings", () => {
 			manager.setDeepseekHarnessField("thresholdRatio", 0.6);
 			manager.setDeepseekHarnessField("maxOverflowRetries", 5);
 			const s = manager.getDeepseekHarnessSettings();
-			assert.equal(s.thresholdRatio, 0.6);
-			assert.equal(s.maxOverflowRetries, 5);
-			assert.equal(s.enabled, true);
+			expect(s.thresholdRatio).toBe(0.6);
+			expect(s.maxOverflowRetries).toBe(5);
+			expect(s.enabled).toBe(true);
 			// Sibling fields keep their defaults.
-			assert.equal(s.retainRatio, 0.16);
+			expect(s.retainRatio).toBe(0.16);
 		} finally {
 			await cleanup();
 		}

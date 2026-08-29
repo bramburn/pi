@@ -27,8 +27,18 @@ export function clampMaxTokensToContext(
 	options?: { safetyMargin?: number },
 ): number {
 	if (model.contextWindow <= 0) return Math.max(MIN_MAX_TOKENS, maxTokens);
+	// Use `??` (not `||`) so an explicit `safetyMargin: 0` is honored
+	// — callers use 0 to disable the safety buffer entirely.
 	const safety = options?.safetyMargin ?? CONTEXT_SAFETY_TOKENS;
-	const available = model.contextWindow - estimateContextTokens(context).tokens - safety;
+	// Honor a caller-supplied token estimate when present. This lets the
+	// agent loop short-circuit the per-message token walk with a known
+	// budget — useful for the DeepSeek Harness overflow recovery path
+	// (item 2) which already has an up-to-date estimate in hand.
+	const contextTokens =
+		typeof (context as unknown as { estimatedTokens?: unknown }).estimatedTokens === "number"
+			? (context as unknown as { estimatedTokens: number }).estimatedTokens
+			: estimateContextTokens(context).tokens;
+	const available = model.contextWindow - contextTokens - safety;
 	return Math.min(maxTokens, Math.max(MIN_MAX_TOKENS, available));
 }
 

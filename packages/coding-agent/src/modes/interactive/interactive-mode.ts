@@ -19,7 +19,9 @@ import type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
+	ScrollViewScrollbar,
 	SlashCommand,
+	StackChild,
 	Terminal,
 } from "@earendil-works/pi-tui";
 import {
@@ -29,15 +31,20 @@ import {
 	fuzzyFilter,
 	getCapabilities,
 	hyperlink,
+	isViewportTUI,
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
+	ScrollView,
 	Spacer,
 	setKeybindings,
 	Text,
 	TruncatedText,
 	type TUI,
+	TuiAltScreen,
 	TuiMainScreen,
+	type TuiMode,
+	VStack,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -99,6 +106,7 @@ import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelo
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
@@ -340,11 +348,13 @@ export interface InteractiveModeOptions {
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
 	/** TUI layout mode. */
+	tuiMode?: TuiMode;
 	/** Initial interactive theme setting for this invocation. */
 	initialThemeSetting?: string;
 }
 
 interface InteractiveTuiOptions {
+	tuiMode: TuiMode;
 	showHardwareCursor: boolean;
 	logDirectory: string;
 	terminal?: Terminal;
@@ -352,8 +362,25 @@ interface InteractiveTuiOptions {
 }
 
 /** Composition root for the interactive terminal renderer. */
-export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScreen {
+export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScreen | TuiAltScreen {
 	const terminal = options.terminal ?? new ProcessTerminal();
+	if (options.tuiMode === "fullscreen") {
+		const styleSearchMatch = (text: string) => theme.bg("searchMatchBg", theme.fg("searchMatchText", text));
+		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, {
+			searchMatchStyle: (text) => theme.underline(styleSearchMatch(text)),
+			searchCurrentMatchStyle: (text) => theme.bold(theme.inverse(styleSearchMatch(text))),
+			openUrl: openBrowser,
+			onRightClickPaste: options.onRightClickPaste,
+			copySelection: async (text) => {
+				try {
+					await copyToClipboard(text);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+		});
+	}
 	return new TuiMainScreen(terminal, options.showHardwareCursor, options.logDirectory);
 }
 
@@ -390,10 +417,19 @@ export function createInteractiveTuiReference(getTui: () => TUI): TUI {
 
 export class InteractiveMode {
 	private runtimeHost: AgentSessionRuntime;
-	private renderer: TuiMainScreen;
+	private renderer: TuiMainScreen | TuiAltScreen;
 	private ui: TUI;
+	private transcriptScrollView: ScrollView | undefined;
+	private fullscreenLayoutRoot: Component | undefined;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
+	private mountInteractiveTui(tui: TuiMainScreen | TuiAltScreen, components: readonly Component[]): void {
+		for (const component of components) tui.addChild(component);
+		if (isViewportTUI(tui)) {
+			if (!this.fullscreenLayoutRoot) throw new Error("Fullscreen layout is not initialized");
+			tui.setLayoutRoot(this.fullscreenLayoutRoot);
+		}
+	}
 	private documentContainer: Container;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
@@ -531,7 +567,8 @@ export class InteractiveMode {
 
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
-		this.options = { ...options };
+		const tuiMode = options.tuiMode ?? this.settingsManager.getTuiMode();
+		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			this.resetExtensionUI();
@@ -542,6 +579,7 @@ export class InteractiveMode {
 		});
 		this.version = VERSION;
 		this.renderer = createInteractiveTui({
+			tuiMode,
 			showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
 			logDirectory: getAgentDir(),
 			onRightClickPaste: this.onRightClickPaste,
@@ -796,6 +834,35 @@ export class InteractiveMode {
 
 		// Keep one component tree and remount it when changing renderers.
 		this.renderWidgets(); // Initialize with default spacer
+		this.transcriptScrollView = new ScrollView(this.documentContainer, {
+			follow: "end",
+			primary: true,
+			overscroll: "chain",
+			scrollbar: "auto" satisfies ScrollViewScrollbar,
+			scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
+		});
+		const dockChildren: StackChild[] = [
+			{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
+			{ component: this.statusContainer, shrink: 1, minSize: 0 },
+			{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
+			{ component: this.editorContainer, shrink: 1, minSize: 3 },
+			{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
+			{ component: this.footerContainer, shrink: 1, minSize: 1 },
+		];
+		const dock = new VStack(dockChildren);
+		this.fullscreenLayoutRoot = new VStack([
+			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+		this.mountInteractiveTui(this.renderer, [
+			this.documentContainer,
+			this.pendingMessagesContainer,
+			this.statusContainer,
+			this.widgetContainerAbove,
+			this.editorContainer,
+			this.widgetContainerBelow,
+			this.footerContainer,
+		]);
 		// Accept text while startup completes, but only enable interrupt, exit, and submission feedback.
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
@@ -4353,6 +4420,8 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
+					fullscreenExitOutput: this.settingsManager.getFullscreenExitOutput(),
+					fullscreenScrollbar: this.settingsManager.getFullscreenScrollbar(),
 					warnings: this.settingsManager.getWarnings(),
 					newSessionModel: preference,
 					lastUsedModelLabel: lastUsed ? `${lastUsed.provider}/${lastUsed.modelId}` : undefined,
@@ -4513,6 +4582,12 @@ export class InteractiveMode {
 					},
 					onShowTerminalProgressChange: (enabled) => {
 						this.settingsManager.setShowTerminalProgress(enabled);
+					},
+					onFullscreenExitOutputChange: (output) => {
+						this.settingsManager.setFullscreenExitOutput(output);
+					},
+					onFullscreenScrollbarChange: (mode) => {
+						this.settingsManager.setFullscreenScrollbar(mode);
 					},
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);

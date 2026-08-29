@@ -11,34 +11,33 @@
  * `deepseekHarness.enabled` (or the default `false`). The profile
  * only kicks in when the user has opted in.
  */
-import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import { MINIMAX_PROFILE } from "../../src/core/deepseek-harness-profile.ts";
 
 describe("MINIMAX_PROFILE", () => {
 	it("has the expected threshold and retain ratios", () => {
-		assert.equal(MINIMAX_PROFILE.thresholdRatio, 0.75);
-		assert.equal(MINIMAX_PROFILE.retainRatio, 0.18);
+		expect(MINIMAX_PROFILE.thresholdRatio).toBe(0.75);
+		expect(MINIMAX_PROFILE.retainRatio).toBe(0.18);
 	});
 
 	it("has 3 overflow retries (cache-friendly provider)", () => {
-		assert.equal(MINIMAX_PROFILE.maxOverflowRetries, 3);
+		expect(MINIMAX_PROFILE.maxOverflowRetries).toBe(3);
 	});
 
 	it("has 3-turn pruner cadence (more aggressive than default 5)", () => {
-		assert.equal(MINIMAX_PROFILE.toolResultPruneEveryN, 3);
+		expect(MINIMAX_PROFILE.toolResultPruneEveryN).toBe(3);
 	});
 
 	it("matches the deepseek-harness pruner defaults (8K/4K/1K)", () => {
-		assert.equal(MINIMAX_PROFILE.toolResultThresholdChars, 8192);
-		assert.equal(MINIMAX_PROFILE.toolResultHeadChars, 4096);
-		assert.equal(MINIMAX_PROFILE.toolResultTailChars, 1024);
+		expect(MINIMAX_PROFILE.toolResultThresholdChars).toBe(8192);
+		expect(MINIMAX_PROFILE.toolResultHeadChars).toBe(4096);
+		expect(MINIMAX_PROFILE.toolResultTailChars).toBe(1024);
 	});
 
 	it("enables replay-prefix summarisation and byte-budgeted instructions", () => {
-		assert.equal(MINIMAX_PROFILE.replayPrefixSummarisation, true);
-		assert.equal(MINIMAX_PROFILE.budgetedInstructions, true);
+		expect(MINIMAX_PROFILE.replayPrefixSummarisation).toBe(true);
+		expect(MINIMAX_PROFILE.budgetedInstructions).toBe(true);
 	});
 
 	it("does not override the master enabled flag (Partial<> contract)", () => {
@@ -47,6 +46,6 @@ describe("MINIMAX_PROFILE", () => {
 		// Verifying with `Partial<DeepseekHarnessSettings>` in the
 		// type signature is the strongest guarantee we can encode; the
 		// runtime check below documents the intent.
-		assert.equal("enabled" in MINIMAX_PROFILE, false);
+		expect("enabled" in MINIMAX_PROFILE).toBe(false);
 	});
 });
