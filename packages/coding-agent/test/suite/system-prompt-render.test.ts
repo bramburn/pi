@@ -8,29 +8,28 @@
  *
  * The renderer is a pure function: same input → same output.
  */
-import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import { renderWorkspaceContext } from "../../src/core/system-prompt-render.ts";
 
 describe("renderWorkspaceContext (Phase 4, item 7)", () => {
 	it("renders a small chain as-is with a `<system-reminder>` envelope", () => {
 		const r = renderWorkspaceContext([{ path: "AGENTS.md", content: "hello world" }], 20 * 1024);
-		assert.ok(r.text.startsWith("<system-reminder>"));
-		assert.ok(r.text.endsWith("</system-reminder>\n"));
-		assert.ok(r.text.includes("AGENTS.md"));
-		assert.ok(r.text.includes("hello world"));
-		assert.equal(r.omitted.length, 0);
-		assert.equal(r.truncated.length, 0);
+		expect(r.text.startsWith("<system-reminder>")).toBe(true);
+		expect(r.text.endsWith("</system-reminder>\n")).toBe(true);
+		expect(r.text.includes("AGENTS.md")).toBe(true);
+		expect(r.text.includes("hello world")).toBe(true);
+		expect(r.omitted.length).toBe(0);
+		expect(r.truncated.length).toBe(0);
 	});
 
 	it("records a truncated file when the chain is over-budget", () => {
 		const r = renderWorkspaceContext([{ path: "AGENTS.md", content: "x".repeat(5 * 1024 * 1024) }], 20 * 1024);
-		assert.equal(r.omitted.length, 0);
-		assert.equal(r.truncated.length, 1);
-		assert.equal(r.truncated[0].path, "AGENTS.md");
-		assert.ok(r.truncated[0].originalBytes > 4_000_000);
-		assert.ok(r.truncated[0].includedBytes <= 20 * 1024);
+		expect(r.omitted.length).toBe(0);
+		expect(r.truncated.length).toBe(1);
+		expect(r.truncated[0].path).toBe("AGENTS.md");
+		expect(r.truncated[0].originalBytes > 4_000_000).toBe(true);
+		expect(r.truncated[0].includedBytes <= 20 * 1024).toBe(true);
 	});
 
 	it("records omitted files when a 2-file chain does not fit", () => {
@@ -46,20 +45,20 @@ describe("renderWorkspaceContext (Phase 4, item 7)", () => {
 		// The renderer fits what it can; either the most-specific file
 		// is omitted or the chain is truncated. Both are acceptable.
 		const renderedBytes = Buffer.byteLength(r.text, "utf8");
-		assert.ok(renderedBytes <= 2048, `expected ≤ 2 KiB, got ${renderedBytes}`);
-		assert.ok(r.omitted.length + r.truncated.length >= 1);
+		expect(renderedBytes <= 2048).toBe(true);
+		expect(r.omitted.length + r.truncated.length >= 1).toBe(true);
 	});
 
 	it("returns empty text for maxBytes=0", () => {
 		const r = renderWorkspaceContext([{ path: "AGENTS.md", content: "hello" }], 0);
-		assert.equal(r.text, "");
-		assert.deepEqual(r.omitted, [{ path: "AGENTS.md" }]);
+		expect(r.text).toBe("");
+		expect(r.omitted).toEqual([{ path: "AGENTS.md" }]);
 	});
 
 	it("returns empty text for maxBytes < 0", () => {
 		const r = renderWorkspaceContext([{ path: "AGENTS.md", content: "hello" }], -1);
-		assert.equal(r.text, "");
-		assert.deepEqual(r.omitted, [{ path: "AGENTS.md" }]);
+		expect(r.text).toBe("");
+		expect(r.omitted).toEqual([{ path: "AGENTS.md" }]);
 	});
 
 	it("escapes `</system-reminder>` substrings inside file contents to prevent early closure", () => {
@@ -67,8 +66,8 @@ describe("renderWorkspaceContext (Phase 4, item 7)", () => {
 		// The literal substring `</system-reminder>` in the content is
 		// escaped to `<\/system-reminder>` so the envelope's
 		// terminator doesn't trip the model.
-		assert.ok(!r.text.includes("</system-reminder> x </system-reminder>"));
-		assert.ok(r.text.includes("<\\/system-reminder>"));
+		expect(r.text.includes("</system-reminder> x </system-reminder>")).toBe(false);
+		expect(r.text.includes("<\\/system-reminder>")).toBe(true);
 	});
 
 	it("UTF-8 safe truncation: never splits a multi-byte code point", () => {
@@ -81,19 +80,19 @@ describe("renderWorkspaceContext (Phase 4, item 7)", () => {
 		// The rendered text decodes as valid UTF-8 (no half-codepoint).
 		const bytes = Buffer.from(r.text, "utf8");
 		const decoded = bytes.toString("utf8");
-		assert.equal(decoded.length, r.text.length);
+		expect(decoded.length).toBe(r.text.length);
 	});
 
 	it("empty file list returns an empty string with no diagnostics", () => {
 		const r = renderWorkspaceContext([], 20 * 1024);
-		assert.equal(r.text, "");
-		assert.equal(r.omitted.length, 0);
-		assert.equal(r.truncated.length, 0);
+		expect(r.text).toBe("");
+		expect(r.omitted.length).toBe(0);
+		expect(r.truncated.length).toBe(0);
 	});
 
 	it("fits within the budget even with a 5 MiB AGENTS.md (truncation kicks in)", () => {
 		const r = renderWorkspaceContext([{ path: "AGENTS.md", content: "x".repeat(5 * 1024 * 1024) }], 20 * 1024);
 		const bytes = Buffer.byteLength(r.text, "utf8");
-		assert.ok(bytes <= 20 * 1024, `expected ≤ 20 KiB, got ${bytes}`);
+		expect(bytes <= 20 * 1024).toBe(true);
 	});
 });

@@ -992,12 +992,14 @@ export class SettingsManager {
 		if (!model || (model.provider !== "minimax" && model.provider !== "minimax-cn")) {
 			return base;
 		}
-		// Built-in MiniMax profile + user-level overrides. The profile module
-		// only imports a TypeScript type from this file, which is erased at
-		// compile time, so the runtime value is safe to reference directly.
+		// Built-in MiniMax profile layered UNDER user-level overrides
+		// (user wins). The profile module only imports a TypeScript type
+		// from this file, which is erased at compile time, so the
+		// runtime value is safe to reference directly.
 		const merged: ResolvedDeepseekHarnessSettings = {
 			...base,
 			...MINIMAX_PROFILE,
+			...user,
 			profile: "minimax",
 		};
 		const exact = user.modelPolicies?.[`${model.provider}/${model.id}`];

@@ -52,6 +52,13 @@ export function renderWorkspaceContext(
 	files: ReadonlyArray<{ path: string; content: string }>,
 	maxBytes: number,
 ): RenderedWorkspaceContext {
+	if (files.length === 0) {
+		// No instructions to render — return an empty envelope rather than
+		// emitting `<system-reminder>\n\n</system-reminder>\n` with no body.
+		// The envelope exists to wrap instructions; without instructions it
+		// adds noise to the system prompt.
+		return { text: "", omitted: [], truncated: [] };
+	}
 	if (maxBytes <= 0 || !Number.isFinite(maxBytes)) {
 		return { text: "", omitted: files.map((f) => ({ path: f.path })), truncated: [] };
 	}

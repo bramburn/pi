@@ -14,8 +14,7 @@
  * mock the Anthropic fetch and assert the request body — that's
  * covered in `regression #007`.
  */
-import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import { buildBaseOptions } from "../src/api/simple-options.ts";
 import type { Context, Model } from "../src/types.ts";
@@ -50,7 +49,7 @@ describe("purpose: 'compaction' (Phase 3, item 12)", () => {
 		});
 		// The base options preserve the field. Providers read it from
 		// here to decide cache behaviour.
-		assert.equal(opts.purpose, "compaction");
+		expect(opts.purpose).toBe("compaction");
 	});
 
 	it("SimpleStreamOptions accepts `purpose: 'session-title'`", () => {
@@ -59,7 +58,7 @@ describe("purpose: 'compaction' (Phase 3, item 12)", () => {
 			apiKey: "test",
 			purpose: "session-title",
 		});
-		assert.equal(opts.purpose, "session-title");
+		expect(opts.purpose).toBe("session-title");
 	});
 
 	it("SimpleStreamOptions allows `purpose` to be undefined (default user-facing call)", () => {
@@ -67,7 +66,7 @@ describe("purpose: 'compaction' (Phase 3, item 12)", () => {
 			maxTokens: 8192,
 			apiKey: "test",
 		});
-		assert.equal(opts.purpose, undefined);
+		expect(opts.purpose).toBeUndefined();
 	});
 
 	it("`safetyMargin` is independent of `purpose` (both are part of the same context-management bundle)", () => {
@@ -77,8 +76,8 @@ describe("purpose: 'compaction' (Phase 3, item 12)", () => {
 			purpose: "compaction",
 			safetyMargin: 1024,
 		});
-		assert.equal(opts.purpose, "compaction");
-		assert.equal(opts.safetyMargin, 1024);
+		expect(opts.purpose).toBe("compaction");
+		expect(opts.safetyMargin).toBe(1024);
 	});
 
 	it("replay-prefix path produces the same base options shape whether or not `purpose` is set", () => {
@@ -95,6 +94,6 @@ describe("purpose: 'compaction' (Phase 3, item 12)", () => {
 		});
 		// Both clamp the same way. The provider-side handling of
 		// `purpose` is what differentiates (cache namespace vs not).
-		assert.equal(withPurpose.maxTokens, withoutPurpose.maxTokens);
+		expect(withPurpose.maxTokens).toBe(withoutPurpose.maxTokens);
 	});
 });
