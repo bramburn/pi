@@ -7,10 +7,11 @@ This package provides:
 - an explicit, callback-based `TelemetryContext` / `TelemetrySpan` contract;
 - a shared `NOOP_TELEMETRY_CONTEXT`;
 - a reference `InMemoryTelemetryContext` implementation;
+- a `SentryTelemetryContext` adapter that emits Sentry envelopes through a caller-supplied transport;
 - serializable schema definitions with inferred TypeScript types;
 - no exporter, global current-span state, or dependency on a telemetry backend.
 
-Applications can use the in-memory reference or provide an adapter for OpenTelemetry, Sentry, logs, or another backend. Pi packages pass telemetry contexts explicitly and define their domain schemas separately.
+Applications can use the in-memory reference, the Sentry adapter, or wire up their own adapter for OpenTelemetry, logs, or another backend. Pi packages pass telemetry contexts explicitly and define their domain schemas separately.
 
 ## Table of Contents
 
@@ -20,6 +21,7 @@ Applications can use the in-memory reference or provide an adapter for OpenTelem
 - [Adapter Contract](#adapter-contract)
 - [No-op Context](#no-op-context)
 - [In-Memory Reference Adapter](#in-memory-reference-adapter)
+- [Sentry Adapter](#sentry-adapter)
 - [Adapter Conformance](#adapter-conformance)
 - [Typed Schemas](#typed-schemas)
   - [Start and Completion Attributes](#start-and-completion-attributes)
@@ -174,6 +176,48 @@ console.log(telemetry.getSpans());
 `getSpans()` returns detached snapshots in span-start order. Each `RecordedTelemetrySpan` contains a deterministic numeric ID, parent ID, merged attributes, ordered events, final status, settlement state, and deterministic end sequence. It records no timestamps.
 
 The adapter is safe to use as an ordinary `TelemetryContext`, but storage is unbounded and process-local. Create a fresh instance to isolate tests or recording scopes, and do not capture sensitive attributes unless the caller's data policy allows them.
+
+## Sentry Adapter
+
+`SentryTelemetryContext` is an opt-in adapter that implements `TelemetryContext` while queueing spans and captured errors as [Sentry envelopes](https://develop.sentry.dev/sdk/envelopes/). The adapter has no runtime dependencies; the caller injects a `SentryTransport` that owns serialization and delivery. In pi's coding-agent the bundled transport posts envelopes to the Sentry envelope endpoint via `undici`.
+
+```ts
+import { parseSentryDsn, SentryTelemetryContext } from "@earendil-works/pi-telemetry";
+
+const dsn = parseSentryDsn(process.env.SENTRY_DSN!);
+const context = new SentryTelemetryContext({
+	dsn,
+	release: "my-app@1.0.0",
+	environment: process.env.NODE_ENV ?? "development",
+	tracesSampleRate: 0.1,   // 10% of root spans become transactions
+	sampleRate: 1,          // all captured errors are sent
+	transport: {
+		async send(envelope) {
+			// POST `envelope` to dsn.envelopeEndpoint with an X-Sentry-Auth header.
+		},
+	},
+});
+
+await context.startSpan({ name: "checkout" }, async (span) => {
+	try {
+		await chargeCard();
+	} catch (error) {
+		span.setStatus({ status: "error", error: { name: "PaymentError", message: String(error) } });
+		context.captureException(error, { tags: { feature: "checkout" } });
+		throw error;
+	}
+});
+
+await context.dispose(); // flushes pending envelopes
+```
+
+Key behaviors:
+
+- Spans are recorded in memory. On `flush()` (or `dispose()`), root spans are emitted as Sentry `transaction` items; child spans become entries in the transaction's `spans` array.
+- `captureException` and `captureMessage` produce Sentry `event` items. Errors are parsed into Sentry's `exception` shape with a basic stack-trace extraction that flags `node_modules` and `node:` frames as not in-app.
+- `tracesSampleRate` (default `0`) gates transactions. `sampleRate` (default `1`) gates events. Sampling is per-root-span and per-event, using `Math.random()`.
+- `beforeSend` may drop or rewrite an event before it is enqueued. The callback is invoked synchronously; thrown errors are logged in `debug` mode and the event is dropped.
+- The transport is responsible for HTTP delivery. The adapter does not retry on failure; a single failed envelope is logged in `debug` mode and the next envelope is attempted.
 
 ## Adapter Conformance
 

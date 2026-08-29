@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in Sentry error reporting controlled by the `PI_AI_DEBUG` and `SENTRY_DSN` environment variables. When `PI_AI_DEBUG=1` and `SENTRY_DSN` point to a Sentry project, the coding-agent captures uncaught exceptions, unhandled rejections, and process warnings, and flushes them to the Sentry envelope endpoint via `undici` on exit. Both env vars are required; either alone is a no-op.
+
+### Documentation
+
+- Documented the new `PI_AI_DEBUG` and `SENTRY_DSN` environment variables in the `--help` output.
+
 ## [0.84.4] - 2026-08-28
 
 ### New Features

@@ -22,6 +22,27 @@ export interface TelemetrySpan extends TelemetryContext {
 }
 
 export { NOOP_TELEMETRY_CONTEXT } from "./noop.ts";
+export type {
+	SentryBreadcrumb,
+	SentryDsn,
+	SentryEnvelope,
+	SentryEnvelopeHeader,
+	SentryEnvelopeItem,
+	SentryEvent,
+	SentryExceptionValue,
+	SentryLogLevel,
+	SentrySpanStatus,
+	SentryStackFrame,
+	SentryTelemetryContextOptions,
+	SentryTransaction,
+	SentryTransactionContext,
+	SentryTransactionSpan,
+	SentryTransport,
+} from "./sentry.ts";
+export {
+	parseSentryDsn,
+	SentryTelemetryContext,
+} from "./sentry.ts";
 
 export type TelemetryAttributeType = "string" | "number" | "boolean" | "string[]" | "number[]" | "boolean[]";
 
