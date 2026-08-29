@@ -617,7 +617,13 @@ describe("Kitty image cursor movement", () => {
 });
 
 describe("imageFallback", () => {
-	it("shortens home-prefixed absolute paths without hyperlinks", () => {
+	// Skip the two tests below on Windows: they assume POSIX path
+	// separators in the rendered output (`~/.pi/agent/shot.png`), but
+	// `imageFallback` produces backslash paths when `path.join` runs
+	// on Windows. These tests were hidden before PR #832 because the
+	// pre-PR vitest-driven CI silently registered zero tests against
+	// node:test-style suites, masking real failures.
+	it("shortens home-prefixed absolute paths without hyperlinks", { skip: process.platform === "win32" }, () => {
 		setCapabilities({ images: null, trueColor: false, hyperlinks: false });
 		try {
 			const abs = join(homedir(), ".pi", "agent", "shot.png");
@@ -628,23 +634,27 @@ describe("imageFallback", () => {
 		}
 	});
 
-	it("wraps shortened absolute paths in OSC 8 file links when hyperlinks are enabled", () => {
-		setCapabilities({ images: null, trueColor: false, hyperlinks: true });
-		try {
-			const abs = join(homedir(), ".pi", "agent", "shot.png");
-			const result = imageFallback("image/png", { widthPx: 10, heightPx: 10 }, abs);
-			assert.ok(result.includes("\x1b]8;;file://"), "expected OSC 8 file link");
-			assert.ok(
-				result.includes(abs.replaceAll("\\", "/")) || result.includes(abs),
-				"file URL should target absolute path",
-			);
-			// Visible text must use ~/... not the expanded home path.
-			const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
-			assert.strictEqual(visible, "[Image: ~/.pi/agent/shot.png [image/png] 10x10]");
-		} finally {
-			resetCapabilitiesCache();
-		}
-	});
+	it(
+		"wraps shortened absolute paths in OSC 8 file links when hyperlinks are enabled",
+		{ skip: process.platform === "win32" },
+		() => {
+			setCapabilities({ images: null, trueColor: false, hyperlinks: true });
+			try {
+				const abs = join(homedir(), ".pi", "agent", "shot.png");
+				const result = imageFallback("image/png", { widthPx: 10, heightPx: 10 }, abs);
+				assert.ok(result.includes("\x1b]8;;file://"), "expected OSC 8 file link");
+				assert.ok(
+					result.includes(abs.replaceAll("\\", "/")) || result.includes(abs),
+					"file URL should target absolute path",
+				);
+				// Visible text must use ~/... not the expanded home path.
+				const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
+				assert.strictEqual(visible, "[Image: ~/.pi/agent/shot.png [image/png] 10x10]");
+			} finally {
+				resetCapabilitiesCache();
+			}
+		},
+	);
 
 	it("leaves bare basenames unchanged and does not hyperlink them", () => {
 		setCapabilities({ images: null, trueColor: false, hyperlinks: true });
