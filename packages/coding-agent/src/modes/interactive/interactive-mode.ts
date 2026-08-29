@@ -62,6 +62,7 @@ import {
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -319,6 +320,8 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
 export interface InteractiveModeOptions {
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
+	/** Diagnostics collected before the interactive TUI was initialized. */
+	startupDiagnostics?: AgentSessionRuntimeDiagnostic[];
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
 	/**
@@ -1034,12 +1037,23 @@ export class InteractiveMode {
 		// Show startup warnings
 		const {
 			migratedProviders,
+			startupDiagnostics,
 			modelFallbackMessage,
 			newSessionModelWarnings,
 			initialMessage,
 			initialImages,
 			initialMessages,
 		} = this.options;
+
+		for (const diagnostic of startupDiagnostics ?? []) {
+			if (diagnostic.type === "error") {
+				this.showError(diagnostic.message);
+			} else if (diagnostic.type === "warning") {
+				this.showWarning(diagnostic.message);
+			} else {
+				this.showStatus(diagnostic.message);
+			}
+		}
 
 		if (migratedProviders && migratedProviders.length > 0) {
 			this.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
@@ -4057,21 +4071,20 @@ export class InteractiveMode {
 		this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
 	}
 
+	/** Update rendered assistant messages without rebuilding live tool components. */
+	private updateThinkingBlockVisibility(): void {
+		for (const child of this.chatContainer.children) {
+			if (child instanceof AssistantMessageComponent) {
+				child.setHideThinkingBlock(this.hideThinkingBlock);
+			}
+		}
+		this.ui.requestRender();
+	}
+
 	private toggleThinkingBlockVisibility(): void {
 		this.hideThinkingBlock = !this.hideThinkingBlock;
 		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
-
-		// Rebuild chat from session messages
-		this.chatContainer.clear();
-		this.rebuildChatFromMessages();
-
-		// If streaming, re-add the streaming component with updated visibility and re-render
-		if (this.streamingComponent && this.streamingMessage) {
-			this.streamingComponent.setHideThinkingBlock(this.hideThinkingBlock);
-			this.streamingComponent.updateContent(this.streamingMessage);
-			this.chatContainer.addChild(this.streamingComponent);
-		}
-
+		this.updateThinkingBlockVisibility();
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
 	}
 
@@ -4499,13 +4512,7 @@ export class InteractiveMode {
 					onHideThinkingBlockChange: (hidden) => {
 						this.hideThinkingBlock = hidden;
 						this.settingsManager.setHideThinkingBlock(hidden);
-						for (const child of this.chatContainer.children) {
-							if (child instanceof AssistantMessageComponent) {
-								child.setHideThinkingBlock(hidden);
-							}
-						}
-						this.chatContainer.clear();
-						this.rebuildChatFromMessages();
+						this.updateThinkingBlockVisibility();
 					},
 					onMermaidRenderingModeChange: (mode) => {
 						this.settingsManager.setMermaidRenderingMode(mode);
