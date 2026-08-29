@@ -1,5 +1,4 @@
-import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 import { SettingsList, type SettingsListTheme } from "../src/components/settings-list.ts";
 
 const testTheme: SettingsListTheme = {
@@ -33,11 +32,11 @@ describe("SettingsList", () => {
 
 		for (const character of "Output padding") list.handleInput(character);
 
-		assert.deepStrictEqual(changes, []);
-		assert.match(list.render(80)[0] ?? "", /Output padding/);
+		expect(changes).toStrictEqual([]);
+		expect(list.render(80)[0] ?? "").toMatch(/Output padding/);
 
 		list.handleInput("\r");
-		assert.deepStrictEqual(changes, [{ id: "output-pad", value: "2" }]);
+		expect(changes).toStrictEqual([{ id: "output-pad", value: "2" }]);
 	});
 
 	it("keeps Space as a change shortcut before a search query is entered", () => {
@@ -53,6 +52,6 @@ describe("SettingsList", () => {
 
 		list.handleInput(" ");
 
-		assert.deepStrictEqual(changes, [{ id: "output-pad", value: "2" }]);
+		expect(changes).toStrictEqual([{ id: "output-pad", value: "2" }]);
 	});
 });

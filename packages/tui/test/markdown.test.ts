@@ -1,7 +1,6 @@
-import assert from "node:assert";
-import { afterEach, describe, it } from "node:test";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import { Chalk } from "chalk";
+import { afterEach, describe, expect, it } from "vitest";
 import { Markdown, type MarkdownTheme } from "../src/components/markdown.ts";
 import { resetCapabilitiesCache, setCapabilities } from "../src/terminal-image.ts";
 import type { Component, TUI } from "../src/tui.ts";
@@ -16,10 +15,10 @@ function getCell(terminal: VirtualTerminal, row: number, col: number) {
 	const xterm = (terminal as unknown as { xterm: XtermTerminalType }).xterm;
 	const buffer = xterm.buffer.active;
 	const line = buffer.getLine(buffer.viewportY + row);
-	assert.ok(line, `Missing buffer line at row ${row}`);
-	const cell = line.getCell(col);
-	assert.ok(cell, `Missing cell at row ${row} col ${col}`);
-	return cell;
+	expect(line).toBeTruthy();
+	const cell = line!.getCell(col);
+	expect(cell).toBeTruthy();
+	return cell!;
 }
 
 function stripAnsi(line: string): string {
@@ -37,31 +36,22 @@ describe("Markdown component", () => {
 				},
 			});
 
-			assert.deepStrictEqual(
-				markdown.render(80).map((line) => stripAnsi(line).trim()),
-				["source 76"],
-			);
+			expect(markdown.render(80).map((line) => stripAnsi(line).trim())).toStrictEqual(["source 76"]);
 			markdown.render(80);
-			assert.deepStrictEqual(
-				markdown.render(60).map((line) => stripAnsi(line).trim()),
-				["source 56"],
-			);
-			assert.deepStrictEqual(calls, [
+			expect(markdown.render(60).map((line) => stripAnsi(line).trim())).toStrictEqual(["source 56"]);
+			expect(calls).toStrictEqual([
 				{ source: "source", availableWidth: 76 },
 				{ source: "source", availableWidth: 56 },
 			]);
 
 			markdown.setText("updated");
-			assert.deepStrictEqual(
-				markdown.render(60).map((line) => stripAnsi(line).trim()),
-				["updated 56"],
-			);
-			assert.deepStrictEqual(calls.at(-1), { source: "updated", availableWidth: 56 });
+			expect(markdown.render(60).map((line) => stripAnsi(line).trim())).toStrictEqual(["updated 56"]);
+			expect(calls.at(-1)).toStrictEqual({ source: "updated", availableWidth: 56 });
 
 			markdown.invalidate();
 			markdown.render(60);
-			assert.deepStrictEqual(calls.at(-1), { source: "updated", availableWidth: 56 });
-			assert.strictEqual(calls.length, 4);
+			expect(calls.at(-1)).toStrictEqual({ source: "updated", availableWidth: 56 });
+			expect(calls.length).toBe(4);
 		});
 	});
 
@@ -80,16 +70,16 @@ describe("Markdown component", () => {
 			const lines = markdown.render(80);
 
 			// Check that we have content
-			assert.ok(lines.length > 0);
+			expect(lines.length > 0).toBeTruthy();
 
 			// Strip ANSI codes for checking
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Check structure
-			assert.ok(plainLines.some((line) => line.includes("- Item 1")));
-			assert.ok(plainLines.some((line) => line.includes("    - Nested 1.1")));
-			assert.ok(plainLines.some((line) => line.includes("    - Nested 1.2")));
-			assert.ok(plainLines.some((line) => line.includes("- Item 2")));
+			expect(plainLines.some((line) => line.includes("- Item 1"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    - Nested 1.1"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    - Nested 1.2"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("- Item 2"))).toBeTruthy();
 		});
 
 		it("should render deeply nested list", () => {
@@ -107,10 +97,10 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Check proper indentation
-			assert.ok(plainLines.some((line) => line.includes("- Level 1")));
-			assert.ok(plainLines.some((line) => line.includes("    - Level 2")));
-			assert.ok(plainLines.some((line) => line.includes("        - Level 3")));
-			assert.ok(plainLines.some((line) => line.includes("            - Level 4")));
+			expect(plainLines.some((line) => line.includes("- Level 1"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    - Level 2"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("        - Level 3"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("            - Level 4"))).toBeTruthy();
 		});
 
 		it("should render ordered nested list", () => {
@@ -127,10 +117,10 @@ describe("Markdown component", () => {
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
-			assert.ok(plainLines.some((line) => line.includes("1. First")));
-			assert.ok(plainLines.some((line) => line.includes("    1. Nested first")));
-			assert.ok(plainLines.some((line) => line.includes("    2. Nested second")));
-			assert.ok(plainLines.some((line) => line.includes("2. Second")));
+			expect(plainLines.some((line) => line.includes("1. First"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    1. Nested first"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    2. Nested second"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("2. Second"))).toBeTruthy();
 		});
 
 		it("should normalize ordered list markers by default", () => {
@@ -138,7 +128,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["1. alpha", "2. beta", "3. gamma"]);
+			expect(lines).toStrictEqual(["1. alpha", "2. beta", "3. gamma"]);
 		});
 
 		it("should preserve source list markers when configured", () => {
@@ -155,7 +145,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, [
+			expect(lines).toStrictEqual([
 				"4. forth",
 				"3. third",
 				"",
@@ -184,9 +174,9 @@ describe("Markdown component", () => {
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
-			assert.ok(plainLines.some((line) => line.includes("1. Ordered item")));
-			assert.ok(plainLines.some((line) => line.includes("    - Unordered nested")));
-			assert.ok(plainLines.some((line) => line.includes("2. Second ordered")));
+			expect(plainLines.some((line) => line.includes("1. Ordered item"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    - Unordered nested"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("2. Second ordered"))).toBeTruthy();
 		});
 
 		it("should render blank lines between loose list items", () => {
@@ -207,7 +197,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, [
+			expect(lines).toStrictEqual([
 				"1. Lorem ipsum dolor sit amet.",
 				"",
 				"   Ut enim ad minim veniam.",
@@ -225,7 +215,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["- [ ] beep", "- [x] boop"]);
+			expect(lines).toStrictEqual(["- [ ] beep", "- [x] boop"]);
 		});
 
 		it("should maintain numbering when code blocks are not indented (LLM output)", () => {
@@ -257,12 +247,12 @@ describe("Markdown component", () => {
 			const numberedLines = plainLines.filter((line) => /^\d+\./.test(line));
 
 			// Should have 3 numbered items
-			assert.strictEqual(numberedLines.length, 3, `Expected 3 numbered items, got: ${numberedLines.join(", ")}`);
+			expect(numberedLines.length).toBe(3);
 
 			// Check the actual numbers
-			assert.ok(numberedLines[0].startsWith("1."), `First item should be "1.", got: ${numberedLines[0]}`);
-			assert.ok(numberedLines[1].startsWith("2."), `Second item should be "2.", got: ${numberedLines[1]}`);
-			assert.ok(numberedLines[2].startsWith("3."), `Third item should be "3.", got: ${numberedLines[2]}`);
+			expect(numberedLines[0].startsWith("1.")).toBeTruthy();
+			expect(numberedLines[1].startsWith("2.")).toBeTruthy();
+			expect(numberedLines[2].startsWith("3.")).toBeTruthy();
 		});
 
 		it("should indent wrapped unordered list lines", () => {
@@ -270,7 +260,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(20).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["- alpha beta gamma", "  delta epsilon"]);
+			expect(lines).toStrictEqual(["- alpha beta gamma", "  delta epsilon"]);
 		});
 
 		it("should indent wrapped ordered list lines", () => {
@@ -278,7 +268,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(20).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["1. alpha beta gamma", "   delta epsilon"]);
+			expect(lines).toStrictEqual(["1. alpha beta gamma", "   delta epsilon"]);
 		});
 
 		it("should indent wrapped ordered list lines with multi-digit markers", () => {
@@ -286,7 +276,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(21).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["10. alpha beta gamma", "    delta epsilon"]);
+			expect(lines).toStrictEqual(["10. alpha beta gamma", "    delta epsilon"]);
 		});
 
 		it("should indent wrapped nested list lines", () => {
@@ -294,7 +284,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(24).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["- parent", "    - alpha beta gamma", "      delta epsilon"]);
+			expect(lines).toStrictEqual(["- parent", "    - alpha beta gamma", "      delta epsilon"]);
 		});
 
 		it("should indent wrapped nested list lines under ordered parents", () => {
@@ -302,7 +292,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(24).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["1. parent", "    - alpha beta gamma", "      delta epsilon"]);
+			expect(lines).toStrictEqual(["1. parent", "    - alpha beta gamma", "      delta epsilon"]);
 		});
 
 		it("should render and wrap blockquotes inside list items", () => {
@@ -310,7 +300,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(24).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["- │ alpha beta gamma", "  │ delta epsilon zeta"]);
+			expect(lines).toStrictEqual(["- │ alpha beta gamma", "  │ delta epsilon zeta"]);
 		});
 
 		it("should render and wrap code blocks inside list items", () => {
@@ -323,7 +313,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(24).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["- ```ts", "    alpha beta gamma", "  delta epsilon zeta", "  ```"]);
+			expect(lines).toStrictEqual(["- ```ts", "    alpha beta gamma", "  delta epsilon zeta", "  ```"]);
 		});
 	});
 
@@ -343,13 +333,13 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Check table structure
-			assert.ok(plainLines.some((line) => line.includes("Name")));
-			assert.ok(plainLines.some((line) => line.includes("Age")));
-			assert.ok(plainLines.some((line) => line.includes("Alice")));
-			assert.ok(plainLines.some((line) => line.includes("Bob")));
+			expect(plainLines.some((line) => line.includes("Name"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("Age"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("Alice"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("Bob"))).toBeTruthy();
 			// Check for table borders
-			assert.ok(plainLines.some((line) => line.includes("│")));
-			assert.ok(plainLines.some((line) => line.includes("─")));
+			expect(plainLines.some((line) => line.includes("│"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("─"))).toBeTruthy();
 		});
 
 		it("should render row dividers between data rows", () => {
@@ -367,7 +357,7 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const dividerLines = plainLines.filter((line) => line.includes("┼"));
 
-			assert.strictEqual(dividerLines.length, 2, "Expected header + row divider");
+			expect(dividerLines.length).toBe(2);
 		});
 
 		it("should keep column width at least the longest word", () => {
@@ -385,17 +375,14 @@ describe("Markdown component", () => {
 			const lines = markdown.render(32);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const dataLine = plainLines.find((line) => line.includes(longestWord));
-			assert.ok(dataLine, "Expected data row containing longest word");
+			expect(dataLine).toBeTruthy();
 
-			const segments = dataLine.split("│").slice(1, -1);
+			const segments = dataLine!.split("│").slice(1, -1);
 			const [firstSegment] = segments;
-			assert.ok(firstSegment, "Expected first column segment");
+			expect(firstSegment).toBeTruthy();
 			const firstColumnWidth = firstSegment.length - 2;
 
-			assert.ok(
-				firstColumnWidth >= longestWord.length,
-				`Expected first column width >= ${longestWord.length}, got ${firstColumnWidth}`,
-			);
+			expect(firstColumnWidth >= longestWord.length).toBeTruthy();
 		});
 
 		it("should render table with alignment", () => {
@@ -413,11 +400,11 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Check headers
-			assert.ok(plainLines.some((line) => line.includes("Left")));
-			assert.ok(plainLines.some((line) => line.includes("Center")));
-			assert.ok(plainLines.some((line) => line.includes("Right")));
+			expect(plainLines.some((line) => line.includes("Left"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("Center"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("Right"))).toBeTruthy();
 			// Check content
-			assert.ok(plainLines.some((line) => line.includes("Long text")));
+			expect(plainLines.some((line) => line.includes("Long text"))).toBeTruthy();
 		});
 
 		it("should handle tables with varying column widths", () => {
@@ -434,11 +421,11 @@ describe("Markdown component", () => {
 			const lines = markdown.render(80);
 
 			// Should render without errors
-			assert.ok(lines.length > 0);
+			expect(lines.length > 0).toBeTruthy();
 
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
-			assert.ok(plainLines.some((line) => line.includes("Very long column header")));
-			assert.ok(plainLines.some((line) => line.includes("This is a much longer cell content")));
+			expect(plainLines.some((line) => line.includes("Very long column header"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("This is a much longer cell content"))).toBeTruthy();
 		});
 
 		it("should wrap table cells when table exceeds available width", () => {
@@ -458,15 +445,15 @@ describe("Markdown component", () => {
 
 			// All lines should fit within width
 			for (const line of plainLines) {
-				assert.ok(line.length <= 50, `Line exceeds width 50: "${line}" (length: ${line.length})`);
+				expect(line.length <= 50).toBeTruthy();
 			}
 
 			// Content should still be present (possibly wrapped across lines)
 			const allText = plainLines.join(" ");
-			assert.ok(allText.includes("Command"), "Should contain 'Command'");
-			assert.ok(allText.includes("Description"), "Should contain 'Description'");
-			assert.ok(allText.includes("npm install"), "Should contain 'npm install'");
-			assert.ok(allText.includes("Install"), "Should contain 'Install'");
+			expect(allText.includes("Command")).toBeTruthy();
+			expect(allText.includes("Description")).toBeTruthy();
+			expect(allText.includes("npm install")).toBeTruthy();
+			expect(allText.includes("Install")).toBeTruthy();
 		});
 
 		it("should not leak wrapped link styles into table borders or plain cells", async () => {
@@ -486,30 +473,30 @@ describe("Markdown component", () => {
 						await terminal.waitForRender();
 						const viewport = terminal.getViewport();
 						const row = viewport.findIndex((line) => line.includes("one") && line.includes("norm"));
-						assert.notStrictEqual(row, -1, `Missing wrapped table row: ${JSON.stringify(viewport)}`);
+						expect(row).not.toBe(-1);
 						const line = viewport[row];
 						const linkCol = line.indexOf("one");
 						const separatorCol = line.indexOf("│", linkCol);
 						const plainCol = line.indexOf("norm");
-						assert.ok(linkCol >= 0 && separatorCol > linkCol && plainCol > separatorCol);
-						assert.strictEqual(getCell(terminal, row, linkCol).isFgDefault(), false);
-						assert.strictEqual(getCell(terminal, row, separatorCol).isFgDefault(), true);
-						assert.strictEqual(getCell(terminal, row, plainCol).isFgDefault(), true);
-						assert.notStrictEqual(getCell(terminal, row, linkCol).isBold(), 0);
-						assert.strictEqual(getCell(terminal, row, separatorCol).isBold(), 0);
-						assert.strictEqual(getCell(terminal, row, plainCol).isBold(), 0);
+						expect(linkCol >= 0 && separatorCol > linkCol && plainCol > separatorCol).toBeTruthy();
+						expect(getCell(terminal, row, linkCol).isFgDefault()).toBe(false);
+						expect(getCell(terminal, row, separatorCol).isFgDefault()).toBe(true);
+						expect(getCell(terminal, row, plainCol).isFgDefault()).toBe(true);
+						expect(getCell(terminal, row, linkCol).isBold()).not.toBe(0);
+						expect(getCell(terminal, row, separatorCol).isBold()).toBe(0);
+						expect(getCell(terminal, row, plainCol).isBold()).toBe(0);
 
 						if (!hyperlinks) {
 							const urlRow = viewport.findIndex((viewportLine) => viewportLine.includes("https"));
-							assert.notStrictEqual(urlRow, -1, `Missing fallback URL row: ${JSON.stringify(viewport)}`);
+							expect(urlRow).not.toBe(-1);
 							const urlLine = viewport[urlRow];
 							const urlCol = urlLine.indexOf("https");
 							const urlSeparatorCol = urlLine.indexOf("│", urlCol);
 							const urlBorderCol = urlLine.lastIndexOf("│");
-							assert.ok(urlCol >= 0 && urlSeparatorCol > urlCol && urlBorderCol > urlSeparatorCol);
-							assert.notStrictEqual(getCell(terminal, urlRow, urlCol).isDim(), 0);
-							assert.strictEqual(getCell(terminal, urlRow, urlSeparatorCol).isDim(), 0);
-							assert.strictEqual(getCell(terminal, urlRow, urlBorderCol).isDim(), 0);
+							expect(urlCol >= 0 && urlSeparatorCol > urlCol && urlBorderCol > urlSeparatorCol).toBeTruthy();
+							expect(getCell(terminal, urlRow, urlCol).isDim()).not.toBe(0);
+							expect(getCell(terminal, urlRow, urlSeparatorCol).isDim()).toBe(0);
+							expect(getCell(terminal, urlRow, urlBorderCol).isDim()).toBe(0);
 						}
 					} finally {
 						tui.stop();
@@ -542,26 +529,28 @@ describe("Markdown component", () => {
 				await terminal.waitForRender();
 				const viewport = terminal.getViewport();
 				const row = viewport.findIndex((line) => line.includes("one") && line.includes("normal"));
-				assert.notStrictEqual(row, -1, `Missing wrapped blockquote table row: ${JSON.stringify(viewport)}`);
+				expect(row).not.toBe(-1);
 				const line = viewport[row];
 				const linkCol = line.indexOf("one");
 				const separatorCol = line.indexOf("│", linkCol);
 				const plainCol = line.indexOf("normal");
-				assert.ok(linkCol >= 0 && separatorCol > linkCol && plainCol > separatorCol);
+				expect(linkCol >= 0 && separatorCol > linkCol && plainCol > separatorCol).toBeTruthy();
 
-				assert.notStrictEqual(getCell(terminal, row, linkCol).getFgColor(), quoteColor);
-				assert.strictEqual(getCell(terminal, row, separatorCol).getFgColor(), quoteColor);
-				assert.strictEqual(getCell(terminal, row, plainCol).getFgColor(), quoteColor);
+				expect(getCell(terminal, row, linkCol).getFgColor()).not.toBe(quoteColor);
+				expect(getCell(terminal, row, separatorCol).getFgColor()).toBe(quoteColor);
+				expect(getCell(terminal, row, plainCol).getFgColor()).toBe(quoteColor);
 
 				const finalRow = viewport.findIndex((line) => line.includes("five six"));
-				assert.notStrictEqual(finalRow, -1, `Missing final wrapped link row: ${JSON.stringify(viewport)}`);
+				expect(finalRow).not.toBe(-1);
 				const finalLine = viewport[finalRow];
 				const finalLinkCol = finalLine.indexOf("five six");
 				const finalSeparatorCol = finalLine.indexOf("│", finalLinkCol);
 				const finalBorderCol = finalLine.lastIndexOf("│");
-				assert.ok(finalLinkCol >= 0 && finalSeparatorCol > finalLinkCol && finalBorderCol > finalSeparatorCol);
-				assert.strictEqual(getCell(terminal, finalRow, finalSeparatorCol).getFgColor(), quoteColor);
-				assert.strictEqual(getCell(terminal, finalRow, finalBorderCol).getFgColor(), quoteColor);
+				expect(
+					finalLinkCol >= 0 && finalSeparatorCol > finalLinkCol && finalBorderCol > finalSeparatorCol,
+				).toBeTruthy();
+				expect(getCell(terminal, finalRow, finalSeparatorCol).getFgColor()).toBe(quoteColor);
+				expect(getCell(terminal, finalRow, finalBorderCol).getFgColor()).toBe(quoteColor);
 			} finally {
 				tui.stop();
 				resetCapabilitiesCache();
@@ -584,13 +573,13 @@ describe("Markdown component", () => {
 
 			// Should have multiple data rows due to wrapping
 			const dataRows = plainLines.filter((line) => line.startsWith("│") && !line.includes("─"));
-			assert.ok(dataRows.length > 2, `Expected wrapped rows, got ${dataRows.length} rows`);
+			expect(dataRows.length > 2).toBeTruthy();
 
 			// All content should be preserved (may be split across lines)
 			const allText = plainLines.join(" ");
-			assert.ok(allText.includes("very long"), "Should preserve 'very long'");
-			assert.ok(allText.includes("cell content"), "Should preserve 'cell content'");
-			assert.ok(allText.includes("should wrap"), "Should preserve 'should wrap'");
+			expect(allText.includes("very long")).toBeTruthy();
+			expect(allText.includes("cell content")).toBeTruthy();
+			expect(allText.includes("should wrap")).toBeTruthy();
 		});
 
 		it("should wrap long unbroken tokens inside table cells (not only at line start)", () => {
@@ -612,22 +601,22 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			for (const line of plainLines) {
-				assert.ok(line.length <= width, `Line exceeds width ${width}: "${line}" (length: ${line.length})`);
+				expect(line.length <= width).toBeTruthy();
 			}
 
 			// Borders should stay intact (exactly 2 vertical borders for a 1-col table)
 			const tableLines = plainLines.filter((line) => line.startsWith("│"));
-			assert.ok(tableLines.length > 0, "Expected table rows to render");
+			expect(tableLines.length > 0).toBeTruthy();
 			for (const line of tableLines) {
 				const borderCount = line.split("│").length - 1;
-				assert.strictEqual(borderCount, 2, `Expected 2 borders, got ${borderCount}: "${line}"`);
+				expect(borderCount).toBe(2);
 			}
 
 			// Strip box drawing characters + whitespace so we can assert the URL is preserved
 			// even if it was split across multiple wrapped lines.
 			const extracted = plainLines.join("").replace(/[│├┤─\s]/g, "");
-			assert.ok(extracted.includes("prefix"), "Should preserve 'prefix'");
-			assert.ok(extracted.includes(url), "Should preserve URL");
+			expect(extracted.includes("prefix")).toBeTruthy();
+			expect(extracted.includes(url)).toBeTruthy();
 		});
 
 		it("should wrap styled inline code inside table cells without breaking borders", () => {
@@ -643,17 +632,17 @@ describe("Markdown component", () => {
 			const width = 20;
 			const lines = markdown.render(width);
 			const joinedOutput = lines.join("\n");
-			assert.ok(joinedOutput.includes("\x1b[33m"), "Inline code should be styled (yellow)");
+			expect(joinedOutput.includes("\x1b[33m")).toBeTruthy();
 
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 			for (const line of plainLines) {
-				assert.ok(line.length <= width, `Line exceeds width ${width}: "${line}" (length: ${line.length})`);
+				expect(line.length <= width).toBeTruthy();
 			}
 
 			const tableLines = plainLines.filter((line) => line.startsWith("│"));
 			for (const line of tableLines) {
 				const borderCount = line.split("│").length - 1;
-				assert.strictEqual(borderCount, 2, `Expected 2 borders, got ${borderCount}: "${line}"`);
+				expect(borderCount).toBe(2);
 			}
 		});
 
@@ -672,11 +661,11 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			// Should not crash and should produce output
-			assert.ok(lines.length > 0, "Should produce output");
+			expect(lines.length > 0).toBeTruthy();
 
 			// Lines should not exceed width
 			for (const line of plainLines) {
-				assert.ok(line.length <= 15, `Line exceeds width 15: "${line}" (length: ${line.length})`);
+				expect(line.length <= 15).toBeTruthy();
 			}
 		});
 
@@ -696,14 +685,14 @@ describe("Markdown component", () => {
 
 			// Should have proper table structure
 			const headerLine = plainLines.find((line) => line.includes("A") && line.includes("B"));
-			assert.ok(headerLine, "Should have header row");
-			assert.ok(headerLine?.includes("│"), "Header should have borders");
+			expect(headerLine).toBeTruthy();
+			expect(headerLine?.includes("│")).toBeTruthy();
 
 			const separatorLine = plainLines.find((line) => line.includes("├") && line.includes("┼"));
-			assert.ok(separatorLine, "Should have separator row");
+			expect(separatorLine).toBeTruthy();
 
 			const dataLine = plainLines.find((line) => line.includes("1") && line.includes("2"));
-			assert.ok(dataLine, "Should have data row");
+			expect(dataLine).toBeTruthy();
 		});
 
 		it("should respect paddingX when calculating table width", () => {
@@ -722,12 +711,12 @@ describe("Markdown component", () => {
 
 			// All lines should respect width
 			for (const line of plainLines) {
-				assert.ok(line.length <= 40, `Line exceeds width 40: "${line}" (length: ${line.length})`);
+				expect(line.length <= 40).toBeTruthy();
 			}
 
 			// Table rows should have left padding
 			const tableRow = plainLines.find((line) => line.includes("│"));
-			assert.ok(tableRow?.startsWith("  "), "Table should have left padding");
+			expect(tableRow?.startsWith("  ")).toBeTruthy();
 		});
 
 		it("should not add a trailing blank line when table is the last rendered block", () => {
@@ -743,11 +732,7 @@ describe("Markdown component", () => {
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-			assert.notStrictEqual(
-				plainLines.at(-1),
-				"",
-				`Expected table to end without a blank line: ${JSON.stringify(plainLines)}`,
-			);
+			expect(plainLines.at(-1)).not.toBe("");
 		});
 	});
 
@@ -772,13 +757,13 @@ describe("Markdown component", () => {
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Check heading
-			assert.ok(plainLines.some((line) => line.includes("Test Document")));
+			expect(plainLines.some((line) => line.includes("Test Document"))).toBeTruthy();
 			// Check list
-			assert.ok(plainLines.some((line) => line.includes("- Item 1")));
-			assert.ok(plainLines.some((line) => line.includes("    - Nested item")));
+			expect(plainLines.some((line) => line.includes("- Item 1"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("    - Nested item"))).toBeTruthy();
 			// Check table
-			assert.ok(plainLines.some((line) => line.includes("Col1")));
-			assert.ok(plainLines.some((line) => line.includes("│")));
+			expect(plainLines.some((line) => line.includes("Col1"))).toBeTruthy();
+			expect(plainLines.some((line) => line.includes("│"))).toBeTruthy();
 		});
 	});
 
@@ -793,7 +778,7 @@ describe("Markdown component", () => {
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["A map ℂ³ → ℂ³, xy, x-y, -x, 1/2, and s → ∞."]);
+			expect(lines).toStrictEqual(["A map ℂ³ → ℂ³, xy, x-y, -x, 1/2, and s → ∞."]);
 		});
 
 		it("renders display dollar delimiters without Markdown escape corruption", () => {
@@ -810,7 +795,7 @@ after`,
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["Before", "", "{3x+2y, x ∈ {0, ± 1}}", "", "after"]);
+			expect(lines).toStrictEqual(["Before", "", "{3x+2y, x ∈ {0, ± 1}}", "", "after"]);
 		});
 
 		it("renders display bracket delimiters", () => {
@@ -829,7 +814,7 @@ after`,
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["Before", "", "    0.1 lux", "E ≈ ────────", "    100 lm/W", "", "after"]);
+			expect(lines).toStrictEqual(["Before", "", "    0.1 lux", "E ≈ ────────", "    100 lm/W", "", "after"]);
 		});
 
 		it("aligns matrix rows with the opening delimiter", () => {
@@ -850,7 +835,7 @@ A=
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["Consider the matrix", "", "A = ⎛ π │ 0   ⎞", "    ⎝ 0 │ 1/π ⎠."]);
+			expect(lines).toStrictEqual(["Consider the matrix", "", "A = ⎛ π │ 0   ⎞", "    ⎝ 0 │ 1/π ⎠."]);
 		});
 
 		it("renders lower limits beneath display operators", () => {
@@ -865,7 +850,7 @@ A=
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["     (sin x)/x-1", "lim  ─────────── = 0", "x→0  (eˣ-1)/x-1"]);
+			expect(lines).toStrictEqual(["     (sin x)/x-1", "lim  ─────────── = 0", "x→0  (eˣ-1)/x-1"]);
 		});
 
 		it("renders math inside lists and tables", () => {
@@ -883,8 +868,8 @@ A=
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 			const output = lines.join("\n");
 
-			assert.ok(output.includes("- Formula: F₁ = u²"));
-			assert.ok(output.includes("│ ℂ³"));
+			expect(output.includes("- Formula: F₁ = u²")).toBeTruthy();
+			expect(output.includes("│ ℂ³")).toBeTruthy();
 		});
 
 		it("does not treat currency, shell variables, or code spans as math", () => {
@@ -893,13 +878,13 @@ A=
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["Costs $5 and $10 or $8k–$12k; use $x$, $HOME, and $" + "{PATH}."]);
+			expect(lines).toStrictEqual(["Costs $5 and $10 or $8k–$12k; use $x$, $HOME, and $" + "{PATH}."]);
 
 			const shellVariables = "Paths: $HOME/$USER and $XDG_CONFIG_HOME/$APP_CONFIG";
 			const shellLines = new Markdown(shellVariables, 0, 0, defaultMarkdownTheme)
 				.render(80)
 				.map((line) => stripAnsi(line).trimEnd());
-			assert.deepStrictEqual(shellLines, [shellVariables]);
+			expect(shellLines).toStrictEqual([shellVariables]);
 		});
 
 		it("preserves unsupported and incomplete LaTeX exactly", () => {
@@ -908,22 +893,18 @@ A=
 			for (const source of cases) {
 				const markdown = new Markdown(source, 0, 0, defaultMarkdownTheme);
 				const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
-				assert.deepStrictEqual(lines, [source]);
+				expect(lines).toStrictEqual([source]);
 			}
 		});
 
 		it("preserves incomplete backslash delimiters while streaming", () => {
 			const inline = new Markdown(String.raw`Map \(\mathbb{C}^3`, 0, 0, defaultMarkdownTheme);
-			assert.deepStrictEqual(
-				inline.render(80).map((line) => stripAnsi(line).trimEnd()),
-				[String.raw`Map \(\mathbb{C}^3`],
-			);
+			expect(inline.render(80).map((line) => stripAnsi(line).trimEnd())).toStrictEqual([
+				String.raw`Map \(\mathbb{C}^3`,
+			]);
 
 			const display = new Markdown("\\[\nx^2", 0, 0, defaultMarkdownTheme);
-			assert.deepStrictEqual(
-				display.render(80).map((line) => stripAnsi(line).trimEnd()),
-				["\\[", "x^2"],
-			);
+			expect(display.render(80).map((line) => stripAnsi(line).trimEnd())).toStrictEqual(["\\[", "x^2"]);
 		});
 
 		it("does not render LaTeX inside escaped delimiters or code fences", () => {
@@ -931,7 +912,7 @@ A=
 			const markdown = new Markdown(source, 0, 0, defaultMarkdownTheme);
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, ["Escaped $x-y$.", "", "```text", "  $\\mathbb{C}^3$", "```"]);
+			expect(lines).toStrictEqual(["Escaped $x-y$.", "", "```text", "  $\\mathbb{C}^3$", "```"]);
 		});
 
 		it("allows LaTeX rendering to be disabled", () => {
@@ -946,25 +927,20 @@ A=
 				},
 			);
 
-			assert.deepStrictEqual(
-				markdown.render(80).map((line) => stripAnsi(line).trimEnd()),
-				[String.raw`Map $\mathbb{C}^3 \to \mathbb{C}^3$`],
-			);
+			expect(markdown.render(80).map((line) => stripAnsi(line).trimEnd())).toStrictEqual([
+				String.raw`Map $\mathbb{C}^3 \to \mathbb{C}^3$`,
+			]);
 		});
 
 		it("switches from raw to rendered math when a streamed delimiter closes", () => {
 			const markdown = new Markdown(String.raw`Map $\mathbb{C}^3`, 0, 0, defaultMarkdownTheme);
-			assert.deepStrictEqual(
-				markdown.render(80).map((line) => stripAnsi(line).trimEnd()),
-				[String.raw`Map $\mathbb{C}^3`],
-			);
+			expect(markdown.render(80).map((line) => stripAnsi(line).trimEnd())).toStrictEqual([
+				String.raw`Map $\mathbb{C}^3`,
+			]);
 
 			markdown.setText(String.raw`Map $\mathbb{C}^3$`);
 
-			assert.deepStrictEqual(
-				markdown.render(80).map((line) => stripAnsi(line).trimEnd()),
-				["Map ℂ³"],
-			);
+			expect(markdown.render(80).map((line) => stripAnsi(line).trimEnd())).toStrictEqual(["Map ℂ³"]);
 		});
 	});
 
@@ -974,7 +950,7 @@ A=
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, [`""`]);
+			expect(lines).toStrictEqual([`""`]);
 		});
 
 		it("should preserve source backslash escapes when configured", () => {
@@ -984,7 +960,7 @@ A=
 
 			const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-			assert.deepStrictEqual(lines, [String.raw`"\"`]);
+			expect(lines).toStrictEqual([String.raw`"\"`]);
 		});
 	});
 
@@ -1006,15 +982,15 @@ A=
 			const joinedOutput = lines.join("\n");
 
 			// Should contain the inline code block
-			assert.ok(joinedOutput.includes("inline code"));
+			expect(joinedOutput.includes("inline code")).toBeTruthy();
 
 			// The output should have ANSI codes for gray (90) and italic (3)
-			assert.ok(joinedOutput.includes("\x1b[90m"), "Should have gray color code");
-			assert.ok(joinedOutput.includes("\x1b[3m"), "Should have italic code");
+			expect(joinedOutput.includes("\x1b[90m")).toBeTruthy();
+			expect(joinedOutput.includes("\x1b[3m")).toBeTruthy();
 
 			// Verify that inline code is styled (theme uses yellow)
 			const hasCodeColor = joinedOutput.includes("\x1b[33m");
-			assert.ok(hasCodeColor, "Should style inline code");
+			expect(hasCodeColor).toBeTruthy();
 		});
 
 		it("should preserve gray italic styling after bold text", () => {
@@ -1033,14 +1009,14 @@ A=
 			const joinedOutput = lines.join("\n");
 
 			// Should contain bold text
-			assert.ok(joinedOutput.includes("bold text"));
+			expect(joinedOutput.includes("bold text")).toBeTruthy();
 
 			// The output should have ANSI codes for gray (90) and italic (3)
-			assert.ok(joinedOutput.includes("\x1b[90m"), "Should have gray color code");
-			assert.ok(joinedOutput.includes("\x1b[3m"), "Should have italic code");
+			expect(joinedOutput.includes("\x1b[90m")).toBeTruthy();
+			expect(joinedOutput.includes("\x1b[3m")).toBeTruthy();
 
 			// Should have bold codes (1 or 22 for bold on/off)
-			assert.ok(joinedOutput.includes("\x1b[1m"), "Should have bold code");
+			expect(joinedOutput.includes("\x1b[1m")).toBeTruthy();
 		});
 
 		it("should not leak styles into following lines when rendered in TUI", async () => {
@@ -1075,9 +1051,9 @@ A=
 			tui.start();
 			await terminal.waitForRender();
 
-			assert.ok(component.markdownLineCount > 0);
+			expect(component.markdownLineCount > 0).toBeTruthy();
 			const inputRow = component.markdownLineCount;
-			assert.strictEqual(getCell(terminal, inputRow, 0).isItalic(), 0);
+			expect(getCell(terminal, inputRow, 0).isItalic()).toBe(0);
 			tui.stop();
 		});
 	});
@@ -1101,16 +1077,12 @@ again, hello world`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			const closingBackticksIndex = plainLines.indexOf("```");
-			assert.ok(closingBackticksIndex !== -1, "Should have closing backticks");
+			expect(closingBackticksIndex !== -1).toBeTruthy();
 
 			const afterBackticks = plainLines.slice(closingBackticksIndex + 1);
 			const emptyLineCount = afterBackticks.findIndex((line) => line !== "");
 
-			assert.strictEqual(
-				emptyLineCount,
-				1,
-				`Expected 1 empty line after code block, but found ${emptyLineCount}. Lines after backticks: ${JSON.stringify(afterBackticks.slice(0, 5))}`,
-			);
+			expect(emptyLineCount).toBe(1);
 		});
 
 		it("should normalize paragraph and code block spacing to one blank line", () => {
@@ -1135,11 +1107,7 @@ more text`,
 				const lines = markdown.render(80);
 				const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-				assert.deepStrictEqual(
-					plainLines,
-					expectedLines,
-					`Unexpected spacing for markdown: ${JSON.stringify(text)}`,
-				);
+				expect(plainLines).toStrictEqual(expectedLines);
 			}
 		});
 
@@ -1151,11 +1119,7 @@ more text`,
 				const lines = markdown.render(80);
 				const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-				assert.notStrictEqual(
-					plainLines.at(-1),
-					"",
-					`Expected code block to end without a blank line: ${JSON.stringify(plainLines)}`,
-				);
+				expect(plainLines.at(-1)).not.toBe("");
 			}
 		});
 	});
@@ -1177,16 +1141,12 @@ again, hello world`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			const dividerIndex = plainLines.findIndex((line) => line.includes("─"));
-			assert.ok(dividerIndex !== -1, "Should have divider");
+			expect(dividerIndex !== -1).toBeTruthy();
 
 			const afterDivider = plainLines.slice(dividerIndex + 1);
 			const emptyLineCount = afterDivider.findIndex((line) => line !== "");
 
-			assert.strictEqual(
-				emptyLineCount,
-				1,
-				`Expected 1 empty line after divider, but found ${emptyLineCount}. Lines after divider: ${JSON.stringify(afterDivider.slice(0, 5))}`,
-			);
+			expect(emptyLineCount).toBe(1);
 		});
 
 		it("should not add a trailing blank line when divider is the last rendered block", () => {
@@ -1194,11 +1154,7 @@ again, hello world`,
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-			assert.notStrictEqual(
-				plainLines.at(-1),
-				"",
-				`Expected divider to end without a blank line: ${JSON.stringify(plainLines)}`,
-			);
+			expect(plainLines.at(-1)).not.toBe("");
 		});
 	});
 
@@ -1217,16 +1173,12 @@ This is a paragraph`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			const headingIndex = plainLines.findIndex((line) => line.includes("Hello"));
-			assert.ok(headingIndex !== -1, "Should have heading");
+			expect(headingIndex !== -1).toBeTruthy();
 
 			const afterHeading = plainLines.slice(headingIndex + 1);
 			const emptyLineCount = afterHeading.findIndex((line) => line !== "");
 
-			assert.strictEqual(
-				emptyLineCount,
-				1,
-				`Expected 1 empty line after heading, but found ${emptyLineCount}. Lines after heading: ${JSON.stringify(afterHeading.slice(0, 5))}`,
-			);
+			expect(emptyLineCount).toBe(1);
 		});
 
 		it("should not add a trailing blank line when heading is the last rendered block", () => {
@@ -1234,11 +1186,7 @@ This is a paragraph`,
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-			assert.notStrictEqual(
-				plainLines.at(-1),
-				"",
-				`Expected heading to end without a blank line: ${JSON.stringify(plainLines)}`,
-			);
+			expect(plainLines.at(-1)).not.toBe("");
 		});
 	});
 
@@ -1259,16 +1207,12 @@ again, hello world`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			const quoteIndex = plainLines.findIndex((line) => line.includes("This is a quote"));
-			assert.ok(quoteIndex !== -1, "Should have blockquote");
+			expect(quoteIndex !== -1).toBeTruthy();
 
 			const afterQuote = plainLines.slice(quoteIndex + 1);
 			const emptyLineCount = afterQuote.findIndex((line) => line !== "");
 
-			assert.strictEqual(
-				emptyLineCount,
-				1,
-				`Expected 1 empty line after blockquote, but found ${emptyLineCount}. Lines after quote: ${JSON.stringify(afterQuote.slice(0, 5))}`,
-			);
+			expect(emptyLineCount).toBe(1);
 		});
 
 		it("should not add a trailing blank line when blockquote is the last rendered block", () => {
@@ -1276,11 +1220,7 @@ again, hello world`,
 			const lines = markdown.render(80);
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
-			assert.notStrictEqual(
-				plainLines.at(-1),
-				"",
-				`Expected blockquote to end without a blank line: ${JSON.stringify(plainLines)}`,
-			);
+			expect(plainLines.at(-1)).not.toBe("");
 		});
 	});
 
@@ -1303,21 +1243,21 @@ bar`,
 			// Both lines should have the quote border
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const quotedLines = plainLines.filter((line) => line.startsWith("│ "));
-			assert.strictEqual(quotedLines.length, 2, `Expected 2 quoted lines, got: ${JSON.stringify(plainLines)}`);
+			expect(quotedLines.length).toBe(2);
 
 			// Both lines should have italic (from theme.quote styling)
 			const fooLine = lines.find((line) => line.includes("Foo"));
 			const barLine = lines.find((line) => line.includes("bar"));
-			assert.ok(fooLine, "Should have Foo line");
-			assert.ok(barLine, "Should have bar line");
+			expect(fooLine).toBeTruthy();
+			expect(barLine).toBeTruthy();
 
 			// Check that both have italic (\x1b[3m) - blockquotes use theme styling, not default message color
-			assert.ok(fooLine?.includes("\x1b[3m"), `Foo line should have italic: ${fooLine}`);
-			assert.ok(barLine?.includes("\x1b[3m"), `bar line should have italic: ${barLine}`);
+			expect(fooLine?.includes("\x1b[3m")).toBeTruthy();
+			expect(barLine?.includes("\x1b[3m")).toBeTruthy();
 
 			// Blockquotes should NOT have the default message color (magenta)
-			assert.ok(!fooLine?.includes("\x1b[35m"), `Foo line should NOT have magenta color: ${fooLine}`);
-			assert.ok(!barLine?.includes("\x1b[35m"), `bar line should NOT have magenta color: ${barLine}`);
+			expect(fooLine?.includes("\x1b[35m")).toBeFalsy();
+			expect(barLine?.includes("\x1b[35m")).toBeFalsy();
 		});
 
 		it("should apply consistent styling to explicit multiline blockquote", () => {
@@ -1337,17 +1277,17 @@ bar`,
 			// Both lines should have the quote border
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const quotedLines = plainLines.filter((line) => line.startsWith("│ "));
-			assert.strictEqual(quotedLines.length, 2, `Expected 2 quoted lines, got: ${JSON.stringify(plainLines)}`);
+			expect(quotedLines.length).toBe(2);
 
 			// Both lines should have italic (from theme.quote styling)
 			const fooLine = lines.find((line) => line.includes("Foo"));
 			const barLine = lines.find((line) => line.includes("bar"));
-			assert.ok(fooLine?.includes("\x1b[3m"), `Foo line should have italic: ${fooLine}`);
-			assert.ok(barLine?.includes("\x1b[3m"), `bar line should have italic: ${barLine}`);
+			expect(fooLine?.includes("\x1b[3m")).toBeTruthy();
+			expect(barLine?.includes("\x1b[3m")).toBeTruthy();
 
 			// Blockquotes should NOT have the default message color (cyan)
-			assert.ok(!fooLine?.includes("\x1b[36m"), `Foo line should NOT have cyan color: ${fooLine}`);
-			assert.ok(!barLine?.includes("\x1b[36m"), `bar line should NOT have cyan color: ${barLine}`);
+			expect(fooLine?.includes("\x1b[36m")).toBeFalsy();
+			expect(barLine?.includes("\x1b[36m")).toBeFalsy();
 		});
 
 		it("should render list content inside blockquotes", () => {
@@ -1363,14 +1303,8 @@ bar`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const quotedLines = plainLines.filter((line) => line.startsWith("│ "));
 
-			assert.ok(
-				quotedLines.some((line) => line.includes("1. bla bla")),
-				`Missing ordered list item: ${JSON.stringify(quotedLines)}`,
-			);
-			assert.ok(
-				quotedLines.some((line) => line.includes("- nested bullet")),
-				`Missing unordered list item: ${JSON.stringify(quotedLines)}`,
-			);
+			expect(quotedLines.some((line) => line.includes("1. bla bla"))).toBeTruthy();
+			expect(quotedLines.some((line) => line.includes("- nested bullet"))).toBeTruthy();
 		});
 
 		it("should wrap long blockquote lines and add border to each wrapped line", () => {
@@ -1385,18 +1319,18 @@ bar`,
 			const contentLines = plainLines.filter((line) => line.length > 0);
 
 			// Should have multiple lines due to wrapping
-			assert.ok(contentLines.length > 1, `Expected multiple wrapped lines, got: ${JSON.stringify(contentLines)}`);
+			expect(contentLines.length > 1).toBeTruthy();
 
 			// Every content line should start with the quote border
 			for (const line of contentLines) {
-				assert.ok(line.startsWith("│ "), `Wrapped line should have quote border: "${line}"`);
+				expect(line.startsWith("│ ")).toBeTruthy();
 			}
 
 			// All content should be preserved
 			const allText = contentLines.join(" ");
-			assert.ok(allText.includes("very long"), "Should preserve 'very long'");
-			assert.ok(allText.includes("blockquote"), "Should preserve 'blockquote'");
-			assert.ok(allText.includes("multiple"), "Should preserve 'multiple'");
+			expect(allText.includes("very long")).toBeTruthy();
+			expect(allText.includes("blockquote")).toBeTruthy();
+			expect(allText.includes("multiple")).toBeTruthy();
 		});
 
 		it("should properly indent wrapped blockquote lines with styling", () => {
@@ -1419,15 +1353,15 @@ bar`,
 
 			// All lines should have the quote border
 			for (const line of contentLines) {
-				assert.ok(line.startsWith("│ "), `Line should have quote border: "${line}"`);
+				expect(line.startsWith("│ ")).toBeTruthy();
 			}
 
 			// Check that italic is applied (from theme.quote)
 			const allOutput = lines.join("\n");
-			assert.ok(allOutput.includes("\x1b[3m"), "Should have italic");
+			expect(allOutput.includes("\x1b[3m")).toBeTruthy();
 
 			// Blockquotes should NOT have the default message color (yellow)
-			assert.ok(!allOutput.includes("\x1b[33m"), "Should NOT have yellow color from default style");
+			expect(allOutput.includes("\x1b[33m")).toBeFalsy();
 		});
 
 		it("should render inline formatting inside blockquotes and reapply quote styling after", () => {
@@ -1437,27 +1371,24 @@ bar`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 
 			// Should have the quote border
-			assert.ok(
-				plainLines.some((line) => line.startsWith("│ ")),
-				"Should have quote border",
-			);
+			expect(plainLines.some((line) => line.startsWith("│ "))).toBeTruthy();
 
 			// Content should be preserved
 			const allPlain = plainLines.join(" ");
-			assert.ok(allPlain.includes("Quote with"), "Should preserve 'Quote with'");
-			assert.ok(allPlain.includes("bold"), "Should preserve 'bold'");
-			assert.ok(allPlain.includes("code"), "Should preserve 'code'");
+			expect(allPlain.includes("Quote with")).toBeTruthy();
+			expect(allPlain.includes("bold")).toBeTruthy();
+			expect(allPlain.includes("code")).toBeTruthy();
 
 			const allOutput = lines.join("\n");
 
 			// Should have bold styling (\x1b[1m)
-			assert.ok(allOutput.includes("\x1b[1m"), "Should have bold styling");
+			expect(allOutput.includes("\x1b[1m")).toBeTruthy();
 
 			// Should have code styling (yellow = \x1b[33m from defaultMarkdownTheme)
-			assert.ok(allOutput.includes("\x1b[33m"), "Should have code styling (yellow)");
+			expect(allOutput.includes("\x1b[33m")).toBeTruthy();
 
 			// Should have italic from quote styling (\x1b[3m)
-			assert.ok(allOutput.includes("\x1b[3m"), "Should have italic from quote styling");
+			expect(allOutput.includes("\x1b[3m")).toBeTruthy();
 		});
 	});
 
@@ -1471,24 +1402,18 @@ bar`,
 			// The heading theme is bold+cyan. After the yellow inline code, the heading
 			// styling (bold+cyan) must be restored so subsequent text is styled correctly.
 			// bold = \x1b[1m, cyan = \x1b[36m, yellow = \x1b[33m
-			assert.ok(joinedOutput.includes("\x1b[33m"), "Should have yellow for inline code");
+			expect(joinedOutput.includes("\x1b[33m")).toBeTruthy();
 
 			// Find the position of "should not be optional" in the raw output.
 			// It must be preceded by heading style codes (bold+cyan), not appear unstyled.
 			const afterCodeIndex = joinedOutput.indexOf("should not be optional");
-			assert.ok(afterCodeIndex > 0, "Should contain text after inline code");
+			expect(afterCodeIndex > 0).toBeTruthy();
 
 			// Look at the ANSI codes between the code span end and "should not be optional".
 			// There should be bold (\x1b[1m) and cyan (\x1b[36m) re-applied.
 			const precedingChunk = joinedOutput.slice(Math.max(0, afterCodeIndex - 40), afterCodeIndex);
-			assert.ok(
-				precedingChunk.includes("\x1b[1m"),
-				`Should re-apply bold before text after code: ${precedingChunk}`,
-			);
-			assert.ok(
-				precedingChunk.includes("\x1b[36m"),
-				`Should re-apply cyan before text after code: ${precedingChunk}`,
-			);
+			expect(precedingChunk.includes("\x1b[1m")).toBeTruthy();
+			expect(precedingChunk.includes("\x1b[36m")).toBeTruthy();
 		});
 
 		it("should preserve heading styling after inline code for h1", () => {
@@ -1498,13 +1423,13 @@ bar`,
 			const joinedOutput = lines.join("\n");
 
 			const afterCodeIndex = joinedOutput.indexOf("inside");
-			assert.ok(afterCodeIndex > 0, "Should contain text after inline code");
+			expect(afterCodeIndex > 0).toBeTruthy();
 
 			const precedingChunk = joinedOutput.slice(Math.max(0, afterCodeIndex - 40), afterCodeIndex);
 			// H1 uses heading + bold + underline
-			assert.ok(precedingChunk.includes("\x1b[1m"), `Should re-apply bold for h1: ${precedingChunk}`);
-			assert.ok(precedingChunk.includes("\x1b[36m"), `Should re-apply cyan for h1: ${precedingChunk}`);
-			assert.ok(precedingChunk.includes("\x1b[4m"), `Should re-apply underline for h1: ${precedingChunk}`);
+			expect(precedingChunk.includes("\x1b[1m")).toBeTruthy();
+			expect(precedingChunk.includes("\x1b[36m")).toBeTruthy();
+			expect(precedingChunk.includes("\x1b[4m")).toBeTruthy();
 		});
 
 		it("should not leak h1 underline into padding when inline code is the last token", async () => {
@@ -1516,16 +1441,12 @@ bar`,
 			await terminal.waitForRender();
 
 			const renderedLine = markdown.render(80)[0];
-			assert.ok(renderedLine, "Should render heading line");
+			expect(renderedLine).toBeTruthy();
 			const contentWidth = renderedLine.replace(/\x1b\[[0-9;]*m/g, "").trimEnd().length;
-			assert.ok(contentWidth > 0, "Should have visible heading content");
+			expect(contentWidth > 0).toBeTruthy();
 
 			for (let col = contentWidth; col < 80; col++) {
-				assert.strictEqual(
-					getCell(terminal, 0, col).isUnderline(),
-					0,
-					`Expected no underline in padding at col ${col}`,
-				);
+				expect(getCell(terminal, 0, col).isUnderline()).toBe(0);
 			}
 
 			tui.stop();
@@ -1538,11 +1459,11 @@ bar`,
 			const joinedOutput = lines.join("\n");
 
 			const afterBoldIndex = joinedOutput.indexOf("and more");
-			assert.ok(afterBoldIndex > 0, "Should contain text after bold");
+			expect(afterBoldIndex > 0).toBeTruthy();
 
 			const precedingChunk = joinedOutput.slice(Math.max(0, afterBoldIndex - 40), afterBoldIndex);
-			assert.ok(precedingChunk.includes("\x1b[1m"), `Should re-apply bold for h2: ${precedingChunk}`);
-			assert.ok(precedingChunk.includes("\x1b[36m"), `Should re-apply cyan for h2: ${precedingChunk}`);
+			expect(precedingChunk.includes("\x1b[1m")).toBeTruthy();
+			expect(precedingChunk.includes("\x1b[36m")).toBeTruthy();
 		});
 	});
 
@@ -1554,9 +1475,9 @@ bar`,
 			const joinedOutput = lines.join("\n");
 			const joinedPlain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "")).join(" ");
 
-			assert.ok(joinedOutput.includes("\x1b[9m"), "Should apply strikethrough styling");
-			assert.ok(joinedPlain.includes("strikethrough"), "Should include struck text content");
-			assert.ok(!joinedPlain.includes("~~strikethrough~~"), "Should not render delimiters as text");
+			expect(joinedOutput.includes("\x1b[9m")).toBeTruthy();
+			expect(joinedPlain.includes("strikethrough")).toBeTruthy();
+			expect(joinedPlain.includes("~~strikethrough~~")).toBeFalsy();
 		});
 
 		it("should keep ~text~ as plain text", () => {
@@ -1566,8 +1487,8 @@ bar`,
 			const joinedOutput = lines.join("\n");
 			const joinedPlain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "")).join(" ");
 
-			assert.ok(joinedPlain.includes("~strikethrough~"), "Single-tilde delimiters should remain visible");
-			assert.ok(!joinedOutput.includes("\x1b[9m"), "Single-tilde text should not use strikethrough styling");
+			expect(joinedPlain.includes("~strikethrough~")).toBeTruthy();
+			expect(joinedOutput.includes("\x1b[9m")).toBeFalsy();
 		});
 	});
 
@@ -1586,8 +1507,8 @@ bar`,
 			const joinedPlain = plainLines.join(" ");
 
 			// Should contain the email once, not duplicated with mailto:
-			assert.ok(joinedPlain.includes("user@example.com"), "Should contain email");
-			assert.ok(!joinedPlain.includes("mailto:"), "Should not show mailto: prefix for autolinked emails");
+			expect(joinedPlain.includes("user@example.com")).toBeTruthy();
+			expect(joinedPlain.includes("mailto:")).toBeFalsy();
 		});
 
 		it("should not duplicate URL for bare URLs", () => {
@@ -1600,7 +1521,7 @@ bar`,
 
 			// URL should appear only once
 			const urlCount = (joinedPlain.match(/https:\/\/example\.com/g) || []).length;
-			assert.strictEqual(urlCount, 1, "URL should appear exactly once");
+			expect(urlCount).toBe(1);
 		});
 
 		it("should show URL in parentheses when hyperlinks are not supported", () => {
@@ -1611,8 +1532,8 @@ bar`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const joinedPlain = plainLines.join(" ");
 
-			assert.ok(joinedPlain.includes("click here"), "Should contain link text");
-			assert.ok(joinedPlain.includes("(https://example.com)"), "Should show URL in parentheses");
+			expect(joinedPlain.includes("click here")).toBeTruthy();
+			expect(joinedPlain.includes("(https://example.com)")).toBeTruthy();
 		});
 
 		it("should show mailto URL in parentheses when hyperlinks are not supported", () => {
@@ -1623,8 +1544,8 @@ bar`,
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
 			const joinedPlain = plainLines.join(" ");
 
-			assert.ok(joinedPlain.includes("Email me"), "Should contain link text");
-			assert.ok(joinedPlain.includes("(mailto:test@example.com)"), "Should show mailto URL in parentheses");
+			expect(joinedPlain.includes("Email me")).toBeTruthy();
+			expect(joinedPlain.includes("(mailto:test@example.com)")).toBeTruthy();
 		});
 
 		it("should emit OSC 8 hyperlink sequence when terminal supports hyperlinks", () => {
@@ -1635,17 +1556,17 @@ bar`,
 			const joined = lines.join("");
 
 			// OSC 8 open: ESC ] 8 ; ; <url> ESC \
-			assert.ok(joined.includes("\x1b]8;;https://example.com\x1b\\"), "Should contain OSC 8 open sequence");
+			expect(joined.includes("\x1b]8;;https://example.com\x1b\\")).toBeTruthy();
 			// OSC 8 close: ESC ] 8 ; ; ESC \
-			assert.ok(joined.includes("\x1b]8;;\x1b\\"), "Should contain OSC 8 close sequence");
+			expect(joined.includes("\x1b]8;;\x1b\\")).toBeTruthy();
 			// Visible text is present
 			const plainLines = lines.map((line) => line.replace(/\x1b[^a-zA-Z]*[a-zA-Z]|\x1b\].*?\x1b\\/g, ""));
-			assert.ok(plainLines.join("").includes("click here"), "Should contain link text");
+			expect(plainLines.join("").includes("click here")).toBeTruthy();
 			// URL is NOT printed inline as plain text
 			const rawPlain = lines.map((line) =>
 				line.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "").replace(/\x1b\[[0-9;]*m/g, ""),
 			);
-			assert.ok(!rawPlain.join("").includes("(https://example.com)"), "URL should not appear inline in parentheses");
+			expect(rawPlain.join("").includes("(https://example.com)")).toBeFalsy();
 		});
 
 		it("should use OSC 8 for mailto links when terminal supports hyperlinks", () => {
@@ -1655,11 +1576,8 @@ bar`,
 			const lines = markdown.render(80);
 			const joined = lines.join("");
 
-			assert.ok(
-				joined.includes("\x1b]8;;mailto:test@example.com\x1b\\"),
-				"Should contain OSC 8 open with mailto URL",
-			);
-			assert.ok(joined.includes("\x1b]8;;\x1b\\"), "Should contain OSC 8 close sequence");
+			expect(joined.includes("\x1b]8;;mailto:test@example.com\x1b\\")).toBeTruthy();
+			expect(joined.includes("\x1b]8;;\x1b\\")).toBeTruthy();
 		});
 
 		it("should use OSC 8 for bare URLs when terminal supports hyperlinks", () => {
@@ -1669,12 +1587,12 @@ bar`,
 			const lines = markdown.render(80);
 			const joined = lines.join("");
 
-			assert.ok(joined.includes("\x1b]8;;https://example.com\x1b\\"), "Should contain OSC 8 hyperlink");
+			expect(joined.includes("\x1b]8;;https://example.com\x1b\\")).toBeTruthy();
 			// URL should not also appear as raw parenthetical text
 			const rawPlain = lines.map((line) =>
 				line.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "").replace(/\x1b\[[0-9;]*m/g, ""),
 			);
-			assert.ok(!rawPlain.join("").includes("(https://example.com)"), "URL should not appear twice");
+			expect(rawPlain.join("").includes("(https://example.com)")).toBeFalsy();
 		});
 	});
 
@@ -1694,10 +1612,7 @@ bar`,
 			const joinedPlain = plainLines.join(" ");
 
 			// The content inside the tags should be visible
-			assert.ok(
-				joinedPlain.includes("hidden content") || joinedPlain.includes("<thinking>"),
-				"Should render HTML-like tags or their content as text, not hide them",
-			);
+			expect(joinedPlain.includes("hidden content") || joinedPlain.includes("<thinking>")).toBeTruthy();
 		});
 
 		it("should render HTML tags in code blocks correctly", () => {
@@ -1708,10 +1623,7 @@ bar`,
 			const joinedPlain = plainLines.join("\n");
 
 			// HTML in code blocks should be visible
-			assert.ok(
-				joinedPlain.includes("<div>") && joinedPlain.includes("</div>"),
-				"Should render HTML in code blocks",
-			);
+			expect(joinedPlain.includes("<div>") && joinedPlain.includes("</div>")).toBeTruthy();
 		});
 	});
 
@@ -1748,13 +1660,13 @@ bar`,
 				const markdown = new Markdown(input, 0, 0, defaultMarkdownTheme);
 				const lines = markdown.render(80).map((line) => stripAnsi(line).trimEnd());
 
-				assert.deepStrictEqual(lines, expected);
+				expect(lines).toStrictEqual(expected);
 			}
 
 			const partial = new Markdown("```ts\nconst x = 1;\n``", 0, 0, defaultMarkdownTheme);
 			const complete = new Markdown("```ts\nconst x = 1;\n```", 0, 0, defaultMarkdownTheme);
 
-			assert.strictEqual(partial.render(80).length, complete.render(80).length);
+			expect(partial.render(80).length).toBe(complete.render(80).length);
 		});
 	});
 });

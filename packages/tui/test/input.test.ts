@@ -1,5 +1,4 @@
-import assert from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 import { Input } from "../src/components/input.ts";
 import { visibleWidth } from "../src/utils.ts";
 
@@ -22,7 +21,7 @@ describe("Input component", () => {
 		input.handleInput("\r");
 
 		// Input is single-line, no backslash+Enter workaround
-		assert.strictEqual(submitted, "hello\\");
+		expect(submitted).toBe("hello\\");
 	});
 
 	it("inserts backslash as regular character", () => {
@@ -31,7 +30,7 @@ describe("Input component", () => {
 		input.handleInput("\\");
 		input.handleInput("x");
 
-		assert.strictEqual(input.getValue(), "\\x");
+		expect(input.getValue()).toBe("\\x");
 	});
 
 	describe("render", () => {
@@ -55,15 +54,15 @@ describe("Input component", () => {
 			];
 
 			for (const text of cases) {
-				for (const { label, move } of cursorPositions) {
+				for (const { label: _label, move } of cursorPositions) {
 					const input = new Input();
 					input.setValue(text);
 					input.focused = true;
 					move(input);
 
 					const [line] = input.render(width);
-					assert.ok(line);
-					assert.ok(visibleWidth(line) <= width, `rendered line overflowed for ${text} at ${label}`);
+					expect(line).toBeTruthy();
+					expect(visibleWidth(line) <= width).toBeTruthy();
 				}
 			}
 		});
@@ -78,8 +77,8 @@ describe("Input component", () => {
 			for (let i = 0; i < 5; i++) input.handleInput("\x1b[C");
 
 			const [line] = input.render(width);
-			assert.ok(line);
-			assert.ok(visibleWidth(line) <= width);
+			expect(line).toBeTruthy();
+			expect(visibleWidth(line) <= width).toBeTruthy();
 		});
 	});
 
@@ -92,12 +91,12 @@ describe("Input component", () => {
 			input.handleInput("\x05"); // Ctrl+E
 
 			input.handleInput("\x17"); // Ctrl+W - deletes "baz"
-			assert.strictEqual(input.getValue(), "foo bar ");
+			expect(input.getValue()).toBe("foo bar ");
 
 			// Move to beginning and yank
 			input.handleInput("\x01"); // Ctrl+A
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "bazfoo bar ");
+			expect(input.getValue()).toBe("bazfoo bar ");
 		});
 
 		it("Ctrl+W preserves ASCII punctuation boundaries", () => {
@@ -106,12 +105,12 @@ describe("Input component", () => {
 			input.setValue("foo.bar");
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x17"); // Ctrl+W - deletes "bar"
-			assert.strictEqual(input.getValue(), "foo.");
+			expect(input.getValue()).toBe("foo.");
 
 			input.setValue("foo:bar");
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x17"); // Ctrl+W - deletes "bar"
-			assert.strictEqual(input.getValue(), "foo:");
+			expect(input.getValue()).toBe("foo:");
 		});
 
 		it("Ctrl+W handles Unicode word boundaries", () => {
@@ -121,17 +120,17 @@ describe("Input component", () => {
 			input.setValue("你好世界。你好，世界");
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x17"); // Ctrl+W - deletes "世界"
-			assert.strictEqual(input.getValue(), "你好世界。你好，");
+			expect(input.getValue()).toBe("你好世界。你好，");
 			input.handleInput("\x17"); // Ctrl+W - deletes "，"
-			assert.strictEqual(input.getValue(), "你好世界。你好");
+			expect(input.getValue()).toBe("你好世界。你好");
 			input.handleInput("\x17"); // Ctrl+W - deletes "你好"
-			assert.strictEqual(input.getValue(), "你好世界。");
+			expect(input.getValue()).toBe("你好世界。");
 			input.handleInput("\x17"); // Ctrl+W - deletes "。"
-			assert.strictEqual(input.getValue(), "你好世界");
+			expect(input.getValue()).toBe("你好世界");
 			input.handleInput("\x17"); // Ctrl+W - deletes "世界"
-			assert.strictEqual(input.getValue(), "你好");
+			expect(input.getValue()).toBe("你好");
 			input.handleInput("\x17"); // Ctrl+W - deletes "你好"
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("Ctrl+U saves deleted text to kill ring", () => {
@@ -143,10 +142,10 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C");
 
 			input.handleInput("\x15"); // Ctrl+U - deletes "hello "
-			assert.strictEqual(input.getValue(), "world");
+			expect(input.getValue()).toBe("world");
 
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("Ctrl+K saves deleted text to kill ring", () => {
@@ -156,10 +155,10 @@ describe("Input component", () => {
 			input.handleInput("\x01"); // Ctrl+A
 			input.handleInput("\x0b"); // Ctrl+K - deletes "hello world"
 
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("Ctrl+Y does nothing when kill ring is empty", () => {
@@ -168,7 +167,7 @@ describe("Input component", () => {
 			input.setValue("test");
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "test");
+			expect(input.getValue()).toBe("test");
 		});
 
 		it("Alt+Y cycles through kill ring after Ctrl+Y", () => {
@@ -185,19 +184,19 @@ describe("Input component", () => {
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x17"); // Ctrl+W - deletes "third"
 
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 
 			input.handleInput("\x19"); // Ctrl+Y - yanks "third"
-			assert.strictEqual(input.getValue(), "third");
+			expect(input.getValue()).toBe("third");
 
 			input.handleInput("\x1by"); // Alt+Y - cycles to "second"
-			assert.strictEqual(input.getValue(), "second");
+			expect(input.getValue()).toBe("second");
 
 			input.handleInput("\x1by"); // Alt+Y - cycles to "first"
-			assert.strictEqual(input.getValue(), "first");
+			expect(input.getValue()).toBe("first");
 
 			input.handleInput("\x1by"); // Alt+Y - cycles back to "third"
-			assert.strictEqual(input.getValue(), "third");
+			expect(input.getValue()).toBe("third");
 		});
 
 		it("Alt+Y does nothing if not preceded by yank", () => {
@@ -211,10 +210,10 @@ describe("Input component", () => {
 
 			// Type something to break the yank chain
 			input.handleInput("x");
-			assert.strictEqual(input.getValue(), "otherx");
+			expect(input.getValue()).toBe("otherx");
 
 			input.handleInput("\x1by"); // Alt+Y - should do nothing
-			assert.strictEqual(input.getValue(), "otherx");
+			expect(input.getValue()).toBe("otherx");
 		});
 
 		it("Alt+Y does nothing if kill ring has one entry", () => {
@@ -225,10 +224,10 @@ describe("Input component", () => {
 			input.handleInput("\x17"); // Ctrl+W - deletes "only"
 
 			input.handleInput("\x19"); // Ctrl+Y - yanks "only"
-			assert.strictEqual(input.getValue(), "only");
+			expect(input.getValue()).toBe("only");
 
 			input.handleInput("\x1by"); // Alt+Y - should do nothing
-			assert.strictEqual(input.getValue(), "only");
+			expect(input.getValue()).toBe("only");
 		});
 
 		it("consecutive Ctrl+W accumulates into one kill ring entry", () => {
@@ -240,10 +239,10 @@ describe("Input component", () => {
 			input.handleInput("\x17"); // Ctrl+W - deletes "two "
 			input.handleInput("\x17"); // Ctrl+W - deletes "one "
 
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "one two three");
+			expect(input.getValue()).toBe("one two three");
 		});
 
 		it("non-delete actions break kill accumulation", () => {
@@ -252,19 +251,19 @@ describe("Input component", () => {
 			input.setValue("foo bar baz");
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("\x17"); // Ctrl+W - deletes "baz"
-			assert.strictEqual(input.getValue(), "foo bar ");
+			expect(input.getValue()).toBe("foo bar ");
 
 			input.handleInput("x"); // Typing breaks accumulation
-			assert.strictEqual(input.getValue(), "foo bar x");
+			expect(input.getValue()).toBe("foo bar x");
 
 			input.handleInput("\x17"); // Ctrl+W - deletes "x" (separate entry)
-			assert.strictEqual(input.getValue(), "foo bar ");
+			expect(input.getValue()).toBe("foo bar ");
 
 			input.handleInput("\x19"); // Ctrl+Y - most recent is "x"
-			assert.strictEqual(input.getValue(), "foo bar x");
+			expect(input.getValue()).toBe("foo bar x");
 
 			input.handleInput("\x1by"); // Alt+Y - cycle to "baz"
-			assert.strictEqual(input.getValue(), "foo bar baz");
+			expect(input.getValue()).toBe("foo bar baz");
 		});
 
 		it("non-yank actions break Alt+Y chain", () => {
@@ -279,13 +278,13 @@ describe("Input component", () => {
 			input.setValue("");
 
 			input.handleInput("\x19"); // Ctrl+Y - yanks "second"
-			assert.strictEqual(input.getValue(), "second");
+			expect(input.getValue()).toBe("second");
 
 			input.handleInput("x"); // Breaks yank chain
-			assert.strictEqual(input.getValue(), "secondx");
+			expect(input.getValue()).toBe("secondx");
 
 			input.handleInput("\x1by"); // Alt+Y - should do nothing
-			assert.strictEqual(input.getValue(), "secondx");
+			expect(input.getValue()).toBe("secondx");
 		});
 
 		it("kill ring rotation persists after cycling", () => {
@@ -304,7 +303,7 @@ describe("Input component", () => {
 
 			input.handleInput("\x19"); // Ctrl+Y - yanks "third"
 			input.handleInput("\x1by"); // Alt+Y - cycles to "second"
-			assert.strictEqual(input.getValue(), "second");
+			expect(input.getValue()).toBe("second");
 
 			// Break chain and start fresh
 			input.handleInput("x");
@@ -312,7 +311,7 @@ describe("Input component", () => {
 
 			// New yank should get "second" (now at end after rotation)
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "second");
+			expect(input.getValue()).toBe("second");
 		});
 
 		it("backward deletions prepend, forward deletions append during accumulation", () => {
@@ -324,10 +323,10 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C"); // Move right 6
 
 			input.handleInput("\x0b"); // Ctrl+K - deletes "|suffix" (forward)
-			assert.strictEqual(input.getValue(), "prefix");
+			expect(input.getValue()).toBe("prefix");
 
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "prefix|suffix");
+			expect(input.getValue()).toBe("prefix|suffix");
 		});
 
 		it("Alt+D deletes word forward and saves to kill ring", () => {
@@ -337,14 +336,14 @@ describe("Input component", () => {
 			input.handleInput("\x01"); // Ctrl+A
 
 			input.handleInput("\x1bd"); // Alt+D - deletes "hello"
-			assert.strictEqual(input.getValue(), " world test");
+			expect(input.getValue()).toBe(" world test");
 
 			input.handleInput("\x1bd"); // Alt+D - deletes " world"
-			assert.strictEqual(input.getValue(), " test");
+			expect(input.getValue()).toBe(" test");
 
 			// Yank should get accumulated text
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "hello world test");
+			expect(input.getValue()).toBe("hello world test");
 		});
 
 		it("Alt+D preserves ASCII punctuation boundaries", () => {
@@ -353,11 +352,11 @@ describe("Input component", () => {
 			input.setValue("foo.bar baz");
 			input.handleInput("\x01"); // Ctrl+A
 			input.handleInput("\x1bd"); // Alt+D - deletes "foo"
-			assert.strictEqual(input.getValue(), ".bar baz");
+			expect(input.getValue()).toBe(".bar baz");
 			input.handleInput("\x1bd"); // Alt+D - deletes "."
-			assert.strictEqual(input.getValue(), "bar baz");
+			expect(input.getValue()).toBe("bar baz");
 			input.handleInput("\x1bd"); // Alt+D - deletes "bar"
-			assert.strictEqual(input.getValue(), " baz");
+			expect(input.getValue()).toBe(" baz");
 		});
 
 		it("Alt+D handles Unicode word boundaries", () => {
@@ -367,17 +366,17 @@ describe("Input component", () => {
 			input.setValue("你好世界。你好，世界");
 			input.handleInput("\x01"); // Ctrl+A
 			input.handleInput("\x1bd"); // Alt+D - deletes "你好"
-			assert.strictEqual(input.getValue(), "世界。你好，世界");
+			expect(input.getValue()).toBe("世界。你好，世界");
 			input.handleInput("\x1bd"); // Alt+D - deletes "世界"
-			assert.strictEqual(input.getValue(), "。你好，世界");
+			expect(input.getValue()).toBe("。你好，世界");
 			input.handleInput("\x1bd"); // Alt+D - deletes "。"
-			assert.strictEqual(input.getValue(), "你好，世界");
+			expect(input.getValue()).toBe("你好，世界");
 			input.handleInput("\x1bd"); // Alt+D - deletes "你好"
-			assert.strictEqual(input.getValue(), "，世界");
+			expect(input.getValue()).toBe("，世界");
 			input.handleInput("\x1bd"); // Alt+D - deletes "，"
-			assert.strictEqual(input.getValue(), "世界");
+			expect(input.getValue()).toBe("世界");
 			input.handleInput("\x1bd"); // Alt+D - deletes "世界"
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("handles yank in middle of text", () => {
@@ -392,7 +391,7 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C");
 
 			input.handleInput("\x19"); // Ctrl+Y
-			assert.strictEqual(input.getValue(), "hello wordworld");
+			expect(input.getValue()).toBe("hello wordworld");
 		});
 
 		it("handles yank-pop in middle of text", () => {
@@ -412,10 +411,10 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C");
 
 			input.handleInput("\x19"); // Ctrl+Y - yanks "SECOND"
-			assert.strictEqual(input.getValue(), "hello SECONDworld");
+			expect(input.getValue()).toBe("hello SECONDworld");
 
 			input.handleInput("\x1by"); // Alt+Y - replaces with "FIRST"
-			assert.strictEqual(input.getValue(), "hello FIRSTworld");
+			expect(input.getValue()).toBe("hello FIRSTworld");
 		});
 	});
 
@@ -424,7 +423,7 @@ describe("Input component", () => {
 			const input = new Input();
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("coalesces consecutive word characters into one undo unit", () => {
@@ -441,15 +440,15 @@ describe("Input component", () => {
 			input.handleInput("r");
 			input.handleInput("l");
 			input.handleInput("d");
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 
 			// Undo removes " world"
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello");
+			expect(input.getValue()).toBe("hello");
 
 			// Undo removes "hello"
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("undoes spaces one at a time", () => {
@@ -462,16 +461,16 @@ describe("Input component", () => {
 			input.handleInput("o");
 			input.handleInput(" ");
 			input.handleInput(" ");
-			assert.strictEqual(input.getValue(), "hello  ");
+			expect(input.getValue()).toBe("hello  ");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo) - removes second " "
-			assert.strictEqual(input.getValue(), "hello ");
+			expect(input.getValue()).toBe("hello ");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo) - removes first " "
-			assert.strictEqual(input.getValue(), "hello");
+			expect(input.getValue()).toBe("hello");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo) - removes "hello"
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("undoes backspace", () => {
@@ -483,10 +482,10 @@ describe("Input component", () => {
 			input.handleInput("l");
 			input.handleInput("o");
 			input.handleInput("\x7f"); // Backspace
-			assert.strictEqual(input.getValue(), "hell");
+			expect(input.getValue()).toBe("hell");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello");
+			expect(input.getValue()).toBe("hello");
 		});
 
 		it("undoes forward delete", () => {
@@ -500,10 +499,10 @@ describe("Input component", () => {
 			input.handleInput("\x01"); // Ctrl+A - go to start
 			input.handleInput("\x1b[C"); // Right arrow
 			input.handleInput("\x1b[3~"); // Delete key
-			assert.strictEqual(input.getValue(), "hllo");
+			expect(input.getValue()).toBe("hllo");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello");
+			expect(input.getValue()).toBe("hello");
 		});
 
 		it("undoes Ctrl+W (delete word backward)", () => {
@@ -520,13 +519,13 @@ describe("Input component", () => {
 			input.handleInput("r");
 			input.handleInput("l");
 			input.handleInput("d");
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 
 			input.handleInput("\x17"); // Ctrl+W
-			assert.strictEqual(input.getValue(), "hello ");
+			expect(input.getValue()).toBe("hello ");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("undoes Ctrl+K (delete to line end)", () => {
@@ -547,10 +546,10 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C");
 
 			input.handleInput("\x0b"); // Ctrl+K
-			assert.strictEqual(input.getValue(), "hello ");
+			expect(input.getValue()).toBe("hello ");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("undoes Ctrl+U (delete to line start)", () => {
@@ -571,10 +570,10 @@ describe("Input component", () => {
 			for (let i = 0; i < 6; i++) input.handleInput("\x1b[C");
 
 			input.handleInput("\x15"); // Ctrl+U
-			assert.strictEqual(input.getValue(), "world");
+			expect(input.getValue()).toBe("world");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("undoes yank", () => {
@@ -588,10 +587,10 @@ describe("Input component", () => {
 			input.handleInput(" ");
 			input.handleInput("\x17"); // Ctrl+W - delete "hello "
 			input.handleInput("\x19"); // Ctrl+Y - yank
-			assert.strictEqual(input.getValue(), "hello ");
+			expect(input.getValue()).toBe("hello ");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 
 		it("undoes paste atomically", () => {
@@ -603,11 +602,11 @@ describe("Input component", () => {
 
 			// Simulate bracketed paste
 			input.handleInput("\x1b[200~beep boop\x1b[201~");
-			assert.strictEqual(input.getValue(), "hellobeep boop world");
+			expect(input.getValue()).toBe("hellobeep boop world");
 
 			// Single undo should restore entire pre-paste state
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("undoes Alt+D (delete word forward)", () => {
@@ -617,10 +616,10 @@ describe("Input component", () => {
 			input.handleInput("\x01"); // Ctrl+A
 
 			input.handleInput("\x1bd"); // Alt+D - deletes "hello"
-			assert.strictEqual(input.getValue(), " world");
+			expect(input.getValue()).toBe(" world");
 
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "hello world");
+			expect(input.getValue()).toBe("hello world");
 		});
 
 		it("cursor movement starts new undo unit", () => {
@@ -633,15 +632,15 @@ describe("Input component", () => {
 			input.handleInput("\x05"); // Ctrl+E
 			input.handleInput("d");
 			input.handleInput("e");
-			assert.strictEqual(input.getValue(), "abcde");
+			expect(input.getValue()).toBe("abcde");
 
 			// Undo removes "de" (typed after movement)
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "abc");
+			expect(input.getValue()).toBe("abc");
 
 			// Undo removes "abc"
 			input.handleInput("\x1b[45;5u"); // Ctrl+- (undo)
-			assert.strictEqual(input.getValue(), "");
+			expect(input.getValue()).toBe("");
 		});
 	});
 });
