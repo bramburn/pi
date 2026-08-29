@@ -12,8 +12,7 @@
  *   tailChars: 1024
  *   skipToolNames: ["read"]
  */
-import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import {
 	DEFAULT_PRUNER_CONFIG,
@@ -47,27 +46,27 @@ function toolResult(toolCallId: string, toolName: string, text: string, ts = 1) 
 
 describe("pruneSession (Phase 2, item 3)", () => {
 	it("DEFAULT_PRUNER_CONFIG matches the deepseek-harness defaults", () => {
-		assert.equal(DEFAULT_PRUNER_CONFIG.thresholdChars, 8192);
-		assert.equal(DEFAULT_PRUNER_CONFIG.headChars, 4096);
-		assert.equal(DEFAULT_PRUNER_CONFIG.tailChars, 1024);
-		assert.deepEqual(DEFAULT_PRUNER_CONFIG.skipToolNames, ["read"]);
+		expect(DEFAULT_PRUNER_CONFIG.thresholdChars).toBe(8192);
+		expect(DEFAULT_PRUNER_CONFIG.headChars).toBe(4096);
+		expect(DEFAULT_PRUNER_CONFIG.tailChars).toBe(1024);
+		expect(DEFAULT_PRUNER_CONFIG.skipToolNames).toEqual(["read"]);
 	});
 
 	it("returns the input array unchanged when no result is over-budget", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", "small output"), bashResult("echo", "small")];
 		const pruned = pruneSession(messages);
-		assert.equal(pruned, messages);
+		expect(pruned).toBe(messages);
 	});
 
 	it("rewrites over-budget tool results with head + marker + tail", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", "x".repeat(20_000))];
 		const pruned = pruneSession(messages);
-		assert.notEqual(pruned, messages);
+		expect(pruned).not.toBe(messages);
 		const text = (pruned[0] as { content: { type: string; text: string }[] }).content[0].text;
-		assert.ok(text.length < 20_000, `expected < 20_000, got ${text.length}`);
-		assert.ok(text.includes(DEFAULT_PRUNER_CONFIG.pruneMarker));
-		assert.ok(text.startsWith("x".repeat(4096)));
-		assert.ok(text.endsWith("x".repeat(1024)));
+		expect(text.length < 20_000).toBeTruthy();
+		expect(text.includes(DEFAULT_PRUNER_CONFIG.pruneMarker)).toBeTruthy();
+		expect(text.startsWith("x".repeat(4096))).toBeTruthy();
+		expect(text.endsWith("x".repeat(1024))).toBeTruthy();
 	});
 
 	it("preserves the head 4 KiB verbatim", () => {
@@ -77,15 +76,15 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", head + padding + tail)];
 		const pruned = pruneSession(messages);
 		const text = (pruned[0] as { content: { type: string; text: string }[] }).content[0].text;
-		assert.ok(text.includes(head));
-		assert.ok(text.includes(tail));
-		assert.ok(text.includes(DEFAULT_PRUNER_CONFIG.pruneMarker));
+		expect(text.includes(head)).toBeTruthy();
+		expect(text.includes(tail)).toBeTruthy();
+		expect(text.includes(DEFAULT_PRUNER_CONFIG.pruneMarker)).toBeTruthy();
 	});
 
 	it("does not prune `read` tool results (decision matrix item 10)", () => {
 		const messages: AgentMessage[] = [toolResult("r1", "read", "x".repeat(50_000))];
 		const pruned = pruneSession(messages);
-		assert.equal(pruned, messages);
+		expect(pruned).toBe(messages);
 	});
 
 	it("does not prune `bashExecution` rows by default (they are tool outputs, not tool results)", () => {
@@ -95,13 +94,13 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		// `bashExecution` is preserved unless the caller sets
 		// `excludeFromPrune: false` (the default). The decision matrix
 		// exemption is for `read`; bash is not exempt.
-		assert.equal(pruned[0], messages[0]);
+		expect(pruned[0]).toBe(messages[0]);
 	});
 
 	it("respects BashExecutionMessage.excludeFromPrune: true", () => {
 		const messages: AgentMessage[] = [{ ...bashResult("echo", "x".repeat(50_000)), excludeFromPrune: true }];
 		const pruned = pruneSession(messages);
-		assert.equal(pruned[0], messages[0]);
+		expect(pruned[0]).toBe(messages[0]);
 	});
 
 	it("respects a custom PrunerConfig (lower threshold)", () => {
@@ -115,21 +114,21 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", "x".repeat(1000))];
 		const pruned = pruneSession(messages, config);
 		const text = (pruned[0] as { content: { type: string; text: string }[] }).content[0].text;
-		assert.ok(text.length < 1000);
-		assert.ok(text.startsWith("x".repeat(64)));
-		assert.ok(text.endsWith("x".repeat(32)));
+		expect(text.length < 1000).toBeTruthy();
+		expect(text.startsWith("x".repeat(64))).toBeTruthy();
+		expect(text.endsWith("x".repeat(32))).toBeTruthy();
 	});
 
 	it("is a no-op for an empty message list", () => {
-		assert.deepEqual(pruneSession([]), []);
+		expect(pruneSession([])).toEqual([]);
 	});
 
 	it("does not mutate the input array (returns a new array)", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", "x".repeat(20_000))];
 		const before = messages.length;
 		pruneSession(messages);
-		assert.equal(messages.length, before);
+		expect(messages.length).toBe(before);
 		// The original message is the same object reference.
-		assert.equal(messages[0], toolResult("t1", "bash", "x".repeat(20_000)));
+		expect(messages[0]).toBe(toolResult("t1", "bash", "x".repeat(20_000)));
 	});
 });
