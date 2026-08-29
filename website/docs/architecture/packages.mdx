@@ -1,0 +1,83 @@
+---
+id: packages
+title: Package Architecture
+sidebar_label: Package Overview
+---
+
+# Package Architecture
+
+pi is a TypeScript monorepo. This page describes the five core packages and how they interact.
+
+## Dependency graph
+
+```
+coding-agent
+    ├── agent       (runtime + tool execution)
+    │    └── ai     (LLM API)
+    ├── tui         (terminal UI)
+    └── telemetry   (event contracts)
+```
+
+## packages/coding-agent
+
+The user-facing CLI. Responsible for:
+
+- Argument parsing (`main.ts`)
+- Session lifecycle (`SessionManager`, session files on disk)
+- TUI bootstrapping (`TuiScreen`, `model-selector.ts`)
+- Binary packaging (`build:binary`, copies the Bun exe + runtime assets)
+
+This is what `pi` the command is. It wires together the lower-level packages and owns the entry point.
+
+## packages/agent
+
+The agent runtime. Responsible for:
+
+- **State machine** — `AgentSession`, `turn_end`, `agent_end` events
+- **Tool execution** — serial and parallel (`executeToolCallsSerial`, `executeToolCallsParallel`), abort handling
+- **Message loop** — `agent_loop.ts`, `agent.ts`, the main turn loop
+- **Extensions** — tool registration, event emission, tool-result synthesis
+
+The agent does not know about the terminal or CLI. It receives messages and emits events.
+
+## packages/ai
+
+Unified multi-provider LLM API. Responsible for:
+
+- **Provider abstraction** — one interface, multiple backends (Anthropic, OpenAI, Google, Groq, OpenRouter, etc.)
+- **Model catalog** — generated from provider catalogs (`models.generated.ts`)
+- **Request/response types** — unified `LlmResponse`, `LlmRequest`, `ToolCall` types
+- **Streaming** — SSE support for all providers
+
+The `ai` package is intentionally isolated. Any package that needs an LLM call goes through it.
+
+## packages/tui
+
+Terminal UI primitives. Responsible for:
+
+- **Input** — keypress handling, Ctrl+C abort, model selector
+- **Rendering** — differential rendering of the chat buffer, tool output, spinner states
+- **Buffer** — scrollback management, ANSI parsing
+- **Screen layout** — header, chat area, input line, status bar
+
+The TUI does not own session or agent logic. It receives render state from the coding-agent and dispatches user input to it.
+
+## packages/telemetry
+
+Vendor-neutral telemetry contracts. Responsible for:
+
+- **Event schemas** — TypeScript types for all agent events (`tool_execution_start`, `message_start`, etc.)
+- **Reference adapter** — a no-op implementation for testing
+- **Conformance tests** — verify that event emitters produce valid events
+
+The telemetry package has no runtime dependency on the other packages. Other packages depend on it for type safety on event contracts.
+
+## Other packages
+
+| Package | Role |
+|---------|------|
+| `packages/protocol` | Wire-format types for IPC between client/server |
+| `packages/client` | HTTP client for the pi server mode |
+| `packages/server` | Optional HTTP server exposing the agent as a REST API |
+| `packages/storage` | Session persistence backends (file, SQLite) |
+| `packages/session-backends` | Session file I/O (file-based and SQLite-backed) |

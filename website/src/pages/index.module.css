@@ -1,0 +1,110 @@
+/* Homepage custom styles */
+
+.heroBanner {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(79, 134, 247, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.5rem;
+}
+
+.heroSubtitle {
+  font-size: 1.25rem;
+  color: var(--ifm-color-content-secondary);
+  max-width: 600px;
+  margin: 0 auto 2rem;
+  line-height: 1.6;
+}
+
+.buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.features {
+  padding: 3rem 0;
+  background: var(--ifm-background-surface-color);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.feature {
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: var(--ifm-background-color);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: border-color 150ms ease;
+}
+
+.feature:hover {
+  border-color: rgba(79, 134, 247, 0.4);
+}
+
+.featureTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--ifm-color-primary);
+}
+
+.featureDescription {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--ifm-color-content-secondary);
+  margin: 0;
+}
+
+.featureLink {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.featureLink:hover {
+  text-decoration: underline;
+}
+
+.installSection {
+  padding: 4rem 0;
+  text-align: center;
+}
+
+.installTitle {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}
+
+.installCode {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: var(--ifm-background-surface-color);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 1rem;
+  margin: 0;
+}
+
+.installNote {
+  margin-top: 1rem;
+  color: var(--ifm-color-content-secondary);
+  font-size: 0.9rem;
+}

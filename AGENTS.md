@@ -517,6 +517,38 @@ without remembering the `node` invocation.
 - **`node scripts/build-binaries.mjs --all`** (existing) — all six
   cross-platform binaries via `build-binaries.sh`. Different scope
   (release artifacts) and not run by `build:both`.
+## Documentation (website/)
+
+The Docusaurus site lives in `website/`. Docs live under `website/docs/`.
+
+### Adding new pages
+
+1. Create the `.mdx` file in the appropriate subdirectory under `website/docs/`
+2. Add it to the matching section in `website/sidebars.ts`
+3. Run `npm run build` from `website/` to verify no broken links
+
+### Content rules
+
+- **Fork docs only** — `website/docs/` documents the bramburn/pi fork. Upstream documentation lives at [pi.dev/docs/latest](https://pi.dev/docs/latest).
+- **Architecture docs** go in `website/docs/architecture/`
+- **Fork-specific docs** (sync process, fork features) go in `website/docs/fork/`
+- **No placeholders** — every page must have real content. Remove the Docusaurus tutorial/blog boilerplate before committing.
+- **Images** — generate with `mmx image generate --output <name> --aspect <ratio> --prompt "<prompt>"`. Put outputs in `website/static/img/`.
+- **Link format** — use relative paths for internal links. Use absolute URLs for upstream docs.
+
+### Docusaurus config
+
+- `url` is `https://bramburn.github.io`, `baseUrl` is `/pi/` (GitHub Pages project URL)
+- `onBrokenLinks: 'throw'` — CI fails on broken links
+- `blog: false` — no blog in this fork
+
+### CI
+
+`.github/workflows/docs.yml` deploys on push to `main` (and feature branches) when `website/**` changes. GitHub Pages URL: `https://bramburn.github.io/pi/`.
+
+### SEO
+
+Every doc page must have a frontmatter `id`, `title`, and `sidebar_label`. OG image is `static/img/social-card.png`.
 
 ## User Override
 

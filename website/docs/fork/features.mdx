@@ -1,0 +1,88 @@
+---
+id: features
+title: Fork Features
+sidebar_label: Fork Features
+---
+
+# Fork Features
+
+Differences between `bramburn/pi` (this fork) and `earendil-works/pi` (upstream).
+
+## Build and release
+
+| Feature | Upstream | Fork |
+|---------|----------|------|
+| npm scope | `@earendil-works/*` | `@bramburn/*` |
+| Binary name | `pi` | `pi-bramburn` |
+| Binary output | `pi.exe` | `pi.exe` (same, renamed via wrapper) |
+| Release pipeline | pi.dev CI | fork GitHub Actions |
+| Shrinkwrap | `@earendil-works/pi-coding-agent` | `@bramburn/pi-coding-agent` |
+
+## Fork identity constant
+
+`packages/coding-agent/src/config.ts` exports `FORK_NAME = "bramburn"`. This appears in `pi --version` output:
+
+```
+# Fork build
+pi 0.84.2 [bramburn]
+
+# Upstream build
+pi 0.84.2
+```
+
+The fork identity is intentional. It tells users which npm scope's binary they have installed.
+
+## `validateLlmMessages` guard
+
+The fork adds an explicit guard in the message loop that validates `user` and `assistant` messages before sending them to the LLM. Invalid messages (e.g., empty content, malformed tool calls) throw rather than being silently sent. This is not in upstream.
+
+## Build tooling
+
+The fork uses a custom `build-both` orchestrator (`scripts/build-both.mjs`) that:
+
+- Detects Node.js and Bun on `PATH`
+- Runs each build target independently
+- Reports `BUILT / SKIPPED / FAILED` per target
+- Supports `--node-only`, `--bun-only`, `--clean`, `--quiet` flags
+
+This is not upstream's approach. Upstream uses separate scripts per target.
+
+## tsgo via Bun
+
+The fork invokes `tsgo` (TypeScript-to-Go compiler) via `bun run` directly:
+
+```bash
+bun run node_modules/@typescript/native-preview/bin/tsgo.js -p tsconfig.build.json
+```
+
+Upstream uses a different invocation pattern in its CI.
+
+## `pi-bun` wrapper on PATH
+
+On Windows, the fork ships a `pi-bun.cmd` wrapper at `C:\Users\<user>\.pi\agent\bin\` that calls `packages/coding-agent/dist/pi.exe` directly. This lets `pi-bun --version` work from any directory without `cd`-ing into the repo.
+
+## Windows CI
+
+The fork runs CI on Windows (`windows-latest`) in addition to Linux. The upstream CI is primarily Linux-focused.
+
+## Fork-specific AGENTS.md rules
+
+The fork's `AGENTS.md` includes rules that do not apply to upstream:
+
+- `FORK_NAME` marker usage and rules
+- Fork sync process (merging upstream releases into the fork)
+- `.github/workflows/publish.yml` rules for the `@bramburn/*` scope
+- Windows prebuild file lock workaround
+- PowerShell BOM trap warning
+- Multi-session git safety (same as upstream, but more prominently documented)
+
+## Planned fork features
+
+These features are in the fork's roadmap but not yet implemented:
+
+- **Per-session default model** — each `.pi-session` file carries its own preferred model, overriding the global default. Planned spec: `docs/per-session-model-plan.md`
+- **Windows `tmux` alternative** — the fork's `pi-test.ps1` uses tmux when available; a native PowerShell loop is planned as a fallback
+
+## Syncing from upstream
+
+The fork merges upstream releases regularly. See [Sync Process](./sync) for the detailed procedure.
