@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import {
 	type Component,
 	parseOsc11BackgroundColor,
@@ -91,7 +92,7 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 describe("parseOsc11BackgroundColor", () => {
 	it("parses 16-bit OSC 11 rgb responses", () => {
-		expect(parseOsc11BackgroundColor("\x1b]11;rgb:0000/8000/ffff\x07")).toStrictEqual({
+		assert.deepStrictEqual(parseOsc11BackgroundColor("\x1b]11;rgb:0000/8000/ffff\x07"), {
 			r: 0,
 			g: 128,
 			b: 255,
@@ -99,26 +100,26 @@ describe("parseOsc11BackgroundColor", () => {
 	});
 
 	it("parses OSC 11 hex responses", () => {
-		expect(parseOsc11BackgroundColor("\x1b]11;#ffffff\x1b\\")).toStrictEqual({ r: 255, g: 255, b: 255 });
-		expect(parseOsc11BackgroundColor("\x1b]11;#000000\x07")).toStrictEqual({ r: 0, g: 0, b: 0 });
+		assert.deepStrictEqual(parseOsc11BackgroundColor("\x1b]11;#ffffff\x1b\\"), { r: 255, g: 255, b: 255 });
+		assert.deepStrictEqual(parseOsc11BackgroundColor("\x1b]11;#000000\x07"), { r: 0, g: 0, b: 0 });
 	});
 
 	it("rejects non-strict OSC 11 responses", () => {
-		expect(parseOsc11BackgroundColor(`x\x1b]11;#ffffff\x07`)).toBe(undefined);
-		expect(parseOsc11BackgroundColor("\x1b]10;#ffffff\x07")).toBe(undefined);
-		expect(parseOsc11BackgroundColor("\x1b]11;#ffffff\x07x")).toBe(undefined);
+		assert.strictEqual(parseOsc11BackgroundColor(`x\x1b]11;#ffffff\x07`), undefined);
+		assert.strictEqual(parseOsc11BackgroundColor("\x1b]10;#ffffff\x07"), undefined);
+		assert.strictEqual(parseOsc11BackgroundColor("\x1b]11;#ffffff\x07x"), undefined);
 	});
 });
 
 describe("parseTerminalColorSchemeReport", () => {
 	it("parses color scheme reports", () => {
-		expect(parseTerminalColorSchemeReport("\x1b[?997;1n")).toBe("dark");
-		expect(parseTerminalColorSchemeReport("\x1b[?997;2n")).toBe("light");
-		expect(parseTerminalColorSchemeReport("\x1b[?997;2n\x1b[?997;1n\x1b[?997;1n")).toBe("dark");
-		expect(parseTerminalColorSchemeReport("\x1b[?997;1n\x1b[?997;2n\x1b[?997;2n")).toBe("light");
-		expect(parseTerminalColorSchemeReport("\x1b[?997;3n")).toBe(undefined);
-		expect(parseTerminalColorSchemeReport("\x1b[?996n")).toBe(undefined);
-		expect(parseTerminalColorSchemeReport("x\x1b[?997;1n")).toBe(undefined);
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?997;1n"), "dark");
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?997;2n"), "light");
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?997;2n\x1b[?997;1n\x1b[?997;1n"), "dark");
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?997;1n\x1b[?997;2n\x1b[?997;2n"), "light");
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?997;3n"), undefined);
+		assert.strictEqual(parseTerminalColorSchemeReport("\x1b[?996n"), undefined);
+		assert.strictEqual(parseTerminalColorSchemeReport("x\x1b[?997;1n"), undefined);
 	});
 });
 
@@ -129,11 +130,11 @@ describe("TUI.queryTerminalBackgroundColor", () => {
 		tui.start();
 		try {
 			const query = tui.queryTerminalBackgroundColor({ timeoutMs: 1000 });
-			expect(terminal.writes.includes("\x1b]11;?\x07")).toBeTruthy();
+			assert.ok(terminal.writes.includes("\x1b]11;?\x07"));
 
 			terminal.sendInput("\x1b]11;#ffffff\x07");
 
-			expect(await query).toStrictEqual({ r: 255, g: 255, b: 255 });
+			assert.deepStrictEqual(await query, { r: 255, g: 255, b: 255 });
 		} finally {
 			tui.stop();
 		}
@@ -156,9 +157,9 @@ describe("TUI.queryTerminalBackgroundColor", () => {
 
 			terminal.sendInput("\x1b]11;#000000\x07");
 
-			expect(await query).toStrictEqual({ r: 0, g: 0, b: 0 });
-			expect(listenerInputs).toStrictEqual([]);
-			expect(component.inputs).toStrictEqual([]);
+			assert.deepStrictEqual(await query, { r: 0, g: 0, b: 0 });
+			assert.deepStrictEqual(listenerInputs, []);
+			assert.deepStrictEqual(component.inputs, []);
 		} finally {
 			tui.stop();
 		}
@@ -181,9 +182,9 @@ describe("TUI.queryTerminalBackgroundColor", () => {
 
 			terminal.sendInput("\x1b]11;not-a-color\x07");
 
-			expect(await query).toBe(undefined);
-			expect(listenerInputs).toStrictEqual([]);
-			expect(component.inputs).toStrictEqual([]);
+			assert.strictEqual(await query, undefined);
+			assert.deepStrictEqual(listenerInputs, []);
+			assert.deepStrictEqual(component.inputs, []);
 		} finally {
 			tui.stop();
 		}
@@ -211,12 +212,12 @@ describe("TUI.queryTerminalBackgroundColor", () => {
 			terminal.sendInput("x");
 			await Promise.resolve();
 
-			expect(settled).toBe(false);
-			expect(listenerInputs).toStrictEqual(["x"]);
-			expect(component.inputs).toStrictEqual(["x"]);
+			assert.strictEqual(settled, false);
+			assert.deepStrictEqual(listenerInputs, ["x"]);
+			assert.deepStrictEqual(component.inputs, ["x"]);
 
 			terminal.sendInput("\x1b]11;#ffffff\x07");
-			expect(await query).toStrictEqual({ r: 255, g: 255, b: 255 });
+			assert.deepStrictEqual(await query, { r: 255, g: 255, b: 255 });
 		} finally {
 			tui.stop();
 		}
@@ -238,12 +239,12 @@ describe("TUI.queryTerminalBackgroundColor", () => {
 			const query = tui.queryTerminalBackgroundColor({ timeoutMs: 1 });
 			await wait(5);
 
-			expect(await query).toBe(undefined);
+			assert.strictEqual(await query, undefined);
 
 			terminal.sendInput("\x1b]11;#ffffff\x07");
 
-			expect(listenerInputs).toStrictEqual([]);
-			expect(component.inputs).toStrictEqual([]);
+			assert.deepStrictEqual(listenerInputs, []);
+			assert.deepStrictEqual(component.inputs, []);
 		} finally {
 			tui.stop();
 		}

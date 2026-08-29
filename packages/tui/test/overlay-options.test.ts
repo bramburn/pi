@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Component, TUI } from "../src/tui.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -52,7 +53,7 @@ describe("TUI overlay options", () => {
 			for (const line of viewport) {
 				// visibleWidth not available here, but line length is a rough check
 				// The important thing is it didn't crash
-				expect(line !== undefined).toBeTruthy();
+				assert.ok(line !== undefined);
 			}
 			tui.stop();
 		});
@@ -74,7 +75,7 @@ describe("TUI overlay options", () => {
 
 			// Should not crash
 			const viewport = terminal.getViewport();
-			expect(viewport.length > 0).toBeTruthy();
+			assert.ok(viewport.length > 0);
 			tui.stop();
 		});
 
@@ -101,7 +102,7 @@ describe("TUI overlay options", () => {
 			// Should not crash and overlay should be visible
 			const viewport = terminal.getViewport();
 			const hasOverlay = viewport.some((line) => line?.includes("OVERLAY"));
-			expect(hasOverlay).toBeTruthy();
+			assert.ok(hasOverlay, "Overlay should be visible");
 			tui.stop();
 		});
 
@@ -119,7 +120,7 @@ describe("TUI overlay options", () => {
 
 			// Should not crash
 			const viewport = terminal.getViewport();
-			expect(viewport.length > 0).toBeTruthy();
+			assert.ok(viewport.length > 0);
 			tui.stop();
 		});
 
@@ -137,7 +138,7 @@ describe("TUI overlay options", () => {
 
 			// Should not crash
 			const viewport = terminal.getViewport();
-			expect(viewport.length > 0).toBeTruthy();
+			assert.ok(viewport.length > 0);
 			tui.stop();
 		});
 
@@ -164,7 +165,7 @@ describe("TUI overlay options", () => {
 
 			// Should not crash - this was the original bug scenario
 			const viewport = terminal.getViewport();
-			expect(viewport.length > 0).toBeTruthy();
+			assert.ok(viewport.length > 0);
 			tui.stop();
 		});
 	});
@@ -180,7 +181,7 @@ describe("TUI overlay options", () => {
 			tui.start();
 			await renderAndFlush(tui, terminal);
 
-			expect(overlay.requestedWidth).toBe(50);
+			assert.strictEqual(overlay.requestedWidth, 50);
 			tui.stop();
 		});
 
@@ -194,7 +195,7 @@ describe("TUI overlay options", () => {
 			tui.start();
 			await renderAndFlush(tui, terminal);
 
-			expect(overlay.requestedWidth).toBe(30);
+			assert.strictEqual(overlay.requestedWidth, 30);
 			tui.stop();
 		});
 	});
@@ -211,7 +212,7 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[0]?.startsWith("TOP-LEFT")).toBeTruthy();
+			assert.ok(viewport[0]?.startsWith("TOP-LEFT"), `Expected TOP-LEFT at start, got: ${viewport[0]}`);
 			tui.stop();
 		});
 
@@ -228,8 +229,8 @@ describe("TUI overlay options", () => {
 			const viewport = terminal.getViewport();
 			// Should be on last row, ending at last column
 			const lastRow = viewport[23];
-			expect(lastRow?.includes("BTM-RIGHT")).toBeTruthy();
-			expect(lastRow?.trimEnd().endsWith("BTM-RIGHT")).toBeTruthy();
+			assert.ok(lastRow?.includes("BTM-RIGHT"), `Expected BTM-RIGHT on last row, got: ${lastRow}`);
+			assert.ok(lastRow?.trimEnd().endsWith("BTM-RIGHT"), `Expected BTM-RIGHT at end, got: ${lastRow}`);
 			tui.stop();
 		});
 
@@ -246,10 +247,10 @@ describe("TUI overlay options", () => {
 			const viewport = terminal.getViewport();
 			// Should be on first row, centered horizontally
 			const firstRow = viewport[0];
-			expect(firstRow?.includes("CENTERED")).toBeTruthy();
+			assert.ok(firstRow?.includes("CENTERED"), `Expected CENTERED on first row, got: ${firstRow}`);
 			// Check it's roughly centered (col 35 for width 10 in 80 col terminal)
 			const colIndex = firstRow?.indexOf("CENTERED") ?? -1;
-			expect(colIndex >= 30 && colIndex <= 40).toBeTruthy();
+			assert.ok(colIndex >= 30 && colIndex <= 40, `Expected centered, got col ${colIndex}`);
 			tui.stop();
 		});
 	});
@@ -272,7 +273,7 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			// Should be at row 0, col 0 (negative margins clamped to 0)
-			expect(viewport[0]?.startsWith("NEG-MARGIN")).toBeTruthy();
+			assert.ok(viewport[0]?.startsWith("NEG-MARGIN"), `Expected NEG-MARGIN at start of row 0, got: ${viewport[0]}`);
 			tui.stop();
 		});
 
@@ -288,12 +289,12 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			// Should be on row 5 (not 0) due to margin
-			expect(viewport[0]?.includes("MARGIN")).toBeFalsy();
-			expect(viewport[4]?.includes("MARGIN")).toBeFalsy();
-			expect(viewport[5]?.includes("MARGIN")).toBeTruthy();
+			assert.ok(!viewport[0]?.includes("MARGIN"), "Should not be on row 0");
+			assert.ok(!viewport[4]?.includes("MARGIN"), "Should not be on row 4");
+			assert.ok(viewport[5]?.includes("MARGIN"), `Expected MARGIN on row 5, got: ${viewport[5]}`);
 			// Should start at col 5 (not 0)
 			const colIndex = viewport[5]?.indexOf("MARGIN") ?? -1;
-			expect(colIndex).toBe(5);
+			assert.strictEqual(colIndex, 5, `Expected col 5, got ${colIndex}`);
 			tui.stop();
 		});
 
@@ -312,9 +313,9 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[2]?.includes("MARGIN")).toBeTruthy();
+			assert.ok(viewport[2]?.includes("MARGIN"), `Expected MARGIN on row 2, got: ${viewport[2]}`);
 			const colIndex = viewport[2]?.indexOf("MARGIN") ?? -1;
-			expect(colIndex).toBe(3);
+			assert.strictEqual(colIndex, 3, `Expected col 3, got ${colIndex}`);
 			tui.stop();
 		});
 	});
@@ -331,9 +332,9 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[5]?.includes("OFFSET")).toBeTruthy();
+			assert.ok(viewport[5]?.includes("OFFSET"), `Expected OFFSET on row 5, got: ${viewport[5]}`);
 			const colIndex = viewport[5]?.indexOf("OFFSET") ?? -1;
-			expect(colIndex).toBe(10);
+			assert.strictEqual(colIndex, 10, `Expected col 10, got ${colIndex}`);
 			tui.stop();
 		});
 	});
@@ -360,7 +361,7 @@ describe("TUI overlay options", () => {
 				}
 			}
 			// Should be roughly centered vertically (row ~11-12 for 24 row terminal)
-			expect(foundRow >= 10 && foundRow <= 13).toBeTruthy();
+			assert.ok(foundRow >= 10 && foundRow <= 13, `Expected centered row, got ${foundRow}`);
 			tui.stop();
 		});
 
@@ -375,7 +376,7 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[0]?.includes("TOP")).toBeTruthy();
+			assert.ok(viewport[0]?.includes("TOP"), `Expected TOP on row 0, got: ${viewport[0]}`);
 			tui.stop();
 		});
 
@@ -390,7 +391,7 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[23]?.includes("BOTTOM")).toBeTruthy();
+			assert.ok(viewport[23]?.includes("BOTTOM"), `Expected BOTTOM on last row, got: ${viewport[23]}`);
 			tui.stop();
 		});
 	});
@@ -408,11 +409,11 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			const content = viewport.join("\n");
-			expect(content.includes("Line 1")).toBeTruthy();
-			expect(content.includes("Line 2")).toBeTruthy();
-			expect(content.includes("Line 3")).toBeTruthy();
-			expect(content.includes("Line 4")).toBeFalsy();
-			expect(content.includes("Line 5")).toBeFalsy();
+			assert.ok(content.includes("Line 1"), "Should include Line 1");
+			assert.ok(content.includes("Line 2"), "Should include Line 2");
+			assert.ok(content.includes("Line 3"), "Should include Line 3");
+			assert.ok(!content.includes("Line 4"), "Should NOT include Line 4");
+			assert.ok(!content.includes("Line 5"), "Should NOT include Line 5");
 			tui.stop();
 		});
 
@@ -429,9 +430,9 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			const content = viewport.join("\n");
-			expect(content.includes("L1")).toBeTruthy();
-			expect(content.includes("L5")).toBeTruthy();
-			expect(content.includes("L6")).toBeFalsy();
+			assert.ok(content.includes("L1"), "Should include L1");
+			assert.ok(content.includes("L5"), "Should include L5");
+			assert.ok(!content.includes("L6"), "Should NOT include L6");
 			tui.stop();
 		});
 	});
@@ -449,9 +450,9 @@ describe("TUI overlay options", () => {
 			await renderAndFlush(tui, terminal);
 
 			const viewport = terminal.getViewport();
-			expect(viewport[3]?.includes("ABSOLUTE")).toBeTruthy();
+			assert.ok(viewport[3]?.includes("ABSOLUTE"), `Expected ABSOLUTE on row 3, got: ${viewport[3]}`);
 			const colIndex = viewport[3]?.indexOf("ABSOLUTE") ?? -1;
-			expect(colIndex).toBe(5);
+			assert.strictEqual(colIndex, 5, `Expected col 5, got ${colIndex}`);
 			tui.stop();
 		});
 	});
@@ -476,7 +477,7 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			// Second overlay should be visible (on top)
-			expect(viewport[0]?.includes("SECOND")).toBeTruthy();
+			assert.ok(viewport[0]?.includes("SECOND"), `Expected SECOND on row 0, got: ${viewport[0]}`);
 			// Part of first overlay might still be visible after SECOND
 			// FIRST-OVERLAY is 13 chars, SECOND is 6 chars, so "OVERLAY" part might show
 			tui.stop();
@@ -501,8 +502,8 @@ describe("TUI overlay options", () => {
 
 			const viewport = terminal.getViewport();
 			// Both should be visible
-			expect(viewport[0]?.includes("TOP-LEFT")).toBeTruthy();
-			expect(viewport[23]?.includes("BTM-RIGHT")).toBeTruthy();
+			assert.ok(viewport[0]?.includes("TOP-LEFT"), `Expected TOP-LEFT on row 0, got: ${viewport[0]}`);
+			assert.ok(viewport[23]?.includes("BTM-RIGHT"), `Expected BTM-RIGHT on row 23, got: ${viewport[23]}`);
 			tui.stop();
 		});
 
@@ -524,7 +525,7 @@ describe("TUI overlay options", () => {
 
 			// Second should be visible
 			let viewport = terminal.getViewport();
-			expect(viewport[0]?.includes("SECOND")).toBeTruthy();
+			assert.ok(viewport[0]?.includes("SECOND"), "SECOND should be visible initially");
 
 			// Hide top overlay
 			tui.hideOverlay();
@@ -532,7 +533,7 @@ describe("TUI overlay options", () => {
 
 			// First should now be visible
 			viewport = terminal.getViewport();
-			expect(viewport[0]?.includes("FIRST")).toBeTruthy();
+			assert.ok(viewport[0]?.includes("FIRST"), "FIRST should be visible after hiding SECOND");
 
 			tui.stop();
 		});

@@ -1,6 +1,7 @@
+import assert from "node:assert";
 import { dirname, join, resolve } from "node:path";
+import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
 import { getNativeModuleCandidates } from "../src/native-module-path.ts";
 
 describe("getNativeModuleCandidates", () => {
@@ -13,13 +14,13 @@ describe("getNativeModuleCandidates", () => {
 			moduleUrl: pathToFileURL(bundledModule).href,
 			execPath: resolve("virtual", "node", "node.exe"),
 			resolvePackage: (specifier) => {
-				expect(specifier).toBe("@earendil-works/pi-tui");
+				assert.equal(specifier, "@earendil-works/pi-tui");
 				return join(packageRoot, "dist", "index.js");
 			},
 		});
 
-		expect(candidates[0]).toBe(join(packageRoot, nativePath));
-		expect(candidates.includes(join(dirname(bundledModule), "..", nativePath))).toBeTruthy();
+		assert.equal(candidates[0], join(packageRoot, nativePath));
+		assert.ok(candidates.includes(join(dirname(bundledModule), "..", nativePath)));
 	});
 
 	it("keeps standalone binary fallbacks when the TUI package is unavailable", () => {
@@ -35,7 +36,7 @@ describe("getNativeModuleCandidates", () => {
 			},
 		});
 
-		expect(candidates).toEqual([
+		assert.deepEqual(candidates, [
 			join(dirname(bundledModule), "..", nativePath),
 			join(dirname(bundledModule), nativePath),
 			join(dirname(execPath), nativePath),

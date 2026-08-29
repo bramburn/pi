@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import assert from "node:assert";
+import { describe, it, mock } from "node:test";
 import { setKittyProtocolActive } from "../src/keys.ts";
 import {
 	normalizeAppleTerminalInput,
@@ -9,62 +10,62 @@ import {
 
 describe("resolveEscapeTimeoutMs", () => {
 	it("uses PI_TUI_ESC_TIMEOUT when configured", () => {
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80" })).toBe(80);
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80", SSH_TTY: "/dev/pts/1" })).toBe(80);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80" }), 80);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80", SSH_TTY: "/dev/pts/1" }), 80);
 	});
 
 	it("ignores invalid PI_TUI_ESC_TIMEOUT values", () => {
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "abc" })).toBe(10);
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "0" })).toBe(10);
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "-5" })).toBe(10);
-		expect(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "" })).toBe(10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "abc" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "0" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "-5" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "" }), 10);
 	});
 
 	it("defaults to 100ms over SSH", () => {
-		expect(resolveEscapeTimeoutMs({ SSH_CONNECTION: "10.0.0.1 22" })).toBe(100);
-		expect(resolveEscapeTimeoutMs({ SSH_TTY: "/dev/pts/1" })).toBe(100);
+		assert.equal(resolveEscapeTimeoutMs({ SSH_CONNECTION: "10.0.0.1 22" }), 100);
+		assert.equal(resolveEscapeTimeoutMs({ SSH_TTY: "/dev/pts/1" }), 100);
 	});
 
 	it("defaults to 10ms otherwise", () => {
-		expect(resolveEscapeTimeoutMs({})).toBe(10);
+		assert.equal(resolveEscapeTimeoutMs({}), 10);
 	});
 });
 
 describe("normalizeNativeShiftEnterInput", () => {
 	it("rewrites Return to CSI-u Shift+Enter when native Shift detection is enabled and Shift is pressed", () => {
-		expect(normalizeNativeShiftEnterInput("\r", true, true)).toBe("\x1b[13;2u");
+		assert.equal(normalizeNativeShiftEnterInput("\r", true, true), "\x1b[13;2u");
 	});
 
 	it("leaves Return unchanged when native Shift detection is disabled", () => {
-		expect(normalizeNativeShiftEnterInput("\r", false, true)).toBe("\r");
+		assert.equal(normalizeNativeShiftEnterInput("\r", false, true), "\r");
 	});
 
 	it("leaves Return unchanged when Shift is not pressed", () => {
-		expect(normalizeNativeShiftEnterInput("\r", true, false)).toBe("\r");
+		assert.equal(normalizeNativeShiftEnterInput("\r", true, false), "\r");
 	});
 
 	it("leaves non-Return input unchanged", () => {
-		expect(normalizeNativeShiftEnterInput("\x1b[13;2u", true, true)).toBe("\x1b[13;2u");
-		expect(normalizeNativeShiftEnterInput("a", true, true)).toBe("a");
+		assert.equal(normalizeNativeShiftEnterInput("\x1b[13;2u", true, true), "\x1b[13;2u");
+		assert.equal(normalizeNativeShiftEnterInput("a", true, true), "a");
 	});
 });
 
 describe("normalizeAppleTerminalInput", () => {
 	it("rewrites Apple Terminal Return to CSI-u Shift+Enter when Shift is pressed", () => {
-		expect(normalizeAppleTerminalInput("\r", true, true)).toBe("\x1b[13;2u");
+		assert.equal(normalizeAppleTerminalInput("\r", true, true), "\x1b[13;2u");
 	});
 
 	it("leaves Apple Terminal Return unchanged when Shift is not pressed", () => {
-		expect(normalizeAppleTerminalInput("\r", true, false)).toBe("\r");
+		assert.equal(normalizeAppleTerminalInput("\r", true, false), "\r");
 	});
 
 	it("leaves non-Apple Terminal Return unchanged when Shift is pressed", () => {
-		expect(normalizeAppleTerminalInput("\r", false, true)).toBe("\r");
+		assert.equal(normalizeAppleTerminalInput("\r", false, true), "\r");
 	});
 
 	it("leaves non-Return input unchanged", () => {
-		expect(normalizeAppleTerminalInput("\x1b[13;2u", true, true)).toBe("\x1b[13;2u");
-		expect(normalizeAppleTerminalInput("a", true, true)).toBe("a");
+		assert.equal(normalizeAppleTerminalInput("\x1b[13;2u", true, true), "\x1b[13;2u");
+		assert.equal(normalizeAppleTerminalInput("a", true, true), "a");
 	});
 });
 
@@ -131,9 +132,9 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 	it("queries Kitty mode before enabling modifyOtherKeys fallback", () => {
 		const harness = setupNegotiation();
 		try {
-			expect(harness.writes[0]).toBe("\x1b[>7u\x1b[?u\x1b[c");
-			expect(harness.writes.includes("\x1b[>4;2m")).toBe(false);
-			expect(harness.terminal.kittyProtocolActive).toBe(false);
+			assert.equal(harness.writes[0], "\x1b[>7u\x1b[?u\x1b[c");
+			assert.equal(harness.writes.includes("\x1b[>4;2m"), false);
+			assert.equal(harness.terminal.kittyProtocolActive, false);
 		} finally {
 			harness.cleanup();
 		}
@@ -144,14 +145,14 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		try {
 			harness.send("\x1b[?7u");
 
-			expect(harness.getInput()).toBe(undefined);
-			expect(harness.terminal.kittyProtocolActive).toBe(true);
-			expect(harness.writes.includes("\x1b[>4;2m")).toBe(false);
-			expect(harness.writes.includes("\x1b[>4;0m")).toBe(false);
+			assert.equal(harness.getInput(), undefined);
+			assert.equal(harness.terminal.kittyProtocolActive, true);
+			assert.equal(harness.writes.includes("\x1b[>4;2m"), false);
+			assert.equal(harness.writes.includes("\x1b[>4;0m"), false);
 
 			harness.cleanup();
-			expect(harness.writes.filter((write) => write === "\x1b[<u").length).toBe(1);
-			expect(harness.writes.includes("\x1b[>4;0m")).toBe(false);
+			assert.equal(harness.writes.filter((write) => write === "\x1b[<u").length, 1);
+			assert.equal(harness.writes.includes("\x1b[>4;0m"), false);
 		} finally {
 			harness.cleanup();
 		}
@@ -162,12 +163,12 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		try {
 			harness.send("\x1b[?0u");
 
-			expect(harness.getInput()).toBe(undefined);
-			expect(harness.terminal.kittyProtocolActive).toBe(false);
-			expect(harness.writes.filter((write) => write === "\x1b[>4;2m").length).toBe(1);
+			assert.equal(harness.getInput(), undefined);
+			assert.equal(harness.terminal.kittyProtocolActive, false);
+			assert.equal(harness.writes.filter((write) => write === "\x1b[>4;2m").length, 1);
 
 			harness.cleanup();
-			expect(harness.writes.filter((write) => write === "\x1b[>4;0m").length).toBe(1);
+			assert.equal(harness.writes.filter((write) => write === "\x1b[>4;0m").length, 1);
 		} finally {
 			harness.cleanup();
 		}
@@ -178,9 +179,9 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		try {
 			harness.send("\x1b[?62;4;52c");
 
-			expect(harness.getInput()).toBe(undefined);
-			expect(harness.terminal.kittyProtocolActive).toBe(false);
-			expect(harness.writes.filter((write) => write === "\x1b[>4;2m").length).toBe(1);
+			assert.equal(harness.getInput(), undefined);
+			assert.equal(harness.terminal.kittyProtocolActive, false);
+			assert.equal(harness.writes.filter((write) => write === "\x1b[>4;2m").length, 1);
 		} finally {
 			harness.cleanup();
 		}
@@ -191,47 +192,47 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		try {
 			harness.send("a");
 
-			expect(harness.getInput()).toBe("a");
-			expect(harness.terminal.kittyProtocolActive).toBe(false);
+			assert.equal(harness.getInput(), "a");
+			assert.equal(harness.terminal.kittyProtocolActive, false);
 		} finally {
 			harness.cleanup();
 		}
 	});
 
 	it("tracks split Kitty confirmation", () => {
-		vi.useFakeTimers({ toFake: ["setTimeout"] });
+		mock.timers.enable({ apis: ["setTimeout"] });
 		const harness = setupNegotiation();
 		try {
 			harness.send("\x1b[?7");
-			vi.advanceTimersByTime(10);
+			mock.timers.tick(10);
 
-			expect(harness.getInput()).toBe(undefined);
+			assert.equal(harness.getInput(), undefined);
 
 			harness.send("u");
 
-			expect(harness.terminal.kittyProtocolActive).toBe(true);
-			expect(harness.writes.includes("\x1b[>4;2m")).toBe(false);
+			assert.equal(harness.terminal.kittyProtocolActive, true);
+			assert.equal(harness.writes.includes("\x1b[>4;2m"), false);
 		} finally {
 			harness.cleanup();
-			vi.useRealTimers();
+			mock.timers.reset();
 		}
 	});
 
 	it("replays buffered CSI-prefix input when it is not a Kitty response", () => {
-		vi.useFakeTimers({ toFake: ["setTimeout"] });
+		mock.timers.enable({ apis: ["setTimeout"] });
 		const harness = setupNegotiation();
 		try {
 			harness.send("\x1b[");
-			vi.advanceTimersByTime(50); // StdinBuffer sequence timeout, not the lone-ESC timeout
+			mock.timers.tick(50); // StdinBuffer sequence timeout, not the lone-ESC timeout
 
-			expect(harness.getInput()).toBe(undefined);
+			assert.equal(harness.getInput(), undefined);
 
-			vi.advanceTimersByTime(150);
+			mock.timers.tick(150);
 
-			expect(harness.getInput()).toBe("\x1b[");
+			assert.equal(harness.getInput(), "\x1b[");
 		} finally {
 			harness.cleanup();
-			vi.useRealTimers();
+			mock.timers.reset();
 		}
 	});
 });
@@ -249,7 +250,7 @@ describe("ProcessTerminal progress", () => {
 
 		try {
 			terminal.setProgress(false);
-			expect(writes).toEqual(["\x1b]9;4;0\x07"]);
+			assert.deepEqual(writes, ["\x1b]9;4;0\x07"]);
 		} finally {
 			process.stdout.write = previousWrite;
 		}
@@ -271,8 +272,8 @@ describe("ProcessTerminal dimensions", () => {
 
 			const terminal = new ProcessTerminal();
 
-			expect(terminal.columns).toBe(123);
-			expect(terminal.rows).toBe(45);
+			assert.equal(terminal.columns, 123);
+			assert.equal(terminal.rows, 45);
 		} finally {
 			if (previousColumnsDescriptor) {
 				Object.defineProperty(process.stdout, "columns", previousColumnsDescriptor);

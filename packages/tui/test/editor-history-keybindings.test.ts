@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import assert from "node:assert";
+import { afterEach, describe, it } from "node:test";
 import { Editor } from "../src/components/editor.ts";
 import { KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "../src/keybindings.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
@@ -25,18 +26,18 @@ describe("Editor prompt history keybindings", () => {
 		editor.handleInput("\x1b[D");
 
 		editor.handleInput("\x10"); // Ctrl+P
-		expect(editor.getText()).toBe("newer\nmultiline prompt");
-		expect(editor.getCursor()).toStrictEqual({ line: 0, col: 0 });
+		assert.strictEqual(editor.getText(), "newer\nmultiline prompt");
+		assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 
 		editor.handleInput("\x10"); // Ctrl+P
-		expect(editor.getText()).toBe("older prompt");
+		assert.strictEqual(editor.getText(), "older prompt");
 
 		editor.handleInput("\x0e"); // Ctrl+N
-		expect(editor.getText()).toBe("newer\nmultiline prompt");
-		expect(editor.getCursor()).toStrictEqual({ line: 1, col: 16 });
+		assert.strictEqual(editor.getText(), "newer\nmultiline prompt");
+		assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 16 });
 
 		editor.handleInput("\x0e"); // Ctrl+N
-		expect(editor.getText()).toBe("draft");
-		expect(editor.getCursor()).toStrictEqual({ line: 0, col: 3 });
+		assert.strictEqual(editor.getText(), "draft");
+		assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 3 });
 	});
 });

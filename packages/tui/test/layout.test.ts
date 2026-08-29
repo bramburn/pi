@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Text } from "../src/components/text.ts";
@@ -23,8 +24,11 @@ describe("viewport layout", () => {
 			() => {},
 		);
 
-		expect(frame.root.children.map((child) => child.rect.height)).toStrictEqual([1, 3]);
-		expect(visibleLines(frame.lines)).toStrictEqual(["top", "body", "", ""]);
+		assert.deepStrictEqual(
+			frame.root.children.map((child) => child.rect.height),
+			[1, 3],
+		);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["top", "body", "", ""]);
 	});
 
 	it("does not render fixed-basis scroll content during stack measurement", () => {
@@ -41,7 +45,7 @@ describe("viewport layout", () => {
 			{ component: new Text("dock", 0, 0), basis: "auto" },
 		]);
 		renderLayoutFrame(root, 10, 3, () => {});
-		expect(renderCount).toBe(1);
+		assert.strictEqual(renderCount, 1);
 	});
 
 	it("paints only clipped rows from very large scroll content", () => {
@@ -61,7 +65,7 @@ describe("viewport layout", () => {
 		);
 
 		const frame = renderLayoutFrame(transcript, 10, 3, () => {});
-		expect(visibleLines(frame.lines)).toStrictEqual(["visible 1", "visible 2", "visible 3"]);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["visible 1", "visible 2", "visible 3"]);
 	});
 
 	it("shrinks entries to their minimum sizes", () => {
@@ -75,8 +79,11 @@ describe("viewport layout", () => {
 			() => {},
 		);
 
-		expect(frame.root.children.map((child) => child.rect.height)).toStrictEqual([1, 3]);
-		expect(visibleLines(frame.lines)).toStrictEqual(["a1", "b1", "b2", "b3"]);
+		assert.deepStrictEqual(
+			frame.root.children.map((child) => child.rect.height),
+			[1, 3],
+		);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["a1", "b1", "b2", "b3"]);
 	});
 
 	it("includes nested minimum sizes in intrinsic stack measurement", () => {
@@ -96,7 +103,7 @@ describe("viewport layout", () => {
 			() => {},
 		);
 
-		expect(visibleLines(frame.lines)).toStrictEqual([
+		assert.deepStrictEqual(visibleLines(frame.lines), [
 			"body",
 			"top1",
 			"top2",
@@ -114,7 +121,10 @@ describe("viewport layout", () => {
 			[new Text("one", 0, 0), { component: new Text("hidden", 0, 0), visible: () => false }, new Text("two", 0, 0)],
 			{ gap: 1 },
 		);
-		expect(stack.render(10).map((line) => line.trimEnd())).toStrictEqual(["one", "", "two"]);
+		assert.deepStrictEqual(
+			stack.render(10).map((line) => line.trimEnd()),
+			["one", "", "two"],
+		);
 	});
 
 	it("crops Kitty images at a scroll view's lower boundary", () => {
@@ -132,7 +142,7 @@ describe("viewport layout", () => {
 			() => {},
 		);
 
-		expect(frame.lines[2]?.includes("y=0,h=34,r=1")).toBeTruthy();
+		assert.ok(frame.lines[2]?.includes("y=0,h=34,r=1"));
 	});
 
 	it("composes horizontal children at allocated widths", () => {
@@ -145,7 +155,7 @@ describe("viewport layout", () => {
 			1,
 			() => {},
 		);
-		expect(visibleLines(frame.lines)).toStrictEqual(["left  right"]);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["left  right"]);
 	});
 
 	it("does not paint zero-width horizontal children", () => {
@@ -158,7 +168,7 @@ describe("viewport layout", () => {
 			1,
 			() => {},
 		);
-		expect(visibleLines(frame.lines)).toStrictEqual(["shown"]);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["shown"]);
 	});
 
 	it("tracks follow-end state and returns unused scroll delta", () => {
@@ -167,17 +177,17 @@ describe("viewport layout", () => {
 			primary: true,
 		});
 		renderLayoutFrame(scrollView, 10, 3, () => {});
-		expect(scrollView.scrollTop).toBe(3);
-		expect(scrollView.isFollowingEnd).toBe(true);
+		assert.strictEqual(scrollView.scrollTop, 3);
+		assert.strictEqual(scrollView.isFollowingEnd, true);
 
-		expect(scrollView.scrollBy(-2)).toBe(0);
-		expect(scrollView.scrollTop).toBe(1);
-		expect(scrollView.isFollowingEnd).toBe(false);
-		expect(scrollView.scrollBy(-3)).toBe(-2);
-		expect(scrollView.scrollTop).toBe(0);
-		expect(scrollView.scrollBy(10)).toBe(7);
-		expect(scrollView.scrollTop).toBe(3);
-		expect(scrollView.isFollowingEnd).toBe(true);
+		assert.strictEqual(scrollView.scrollBy(-2), 0);
+		assert.strictEqual(scrollView.scrollTop, 1);
+		assert.strictEqual(scrollView.isFollowingEnd, false);
+		assert.strictEqual(scrollView.scrollBy(-3), -2);
+		assert.strictEqual(scrollView.scrollTop, 0);
+		assert.strictEqual(scrollView.scrollBy(10), 7);
+		assert.strictEqual(scrollView.scrollTop, 3);
+		assert.strictEqual(scrollView.isFollowingEnd, true);
 	});
 
 	it("renders a transient proportional scrollbar without replacing cell content", async () => {
@@ -195,23 +205,23 @@ describe("viewport layout", () => {
 		const thumbRows = (lines: string[]) => lines.map((line) => line.includes(scrollbarBackground));
 
 		let lines = render();
-		expect(thumbRows(lines)).toStrictEqual([false, false, false, false]);
-		expect(lines.map(stripTerminalSequences)).toStrictEqual(sourceLines.slice(0, 4));
+		assert.deepStrictEqual(thumbRows(lines), [false, false, false, false]);
+		assert.deepStrictEqual(lines.map(stripTerminalSequences), sourceLines.slice(0, 4));
 
 		scrollView.scrollBy(2);
 		lines = render();
-		expect(thumbRows(lines)).toStrictEqual([false, true, true, false]);
-		expect(lines.map(stripTerminalSequences)).toStrictEqual(sourceLines.slice(2, 6));
-		expect(lines[1]!.lastIndexOf(contentBackground) < lines[1]!.lastIndexOf(scrollbarBackground)).toBeTruthy();
+		assert.deepStrictEqual(thumbRows(lines), [false, true, true, false]);
+		assert.deepStrictEqual(lines.map(stripTerminalSequences), sourceLines.slice(2, 6));
+		assert.ok(lines[1]!.lastIndexOf(contentBackground) < lines[1]!.lastIndexOf(scrollbarBackground));
 
 		await new Promise((resolve) => setTimeout(resolve, 30));
 		lines = render();
-		expect(thumbRows(lines)).toStrictEqual([false, false, false, false]);
+		assert.deepStrictEqual(thumbRows(lines), [false, false, false, false]);
 
 		scrollView.scrollToEnd();
 		lines = render();
-		expect(thumbRows(lines)).toStrictEqual([false, false, true, true]);
-		expect(lines.map(stripTerminalSequences)).toStrictEqual(sourceLines.slice(4));
+		assert.deepStrictEqual(thumbRows(lines), [false, false, true, true]);
+		assert.deepStrictEqual(lines.map(stripTerminalSequences), sourceLines.slice(4));
 
 		const followedContent = new Text(sourceLines.join("\n"), 0, 0);
 		const followed = new ScrollView(followedContent, {
@@ -220,29 +230,29 @@ describe("viewport layout", () => {
 			scrollbarStyle,
 		});
 		renderLayoutFrame(followed, 6, 4, () => {});
-		expect(followed.scrollTop).toBe(4);
+		assert.strictEqual(followed.scrollTop, 4);
 		followedContent.setText(`${sourceLines.join("\n")}\nabcde9`);
 		const growthFrame = renderLayoutFrame(followed, 6, 4, () => {});
-		expect(followed.scrollTop).toBe(5);
-		expect(growthFrame.lines.every((line) => !line.includes(scrollbarBackground))).toBeTruthy();
+		assert.strictEqual(followed.scrollTop, 5);
+		assert.ok(growthFrame.lines.every((line) => !line.includes(scrollbarBackground)));
 
 		const fittingContent = new Text("1\n2", 0, 0);
 		const automatic = new ScrollView(fittingContent, { scrollbar: "auto", scrollbarStyle });
 		renderLayoutFrame(automatic, 6, 4, () => {});
 		automatic.scrollBy(1);
-		expect(
+		assert.ok(
 			renderLayoutFrame(automatic, 6, 4, () => {}).lines.every((line) => !line.includes(scrollbarBackground)),
-		).toBeTruthy();
+		);
 
 		const alwaysFitting = new ScrollView(fittingContent, { scrollbar: "always", scrollbarStyle });
 		const alwaysFittingFrame = renderLayoutFrame(alwaysFitting, 6, 4, () => {});
-		expect(alwaysFittingFrame.root.children[0]?.rect.width).toBe(5);
-		expect(alwaysFittingFrame.lines.every((line) => line.includes(scrollbarBackground))).toBeTruthy();
+		assert.strictEqual(alwaysFittingFrame.root.children[0]?.rect.width, 5);
+		assert.ok(alwaysFittingFrame.lines.every((line) => line.includes(scrollbarBackground)));
 
 		const alwaysOverflowing = new ScrollView(content, { scrollbar: "always", scrollbarStyle });
 		const alwaysOverflowingFrame = renderLayoutFrame(alwaysOverflowing, 6, 4, () => {});
-		expect(alwaysOverflowingFrame.root.children[0]?.rect.width).toBe(5);
-		expect(alwaysOverflowingFrame.lines.filter((line) => line.includes(scrollbarBackground)).length).toBe(2);
+		assert.strictEqual(alwaysOverflowingFrame.root.children[0]?.rect.width, 5);
+		assert.strictEqual(alwaysOverflowingFrame.lines.filter((line) => line.includes(scrollbarBackground)).length, 2);
 
 		const thumbHeightFor = (contentHeight: number) => {
 			const sized = new ScrollView(new Text(Array.from({ length: contentHeight }, () => "x").join("\n"), 0, 0), {
@@ -254,23 +264,23 @@ describe("viewport layout", () => {
 			return renderLayoutFrame(sized, 6, 20, () => {}).lines.filter((line) => line.includes(scrollbarBackground))
 				.length;
 		};
-		expect(thumbHeightFor(21)).toBe(19);
-		expect(thumbHeightFor(40)).toBe(10);
-		expect(thumbHeightFor(100)).toBe(4);
-		expect(thumbHeightFor(400)).toBe(2);
+		assert.strictEqual(thumbHeightFor(21), 19);
+		assert.strictEqual(thumbHeightFor(40), 10);
+		assert.strictEqual(thumbHeightFor(100), 4);
+		assert.strictEqual(thumbHeightFor(400), 2);
 	});
 
 	it("updates reserved scrollbar layout at runtime", () => {
 		const scrollView = new ScrollView(new Text("123456", 0, 0), { scrollbar: "always" });
 		const render = () => renderLayoutFrame(new HStack([scrollView], { align: "start" }), 6, 2, () => {});
 		const always = render();
-		expect(visibleLines(always.lines)).toStrictEqual(["12345", "6"]);
-		expect(always.root.children[0]?.rect.width).toBe(6);
-		expect(always.root.children[0]?.children[0]?.rect.width).toBe(5);
+		assert.deepStrictEqual(visibleLines(always.lines), ["12345", "6"]);
+		assert.strictEqual(always.root.children[0]?.rect.width, 6);
+		assert.strictEqual(always.root.children[0]?.children[0]?.rect.width, 5);
 
 		scrollView.setScrollbar("hidden");
-		expect(render().root.children[0]?.children[0]?.rect.width).toBe(6);
-		expect(scrollView.isScrollbarVisible).toBe(false);
+		assert.strictEqual(render().root.children[0]?.children[0]?.rect.width, 6);
+		assert.strictEqual(scrollView.isScrollbarVisible, false);
 	});
 
 	it("measures nested scroll content from constrained child geometry", () => {
@@ -278,9 +288,9 @@ describe("viewport layout", () => {
 		const outer = new ScrollView(new VStack([{ component: inner, basis: 2 }, new Text("tail", 0, 0)]));
 		renderLayoutFrame(outer, 10, 2, () => {});
 
-		expect(inner.viewportHeight).toBe(2);
-		expect(outer.scrollBy(10)).toBe(9);
-		expect(outer.scrollTop).toBe(1);
+		assert.strictEqual(inner.viewportHeight, 2);
+		assert.strictEqual(outer.scrollBy(10), 9);
+		assert.strictEqual(outer.scrollTop, 1);
 	});
 
 	it("rebuilds geometry after content changes", () => {
@@ -290,7 +300,7 @@ describe("viewport layout", () => {
 		text.setText("one\ntwo\nthree");
 		const second = renderLayoutFrame(root, 10, 4, () => {});
 
-		expect(first.root.children[0]?.lines?.length).toBe(1);
-		expect(second.root.children[0]?.lines?.length).toBe(3);
+		assert.strictEqual(first.root.children[0]?.lines?.length, 1);
+		assert.strictEqual(second.root.children[0]?.lines?.length, 3);
 	});
 });

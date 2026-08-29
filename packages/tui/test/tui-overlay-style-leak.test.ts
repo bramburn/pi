@@ -1,5 +1,6 @@
+import assert from "node:assert";
+import { describe, it } from "node:test";
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
-import { describe, expect, it } from "vitest";
 import type { Component, TUI } from "../src/tui.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -36,10 +37,10 @@ function getCellItalic(terminal: VirtualTerminal, row: number, col: number): num
 	const xterm = (terminal as unknown as { xterm: XtermTerminalType }).xterm;
 	const buffer = xterm.buffer.active;
 	const line = buffer.getLine(buffer.viewportY + row);
-	expect(line).toBeTruthy();
-	const cell = line!.getCell(col);
-	expect(cell).toBeTruthy();
-	return cell!.isItalic();
+	assert.ok(line, `Missing buffer line at row ${row}`);
+	const cell = line.getCell(col);
+	assert.ok(cell, `Missing cell at row ${row} col ${col}`);
+	return cell.isItalic();
 }
 
 async function renderAndFlush(tui: TUI, terminal: VirtualTerminal): Promise<void> {
@@ -58,7 +59,7 @@ describe("TUI overlay compositing", () => {
 		tui.addChild(new StaticLines([baseLine, "INPUT"]));
 		tui.start();
 		await renderAndFlush(tui, terminal);
-		expect(getCellItalic(terminal, 1, 0)).toBe(0);
+		assert.strictEqual(getCellItalic(terminal, 1, 0), 0);
 		tui.stop();
 	});
 
@@ -74,7 +75,7 @@ describe("TUI overlay compositing", () => {
 		tui.start();
 		await renderAndFlush(tui, terminal);
 
-		expect(getCellItalic(terminal, 1, 0)).toBe(0);
+		assert.strictEqual(getCellItalic(terminal, 1, 0), 0);
 		tui.stop();
 	});
 });
