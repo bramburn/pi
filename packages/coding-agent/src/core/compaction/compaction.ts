@@ -550,6 +550,20 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+/**
+ * Returns an error message when a summarization response cannot safely be persisted.
+ * A length stop contains partial text and must not become a session checkpoint.
+ */
+export function getSummarizationFailure(response: AssistantMessage, label: string): string | undefined {
+	if (response.stopReason === "error") {
+		return `${label} failed: ${response.errorMessage || "Unknown error"}`;
+	}
+	if (response.stopReason === "length") {
+		return `${label} failed: generation hit the token cap and the summary is incomplete`;
+	}
+	return undefined;
+}
+
 function createSummarizationOptions(
 	model: Model<any>,
 	maxTokens: number,
@@ -582,10 +596,12 @@ export async function completeSummarization(
 	callbacks?: RetryCallbacks,
 ): Promise<AssistantMessage> {
 	// Summaries are standalone requests, so isolate routing and avoid cache writes that cannot be reused.
+	// Reuse caller-supplied routing when available; callers without a session ID,
+	// including branch summaries, receive a fresh routing ID.
 	const requestOptions: SimpleStreamOptions = {
 		...options,
 		cacheRetention: "none",
-		sessionId: uuidv7(),
+		sessionId: options.sessionId ?? uuidv7(),
 	};
 	const produce = async (): Promise<AssistantMessage> =>
 		streamFn
@@ -719,8 +735,12 @@ export async function generateSummaryWithUsage(
 		callbacks,
 	);
 
-	if (response.stopReason === "error") {
-		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
+	const failure = getSummarizationFailure(response, "Summarization");
+	if (failure) {
+		throw new Error(failure);
+	}
+	if (response.content.some((block) => block.type === "toolCall")) {
+		throw new Error("Summarization attempted to call a tool");
 	}
 
 	const textContent = contentText(response.content);
@@ -1004,8 +1024,12 @@ async function generateTurnPrefixSummary(
 		callbacks,
 	);
 
-	if (response.stopReason === "error") {
-		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
+	const failure = getSummarizationFailure(response, "Turn prefix summarization");
+	if (failure) {
+		throw new Error(failure);
+	}
+	if (response.content.some((block) => block.type === "toolCall")) {
+		throw new Error("Turn prefix summarization attempted to call a tool");
 	}
 
 	return {
