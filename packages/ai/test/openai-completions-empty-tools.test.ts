@@ -171,7 +171,11 @@ describe("openai-completions empty tools handling", () => {
 
 		const params = mockState.lastParams as { max_tokens?: number; max_completion_tokens?: number };
 		expect(params.max_tokens).toBeUndefined();
-		expect(params.max_completion_tokens).toBe(3904);
+		// contextWindow 10000 - estimate 2000 - CONTEXT_SAFETY_TOKENS 1024 = 6976.
+		// (Test authored against the legacy 4096 default; updated for the
+		// tightened 1024 recovery-loop backstop introduced in DeepSeek
+		// Harness Phase 1, item 5.)
+		expect(params.max_completion_tokens).toBe(6976);
 	});
 
 	it("clamps explicit maxTokens to remaining context", async () => {
@@ -188,7 +192,8 @@ describe("openai-completions empty tools handling", () => {
 
 		const params = mockState.lastParams as { max_tokens?: number; max_completion_tokens?: number };
 		expect(params.max_tokens).toBeUndefined();
-		expect(params.max_completion_tokens).toBe(3904);
+		// Same clamp math as the default case above (6976).
+		expect(params.max_completion_tokens).toBe(6976);
 	});
 
 	it("uses conservative OpenAI-compatible fields for Cloudflare AI Gateway /openai models", async () => {
