@@ -19,7 +19,6 @@ import type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
-	ScrollViewOptions,
 	ScrollViewScrollbar,
 	SlashCommand,
 	StackChild,
@@ -45,8 +44,8 @@ import {
 	TuiAltScreen,
 	TuiMainScreen,
 	type TuiMode,
-	visibleWidth,
 	VStack,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
@@ -107,11 +106,11 @@ import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelo
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
-import { openBrowser } from "../../utils/open-browser.ts";
 import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -842,14 +841,15 @@ export class InteractiveMode {
 			scrollbar: "auto" satisfies ScrollViewScrollbar,
 			scrollbarStyle: (text) => theme.bg("scrollbarThumb", text),
 		});
-		const dock = new VStack([
+		const dockChildren: StackChild[] = [
 			{ component: this.pendingMessagesContainer, shrink: 1, minSize: 0 },
 			{ component: this.statusContainer, shrink: 1, minSize: 0 },
 			{ component: this.widgetContainerAbove, shrink: 1, minSize: 0 },
 			{ component: this.editorContainer, shrink: 1, minSize: 3 },
 			{ component: this.widgetContainerBelow, shrink: 1, minSize: 0 },
 			{ component: this.footerContainer, shrink: 1, minSize: 1 },
-		]);
+		];
+		const dock = new VStack(dockChildren);
 		this.fullscreenLayoutRoot = new VStack([
 			{ component: this.transcriptScrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
 			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },

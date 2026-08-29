@@ -36,6 +36,7 @@ describe("createInteractiveTui", () => {
 	it("creates the main-screen renderer", async () => {
 		const mainTerminal = new RecordingTerminal();
 		const mainTui = createInteractiveTui({
+			tuiMode: "regular",
 			showHardwareCursor: false,
 			logDirectory: "/tmp",
 			terminal: mainTerminal,
@@ -91,6 +92,7 @@ describe("InteractiveMode copy confirmation", () => {
 
 	it("keeps the status-line confirmation for the copy shortcut", async () => {
 		const ui = createInteractiveTui({
+			tuiMode: "regular",
 			showHardwareCursor: false,
 			logDirectory: "/tmp",
 			terminal: new RecordingTerminal(),
