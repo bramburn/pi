@@ -1,0 +1,104 @@
+---
+id: sync
+title: Sync Process
+sidebar_label: Sync Process
+---
+
+# Syncing from Upstream
+
+This page documents how the fork merges new releases from `earendil-works/pi` into `bramburn/pi`.
+
+## When to sync
+
+Sync when upstream ships a new release that the fork wants to track. The sync is done on a short-lived branch, tested via CI, then merged into fork `main`.
+
+## Sync procedure
+
+### 1. Create a sync branch
+
+```bash
+git checkout -b sync/upstream-0.85.0 fork/main
+```
+
+Do **not** commit fork-local work to a long-lived branch. Sync branches are short-lived.
+
+### 2. Merge upstream
+
+```bash
+git merge --no-ff origin/main -m "Merge upstream 0.85.0 into bramburn/pi"
+```
+
+Resolve conflicts using the sync plan in `.pi/plans/sync-upstream-<version>.md`.
+
+### 3. Bump versions
+
+Bump all workspace package versions to `<upstream-version>-b<fork-patch>`:
+
+```
+0.85.0 upstream → 0.85.0-b1 bramburn
+```
+
+This suffix signals "fork build on the upstream baseline" without colliding with upstream tags.
+
+### 4. Regenerate shrinkwrap and install-lock
+
+```bash
+node scripts/generate-coding-agent-shrinkwrap.mjs
+node scripts/generate-coding-agent-install-lock.mjs
+```
+
+These regenerate the npm shrinkwrap and install-lock files for the `@bramburn/*` scope.
+
+### 5. Re-apply fork preserves
+
+After the merge, re-apply fork-local changes that were dropped:
+
+- `FORK_NAME` in `config.ts`, `main.ts`, `stdout-cleanliness.test.ts`
+- `validateLlmMessages` in the agent loop
+- Any fork-specific patches in `packages/`
+
+### 6. Append changelog entry
+
+In each `packages/*/CHANGELOG.md`, append under `## [Unreleased]`:
+
+```markdown
+### Fork-local (bramburn)
+- Merged upstream <version>
+```
+
+### 7. Push and open PR
+
+```bash
+git push origin sync/upstream-0.85.0
+gh pr create --base fork/main --head sync/upstream-0.85.0 \
+  --title "sync: merge upstream 0.85.0" \
+  --body "Syncs upstream release 0.85.0 into bramburn/pi."
+```
+
+CI runs `npm run check`, `npm run build`, and `./test.sh`. Fix any failures before merging.
+
+### 8. Tag and release
+
+After CI passes, merge the PR. Then push the fork tag:
+
+```bash
+git tag -a v0.85.0-b1 -m "bramburn/pi fork build on upstream 0.85.0"
+git push fork v0.85.0-b1
+```
+
+The tag push triggers the fork's CI: builds, runs tests, publishes npm packages to `@bramburn/*`, and uploads binaries to the GitHub release.
+
+## Conflict resolution rules
+
+| File | Resolution |
+|------|-----------|
+| `packages/coding-agent/src/config.ts` | Always keep fork `FORK_NAME` |
+| `packages/ai/src/models.generated.ts` | Accept upstream (regenerated at build time) |
+| `packages/*/package.json` | Bump to `<version>-b1` |
+| `CHANGELOG.md` files | Append fork-local section under `[Unreleased]` |
+| `AGENTS.md`, `workflows.md` | Keep fork version; append upstream changes |
+| All other files | Accept upstream unless the change breaks fork-specific code |
+
+## Frequency
+
+The fork syncs on every upstream release. If upstream ships a breaking change that the fork can't accommodate, open an issue on both repos and defer the sync.

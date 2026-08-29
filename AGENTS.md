@@ -164,6 +164,39 @@ Attribution:
 
 5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Documentation (website/)
+
+The Docusaurus site lives in `website/`. Docs live under `website/docs/`.
+
+### Adding new pages
+
+1. Create the `.mdx` file in the appropriate subdirectory under `website/docs/`
+2. Add it to the matching section in `website/sidebars.ts`
+3. Run `npm run build` from `website/` to verify no broken links
+
+### Content rules
+
+- **Fork docs only** — `website/docs/` documents the bramburn/pi fork. Upstream documentation lives at [pi.dev/docs/latest](https://pi.dev/docs/latest).
+- **Architecture docs** go in `website/docs/architecture/`
+- **Fork-specific docs** (sync process, fork features) go in `website/docs/fork/`
+- **No placeholders** — every page must have real content. Remove the Docusaurus tutorial/blog boilerplate before committing.
+- **Images** — generate with `mmx image generate --output <name> --aspect <ratio> --prompt "<prompt>"`. Put outputs in `website/static/img/`.
+- **Link format** — use relative paths for internal links. Use absolute URLs for upstream docs.
+
+### Docusaurus config
+
+- `url` is `https://bramburn.github.io`, `baseUrl` is `/pi/` (GitHub Pages project URL)
+- `onBrokenLinks: 'throw'` — CI fails on broken links
+- `blog: false` — no blog in this fork
+
+### CI
+
+`.github/workflows/docs.yml` deploys on push to `main` (and feature branches) when `website/**` changes. GitHub Pages URL: `https://bramburn.github.io/pi/`.
+
+### SEO
+
+Every doc page must have a frontmatter `id`, `title`, and `sidebar_label`. OG image is `static/img/social-card.png`.
+
 ## User Override
 
 If the user's instructions conflict with any rule in this document, ask for explicit confirmation before overriding. Only then execute their instructions.

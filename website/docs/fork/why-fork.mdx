@@ -1,0 +1,56 @@
+---
+id: why-fork
+title: Why a Fork?
+sidebar_label: Why a Fork?
+---
+
+# Why a Fork?
+
+`bramburn/pi` is a fork of [earendil-works/pi](https://github.com/earendil-works/pi). This page explains the motivations and constraints that led to the fork.
+
+## Motivations
+
+### Build and publish autonomy
+
+The upstream project owns the `pi.dev` domain, the npm `@earendil-works/*` scope, and the CI pipeline that publishes to both. As a solo developer using pi heavily, the author wanted:
+
+- **Independent npm publishing** — the fork publishes to `@bramburn/*` so its releases don't depend on upstream's pipeline
+- **Independent binary distribution** — the fork's GitHub releases are self-contained
+- **Faster iteration** — changes can be built, tested, and released without waiting for upstream review
+
+### Windows-first development
+
+The author develops on Windows. The fork has explicit Windows support in the build pipeline and CI, and the development workflow assumes a Windows/PowerShell environment.
+
+### Fork-specific features
+
+Some changes in this fork may never be merged upstream because they are specific to the author's workflow (e.g., the `validateLlmMessages` guard, custom build tooling, the `FORK_NAME` constant in version output).
+
+## What the fork keeps
+
+The fork is kept close to upstream. Every upstream release is merged in and re-tested. The goal is to track upstream closely while maintaining the ability to ship independently.
+
+## What the fork changes
+
+See [Fork Features](./features) for the full list of differences.
+
+## Relationship with upstream
+
+| Aspect | Upstream (earendil-works/pi) | Fork (bramburn/pi) |
+|--------|------------------------------|---------------------|
+| npm scope | `@earendil-works/*` | `@bramburn/*` |
+| Binary name | `pi` | `pi-bramburn` |
+| Docs URL | pi.dev/docs/latest | This site |
+| CI pipeline | pi.dev CI | fork GitHub Actions |
+| Releases | Pushed to npm + GitHub | GitHub releases only |
+| Issues | earendil-works/pi issues | bramburn/pi issues |
+
+The fork is MIT-licensed, same as upstream.
+
+## Contributing to this fork
+
+Issues and PRs for this fork go to [github.com/bramburn/pi](https://github.com/bramburn/pi). See the main [CONTRIBUTING.md](https://github.com/bramburn/pi/blob/main/CONTRIBUTING.md) for the contributor workflow.
+
+## Upstream contributions
+
+If a fix or feature belongs in upstream, open a PR against [earendil-works/pi](https://github.com/earendil-works/pi). The fork's AGENTS.md has guidance on when to target which repo.
