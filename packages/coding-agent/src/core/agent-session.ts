@@ -330,6 +330,8 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	/** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
+	private _pendingCustomMessages: CustomMessage[] = [];
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -770,6 +772,13 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
+
+			// A turn ends after its assistant message and every tool result has been appended,
+			// so this is the first point in the run where a context-only custom message can be
+			// inserted without landing between a tool call and its result. Flushing after the
+			// extension and listener dispatch above also picks up messages that turn_end
+			// handlers queued.
+			this._flushPendingCustomMessages();
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
 				type: "message_start",
@@ -1104,6 +1113,7 @@ export class AgentSession {
 		} finally {
 			this._systemPromptOverride = undefined;
 			this._flushPendingBashMessages();
+			this._flushPendingCustomMessages();
 			await this._emitAgentSettled();
 		}
 	}
@@ -1233,8 +1243,9 @@ export class AgentSession {
 				return;
 			}
 
-			// Flush any pending bash messages before the new prompt
+			// Flush any pending bash and custom messages before the new prompt
 			this._flushPendingBashMessages();
+			this._flushPendingCustomMessages();
 
 			// Validate model
 			if (!this.model) {
@@ -1511,16 +1522,40 @@ export class AgentSession {
 			}
 		} else if (options?.triggerTurn) {
 			await this._runAgentPrompt(appMessage);
+		} else if (this.isStreaming) {
+			// Appending now would put the message between an assistant tool call and its
+			// result, which providers that validate message order reject on replay. Defer
+			// to the end of the turn. Nothing is emitted yet: message events must not
+			// describe messages the session tree does not contain.
+			this._pendingCustomMessages.push(appMessage);
 		} else {
-			this.agent.state.messages.push(appMessage);
-			this.sessionManager.appendCustomMessageEntry(
-				message.customType,
-				message.content,
-				message.display,
-				message.details,
-			);
-			this._emit({ type: "message_start", message: appMessage });
-			this._emit({ type: "message_end", message: appMessage });
+			this._appendCustomMessage(appMessage);
+		}
+	}
+
+	private _appendCustomMessage(appMessage: CustomMessage): void {
+		this.agent.state.messages.push(appMessage);
+		this.sessionManager.appendCustomMessageEntry(
+			appMessage.customType,
+			appMessage.content,
+			appMessage.display,
+			appMessage.details,
+		);
+		this._emit({ type: "message_start", message: appMessage });
+		this._emit({ type: "message_end", message: appMessage });
+	}
+
+	/**
+	 * Append custom messages queued while the agent was running.
+	 * Called once the current turn's tool results are in agent state and session history.
+	 */
+	private _flushPendingCustomMessages(): void {
+		if (this._pendingCustomMessages.length === 0) return;
+
+		const pending = this._pendingCustomMessages;
+		this._pendingCustomMessages = [];
+		for (const appMessage of pending) {
+			this._appendCustomMessage(appMessage);
 		}
 	}
 
@@ -1634,8 +1669,22 @@ export class AgentSession {
 
 	/**
 	 * Set model directly.
-	 * Validates that auth is configured, saves to session and settings.
-	 * @param options.persist - Also update the default model in settings (default: true)
+	 * Validates that auth is configured, saves to session and (when `persist: true`)
+	 * updates the persisted default.
+	 *
+	 * `setModel` is session-only by default: it writes a `model_change` entry to the
+	 * session and updates the `lastUsedModel` tracking hint, but does NOT change the
+	 * user's persisted `defaultProvider` / `defaultModel`. Pass `{ persist: true }`
+	 * to also promote the model to the persisted default.
+	 *
+	 * When persisting and a scoped model list (runtime or persisted) already exists,
+	 * the new model is appended to both lists so cycling continues to include the
+	 * newly chosen model. With no existing scope, the persisted scope list is left
+	 * untouched (no list is created) — matching the "do not create a scoped model
+	 * list when all models are available" semantics.
+	 *
+	 * @param options.persist - Also update the default model in settings and extend
+	 *   the scoped model list (default: false)
 	 * @throws Error if no auth is configured for the model
 	 */
 	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
@@ -1644,11 +1693,31 @@ export class AgentSession {
 		}
 
 		const previousModel = this.model;
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
-		if (options?.persist !== false) {
+		if (options?.persist === true) {
 			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+
+			// When a scoped list already exists (runtime OR persisted), append the new
+			// model to both so cycling keeps it in the rotation. With no existing
+			// scope we leave the persisted list alone — it represents a user choice
+			// to expose every model, not an implicit permission to start one.
+			const hasRuntimeScope = this._scopedModels.length > 0;
+			const persistedEnabled = this.settingsManager.getEnabledModels();
+			const hasPersistedScope = persistedEnabled !== undefined;
+
+			if (hasRuntimeScope || hasPersistedScope) {
+				if (hasRuntimeScope && !this._scopedModels.some((sm) => modelsAreEqual(sm.model, model))) {
+					this._scopedModels.push({ model });
+				}
+				if (hasPersistedScope) {
+					const modelRef = `${model.provider}/${model.id}`;
+					if (!persistedEnabled.includes(modelRef)) {
+						this.settingsManager.setEnabledModels([...persistedEnabled, modelRef]);
+					}
+				}
+			}
 		}
 		// `setLastUsedModel` is logically independent of the global default
 		// write above: if a transient error (e.g. lockfile contention) makes
@@ -1698,12 +1767,11 @@ export class AgentSession {
 		const len = scopedModels.length;
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const next = scopedModels[nextIndex];
-		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.model, next.thinkingLevel);
 
 		// Apply model
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
-		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
 		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
 		try {
 			this.settingsManager.setLastUsedModel({ provider: next.model.provider, modelId: next.model.id });
@@ -1715,7 +1783,9 @@ export class AgentSession {
 		// - Explicit scoped model thinking level overrides current session level
 		// - Undefined scoped model thinking level inherits the current session preference
 		// setThinkingLevel clamps to model capabilities.
-		this.setThinkingLevel(thinkingLevel);
+		// Cycling must NOT touch persisted state — defaults only move when the user
+		// explicitly opts in via setModel({ persist: true }).
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
 
@@ -1734,10 +1804,9 @@ export class AgentSession {
 		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		const nextModel = availableModels[nextIndex];
 
-		const thinkingLevel = this._getThinkingLevelForModelSwitch();
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(nextModel);
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
 		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
 		try {
 			this.settingsManager.setLastUsedModel({ provider: nextModel.provider, modelId: nextModel.id });
@@ -1746,7 +1815,8 @@ export class AgentSession {
 		}
 
 		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		// Cycling must NOT touch persisted state — see _cycleScopedModel.
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
@@ -1760,8 +1830,18 @@ export class AgentSession {
 	/**
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
-	 * Saves to session and settings only if the level actually changes.
-	 * @param options.persist - Also update the default thinking level in settings (default: true)
+	 * Saves to session and (when `persist: true`) updates the persisted default.
+	 *
+	 * Session-only by default: a thinking level change is reflected in the agent
+	 * state and recorded as a `thinking_level_change` session entry, but does NOT
+	 * update `defaultThinkingLevel` in settings. Pass `{ persist: true }` to also
+	 * promote the level to the persisted default.
+	 *
+	 * When persisting and the current model clamps the requested level to a
+	 * different effective level, the requested level is what gets persisted (so
+	 * switching back to a model that supports the original level restores it).
+	 *
+	 * @param options.persist - Also update the default thinking level in settings (default: false)
 	 */
 	setThinkingLevel(level: ThinkingLevel, options?: { persist?: boolean }): void {
 		const availableLevels = this.getAvailableThinkingLevels();
@@ -1775,8 +1855,10 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (options?.persist !== false && (this.supportsThinking() || effectiveLevel !== "off")) {
-				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
+			if (options?.persist === true && (this.supportsThinking() || level !== "off")) {
+				// Persist the user-requested level, not the clamped effective level,
+				// so the original preference survives model switches that re-clamp it.
+				this.settingsManager.setDefaultThinkingLevel(level);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
 			void this._extensionRunner.emit({
@@ -1819,9 +1901,34 @@ export class AgentSession {
 		return !!this.model?.reasoning;
 	}
 
-	private _getThinkingLevelForModelSwitch(explicitLevel?: ThinkingLevel): ThinkingLevel {
+	/**
+	 * Decide which thinking level to apply on a model switch.
+	 *
+	 * Resolution order:
+	 * 1. `explicitLevel` (caller-provided, e.g. scoped-model entry's thinking level).
+	 * 2. Per-model override from settings for the model being switched TO.
+	 * 3. Global `defaultThinkingLevel` from settings.
+	 * 4. Current session level, falling back to {@link DEFAULT_THINKING_LEVEL} when
+	 *    the current model doesn't support thinking.
+	 *
+	 * Per-model overrides take priority over both the global default and the
+	 * current session level — the user wants a specific level on a specific
+	 * model, so cycling to it should restore that preference even if the prior
+	 * session had a different level.
+	 */
+	private _getThinkingLevelForModelSwitch(newModel?: Model<any>, explicitLevel?: ThinkingLevel): ThinkingLevel {
 		if (explicitLevel !== undefined) {
 			return explicitLevel;
+		}
+		if (newModel) {
+			const perModel = this.settingsManager.getModelThinkingLevel(newModel.provider, newModel.id);
+			if (perModel) {
+				return perModel;
+			}
+			const globalDefault = this.settingsManager.getDefaultThinkingLevel();
+			if (globalDefault) {
+				return globalDefault;
+			}
 		}
 		if (!this.supportsThinking()) {
 			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
@@ -2100,25 +2207,24 @@ export class AgentSession {
 			const settings = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
 			const maxAttempts = settings.enabled ? Math.max(1, settings.maxOverflowRetries) : 1;
 			if (this._overflowRecoveryAttempts >= maxAttempts) {
+				const overflow = isContextOverflow(assistantMessage, contextWindow);
+				const errorMessage =
+					!overflow && recoverableLength
+						? `Truncated response recovery failed after one compact-and-retry attempt.`
+						: `Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.`;
 				this._emit({
 					type: "compaction_end",
 					reason: "overflow",
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage: `Context overflow recovery failed after ${maxAttempts} compact-and-retry attempt(s). Try reducing context or switching to a larger-context model.`,
+					errorMessage,
 				});
 				return false;
 			}
 
 			this._overflowRecoveryAttempts += 1;
-			this._emit({
-				type: "compaction_start",
-				reason: "overflow",
-				attempt: this._overflowRecoveryAttempts,
-				maxAttempts,
-				willRetry,
-			});
+			// _runAutoCompaction emits its own compaction_start event with attempt/maxAttempts.
 			// Remove the failed or truncated message from agent state. It remains in session history,
 			// but must not be included in the compact-and-retry context.
 			const messages = this.agent.state.messages;
@@ -2137,19 +2243,25 @@ export class AgentSession {
 		if (assistantMessage.stopReason === "error" || directContextTokens === 0) {
 			const messages = this.agent.state.messages;
 			const estimate = estimateContextTokens(messages);
-			if (estimate.lastUsageIndex === null) return false; // No usage data at all
-			// Verify the usage source is post-compaction. Kept pre-compaction messages
-			// have stale usage reflecting the old (larger) context and would falsely
-			// trigger compaction right after one just finished.
-			const usageMsg = messages[estimate.lastUsageIndex];
-			if (
-				compactionEntry &&
-				usageMsg.role === "assistant" &&
-				(usageMsg as AssistantMessage).timestamp <= new Date(compactionEntry.timestamp).getTime()
-			) {
-				return false;
+			if (estimate.lastUsageIndex === null) {
+				// No usage data at all — fall back to the pure chars/4 estimate.
+				// The estimate is deterministic and grows monotonically with message count,
+				// so it enables threshold compaction for zero-usage providers.
+				contextTokens = estimate.tokens;
+			} else {
+				// Verify the usage source is post-compaction. Kept pre-compaction messages
+				// have stale usage reflecting the old (larger) context and would falsely
+				// trigger compaction right after one just finished.
+				const usageMsg = messages[estimate.lastUsageIndex];
+				if (
+					compactionEntry &&
+					usageMsg.role === "assistant" &&
+					(usageMsg as AssistantMessage).timestamp <= new Date(compactionEntry.timestamp).getTime()
+				) {
+					return false;
+				}
+				contextTokens = estimate.tokens;
 			}
-			contextTokens = estimate.tokens;
 		} else {
 			contextTokens = directContextTokens;
 		}
@@ -2165,6 +2277,7 @@ export class AgentSession {
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
+		let fromExtension = false;
 
 		try {
 			if (!this.model) {
@@ -2185,7 +2298,6 @@ export class AgentSession {
 			started = true;
 
 			let extensionCompaction: CompactionResult | undefined;
-			let fromExtension = false;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 				const extensionResult = (await this._extensionRunner.emit({
@@ -2317,17 +2429,28 @@ export class AgentSession {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
 			if (started) {
+				const fullErrorMessage =
+					reason === "overflow"
+						? `Context overflow recovery failed: ${errorMessage}`
+						: `Auto-compaction failed: ${errorMessage}`;
 				this._emit({
 					type: "compaction_end",
 					reason,
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage:
-						reason === "overflow"
-							? `Context overflow recovery failed: ${errorMessage}`
-							: `Auto-compaction failed: ${errorMessage}`,
+					errorMessage: fullErrorMessage,
 				});
+				if (this._extensionRunner) {
+					await this._extensionRunner.emit({
+						type: "session_compact_failed",
+						reason,
+						errorMessage: fullErrorMessage,
+						aborted: false,
+						willRetry: false,
+						fromExtension,
+					});
+				}
 			}
 			return false;
 		} finally {

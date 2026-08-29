@@ -43,6 +43,54 @@
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
 - Never commit unless the user asks.
 
+## Test Framework Conventions
+
+### Vitest (default)
+
+Most packages use vitest. Run a single test file from the package root:
+
+```bash
+node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts
+```
+
+Vitest does NOT recognize `describe` / `it` / `beforeAll` from `node:test`. A
+`node:test` suite run under vitest silently registers zero tests and exits 0 — a
+false-confidence hazard. After any conversion or new test file, verify the suite
+actually executed by checking the count line (`Tests  N passed (N)`) and
+confirming `N > 0` and matches the prior `node:test` subtest count.
+
+### Node test runner
+
+`packages/tui` uses the built-in `node:test` runner. Run with `node --test
+test/specific.test.ts`. Do not migrate `packages/tui` to vitest without
+explicit user approval — it is the one package that intentionally uses
+`node:test` for performance and hermeticity.
+
+### Converting node:test → vitest
+
+Mechanical pattern when a package migrates a suite:
+
+1. Replace `import { describe, it, beforeAll } from "node:test";` with
+   `import { describe, expect, it, beforeAll } from "vitest";` (add the imports
+   the file actually uses).
+2. Drop `import * as assert from "node:assert/strict";` — `expect` from vitest
+   replaces it.
+3. Sed substitutions (run from the package root):
+   - `assert.equal(a, b)` → `expect(a).toBe(b)`
+   - `assert.deepEqual(a, b)` → `expect(a).toEqual(b)`
+   - `assert.ok(a)` → `expect(a).toBeTruthy()`
+4. Mock helper: `import { vi } from "vitest"` (NOT `node:test/mock`); use
+   `vi.fn()` / `vi.mock()` / `vi.spyOn()`.
+5. For test files that assert on exact error-message strings, copy the exact
+   text from the production source first — do not paraphrase. If the message
+   has drift, decide whether to restore production text or update the test
+   (track the choice in the PR body).
+
+After conversion, run the test from the package root and confirm the count
+line shows the expected number of tests. The full conversion (import swap +
+sed substitutions + smoke test) should run `npm run check` clean before
+commit — do not use `--no-verify` to bypass it.
+
 ## Dependency and Install Security
 
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions.
