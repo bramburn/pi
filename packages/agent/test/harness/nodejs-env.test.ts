@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { access, chmod, realpath, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
@@ -33,6 +33,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout?: () => void)
 
 function toBashSingleQuotedArg(value: string): string {
 	return `'${value.replace(/\\/g, "/").replace(/'/g, `'"'"'`)}'`;
+}
+
+// Normalize an absolute path to POSIX forward slashes. Used to compare
+// paths produced by Node (which returns Windows-native backslashes on
+// win32 via realpath()/canonicalPath()) against paths printed by the
+// bash subprocess (which always emits POSIX-style, e.g. /tmp/...).
+// On non-Windows platforms this is a no-op since `sep` is already "/".
+function toPosix(p: string): string {
+	return p.split(sep).join("/");
 }
 
 function createInheritedStdioCommand(pidFile: string): string {
@@ -281,12 +290,20 @@ describe("NodeExecutionEnv", () => {
 	it("executes commands in cwd with env overrides", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });
+		// Use `pwd -W` on Windows git-bash (MSYS) where the bash builtin emits
+		// the Windows-native path with forward slashes — matching Node's
+		// realpath() output (after toPosix normalization). Fall back to plain
+		// `pwd` on POSIX bash where `pwd -W` does not exist. The test would
+		// otherwise fail on Windows because bash's $PWD is the virtual
+		// MSYS POSIX path (e.g. /tmp/...) while realpath() returns
+		// C:/Users/.../Temp/... for the same directory.
 		const result = getOrThrow(
-			await env.exec('printf \'%s:%s\' "$PWD" "$NODE_ENV_TEST"', {
-				env: { NODE_ENV_TEST: "ok" },
-			}),
+			await env.exec(
+				'pwd_str=$(pwd -W 2>/dev/null || pwd); printf \'%s:%s\' "$pwd_str" "$NODE_ENV_TEST"',
+				{ env: { NODE_ENV_TEST: "ok" } },
+			),
 		);
-		expect(result).toEqual({ stdout: `${await realpath(root)}:ok`, stderr: "", exitCode: 0 });
+		expect(result).toEqual({ stdout: `${toPosix(await realpath(root))}:ok`, stderr: "", exitCode: 0 });
 	});
 
 	it.each([

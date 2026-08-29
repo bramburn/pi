@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+- Removed fullscreen TUI mode
+
 ### Added
 
 - Added environment and programmatic overrides for OSC 8 hyperlinks, inline image protocols, and truecolor terminal capabilities ([#8665](https://github.com/earendil-works/pi/issues/8665)).

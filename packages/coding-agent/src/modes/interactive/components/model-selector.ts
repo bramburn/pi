@@ -5,12 +5,12 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
-	matchesKey,
 	Spacer,
 	Text,
 	type TUI,
 } from "@earendil-works/pi-tui";
 import type { ModelRuntime } from "../../../core/model-runtime.ts";
+import type { SessionManager } from "../../../core/session-manager.ts";
 import { refreshModelCatalogs } from "../model-catalog-refresh.ts";
 import { getModelSelectorSearchText } from "../model-search.ts";
 import { theme } from "../theme/theme.ts";
@@ -26,11 +26,6 @@ interface ModelItem {
 interface ScopedModelItem {
 	model: Model<any>;
 	thinkingLevel?: string;
-}
-
-interface DefaultModelReference {
-	provider: string;
-	id: string;
 }
 
 type ModelScope = "all" | "scoped";
@@ -57,45 +52,51 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private filteredModels: ModelItem[] = [];
 	private selectedIndex: number = 0;
 	private currentModel?: Model<any>;
+	private sessionManager: SessionManager;
 	private modelRuntime: ModelRuntime;
 	private onSelectCallback: (model: Model<any>) => void;
-	private onSelectAsDefaultCallback?: (model: Model<any>) => void;
 	private onCancelCallback: () => void;
 	private errorMessage?: string;
 	private refreshStatusMessage = "Refreshing model catalogs…";
 	private refreshStatusSuccess = false;
 	private tui: TUI;
 	private scopedModels: ReadonlyArray<ScopedModelItem>;
-	private defaultModel?: DefaultModelReference;
 	private scope: ModelScope = "all";
 	private scopeText?: Text;
 	private scopeHintText?: Text;
 	private readonly refreshAbortController = new AbortController();
 	private refreshTimeout?: ReturnType<typeof setTimeout>;
 	private closed = false;
+	/**
+	 * When true, `handleSelect` does NOT call `sessionManager.setSessionDefault(...)`.
+	 * Used by the settings-driven "Use specific model" picker (which writes
+	 * to the global preference, not the current session header). The `/model`
+	 * flow leaves this as `false` to preserve the existing header-write behaviour.
+	 */
+	private readonly skipHeaderWrite: boolean;
 
 	constructor(
 		tui: TUI,
 		currentModel: Model<any> | undefined,
+		sessionManager: SessionManager,
 		modelRuntime: ModelRuntime,
 		scopedModels: ReadonlyArray<ScopedModelItem>,
 		onSelect: (model: Model<any>) => void,
 		onCancel: () => void,
 		initialSearchInput?: string,
-		onSelectAsDefault?: (model: Model<any>) => void,
-		defaultModel?: DefaultModelReference,
+		skipHeaderWrite?: boolean,
 	) {
 		super();
 
 		this.tui = tui;
 		this.currentModel = currentModel;
+		this.sessionManager = sessionManager;
 		this.modelRuntime = modelRuntime;
 		this.scopedModels = scopedModels;
-		this.defaultModel = defaultModel;
 		this.scope = scopedModels.length > 0 ? "scoped" : "all";
 		this.onSelectCallback = onSelect;
-		this.onSelectAsDefaultCallback = onSelectAsDefault;
 		this.onCancelCallback = onCancel;
+		this.skipHeaderWrite = skipHeaderWrite ?? false;
 
 		// Add top border
 		this.addChild(new DynamicBorder());
@@ -133,13 +134,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.addChild(this.listContainer);
 
 		this.addChild(new Spacer(1));
-
-		// Hint
-		if (this.onSelectAsDefaultCallback) {
-			this.addChild(
-				new Text(theme.fg("dim", "  Enter to select \u00b7 Ctrl+S to set as default \u00b7 Esc to cancel"), 0, 0),
-			);
-		}
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());
@@ -224,16 +218,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private sortModels(models: ModelItem[]): ModelItem[] {
 		const sorted = [...models];
-		// Sort: current model first, default model second, then by provider.
+		// Sort: current model first, then by provider
 		sorted.sort((a, b) => {
 			const aIsCurrent = modelsAreEqual(this.currentModel, a.model);
 			const bIsCurrent = modelsAreEqual(this.currentModel, b.model);
 			if (aIsCurrent && !bIsCurrent) return -1;
 			if (!aIsCurrent && bIsCurrent) return 1;
-			const aIsDefault = this.isDefaultModel(a.model);
-			const bIsDefault = this.isDefaultModel(b.model);
-			if (aIsDefault && !bIsDefault) return -1;
-			if (!aIsDefault && bIsDefault) return 1;
 			return a.provider.localeCompare(b.provider);
 		});
 		return sorted;
@@ -249,15 +239,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		return keyHint("tui.input.tab", "scope") + theme.fg("muted", " (all/scoped)");
 	}
 
-	private isDefaultModel(model: Model<any>): boolean {
-		return this.defaultModel?.provider === model.provider && this.defaultModel.id === model.id;
-	}
-
-	private isDefaultSearch(query: string): boolean {
-		const normalized = query.trim().toLowerCase();
-		return normalized.length > 0 && "default".startsWith(normalized);
-	}
-
 	private setScope(scope: ModelScope): void {
 		if (this.scope === scope) return;
 		this.scope = scope;
@@ -271,24 +252,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	private filterModels(query: string): void {
-		if (query) {
-			const filtered = fuzzyFilter(this.activeModels, query, (item) => {
-				const defaultText = this.isDefaultModel(item.model) ? " default" : "";
-				return `${getModelSelectorSearchText({ id: item.id, provider: item.provider, name: item.model.name })}${defaultText}`;
-			});
-			if (this.isDefaultSearch(query)) {
-				const defaultItems = this.activeModels.filter((item) => this.isDefaultModel(item.model));
-				const defaultKeys = new Set(defaultItems.map((item) => `${item.provider}\0${item.id}`));
-				this.filteredModels = [
-					...defaultItems,
-					...filtered.filter((item) => !defaultKeys.has(`${item.provider}\0${item.id}`)),
-				];
-			} else {
-				this.filteredModels = filtered;
-			}
-		} else {
-			this.filteredModels = this.activeModels;
-		}
+		this.filteredModels = query
+			? fuzzyFilter(this.activeModels, query, ({ id, provider, model }) =>
+					getModelSelectorSearchText({ id, provider, name: model.name }),
+				)
+			: this.activeModels;
 		// When filtering by a query, move the selector to the top row so the best
 		// match is highlighted. When the query is cleared, keep the current position
 		// clamped to the (restored) list length.
@@ -313,8 +281,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 			const isSelected = i === this.selectedIndex;
 			const isCurrent = modelsAreEqual(this.currentModel, item.model);
-			const isDefault = this.isDefaultModel(item.model);
-			const defaultBadge = isDefault ? theme.fg("muted", " · default") : "";
 
 			let line = "";
 			if (isSelected) {
@@ -322,12 +288,12 @@ export class ModelSelectorComponent extends Container implements Focusable {
 				const modelText = `${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${defaultBadge}${checkmark}`;
+				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
 			} else {
 				const modelText = `  ${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${modelText} ${providerBadge}${defaultBadge}${checkmark}`;
+				line = `${modelText} ${providerBadge}${checkmark}`;
 			}
 
 			this.listContainer.addChild(new Text(line, 0, 0));
@@ -397,14 +363,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			this.dispose();
 			this.onCancelCallback();
 		}
-		// Ctrl+S — select and save as default
-		else if (matchesKey(keyData, "ctrl+s") && this.onSelectAsDefaultCallback) {
-			const selectedModel = this.filteredModels[this.selectedIndex];
-			if (selectedModel) {
-				this.dispose();
-				this.onSelectAsDefaultCallback(selectedModel.model);
-			}
-		}
 		// Pass everything else to search input
 		else {
 			this.searchInput.handleInput(keyData);
@@ -414,6 +372,13 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private handleSelect(model: Model<any>): void {
 		this.dispose();
+		// Save as the default for this session (writes to session file header).
+		// Skip when the caller is configuring a global preference (e.g. the
+		// "New session model → Use specific model" submenu): the user is
+		// picking the model for future sessions, not for this one.
+		if (!this.skipHeaderWrite) {
+			this.sessionManager.setSessionDefault({ model: { provider: model.provider, modelId: model.id } });
+		}
 		this.onSelectCallback(model);
 	}
 

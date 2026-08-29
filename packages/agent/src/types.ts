@@ -36,8 +36,11 @@ export type StreamFn = (
  *
  * - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
  * - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
- *   `tool_execution_end` is emitted in tool completion order after each tool is finalized,
- *   while tool-result message artifacts are emitted later in assistant source order.
+ *   `tool_execution_end` and the tool-result message events are emitted per tool in
+ *   completion order as each tool is finalized, so completed tools are persisted even
+ *   if a sibling stalls. The batch's returned `toolResults` (and `turn_end.toolResults`)
+ *   remain in assistant source order. On abort, siblings that never settled are
+ *   persisted as `isError` "Operation aborted" results instead of being orphaned.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 
@@ -260,12 +263,23 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Tool execution mode.
 	 * - "sequential": execute tool calls one by one
 	 * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
-	 *   emit `tool_execution_end` in tool completion order after each tool is finalized,
-	 *   then emit tool-result message artifacts later in assistant source order
+	 *   `tool_execution_end` and the tool-result message events are emitted per tool in
+	 *   completion order as each tool is finalized, so completed tools are persisted even
+	 *   if a sibling stalls. The batch's returned `toolResults` (and `turn_end.toolResults`)
+	 *   remain in assistant source order. On abort, siblings that never settled are
+	 *   persisted as `isError` "Operation aborted" results instead of being orphaned.
 	 *
 	 * Default: "parallel"
 	 */
 	toolExecution?: ToolExecutionMode;
+	/**
+	 * Whether the DeepSeek Harness context pipeline is enabled.
+	 * When true, the agent loop lowers the safety margin for
+	 * `clampMaxTokensToContext` from 4096 to 1024. The session
+	 * calls `agent.setDeepseekHarnessEnabled(enabled)` when the
+	 * user toggles the setting.
+	 */
+	deepseekHarnessEnabled?: boolean;
 
 	/**
 	 * Called before a tool is executed, after arguments have been validated.

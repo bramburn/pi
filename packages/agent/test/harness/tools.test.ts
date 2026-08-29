@@ -1,4 +1,5 @@
 import { symlink } from "node:fs/promises";
+import { sep } from "node:path";
 import { applyPatch } from "diff";
 import { describe, expect, it } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
@@ -20,6 +21,15 @@ import { createTempDir } from "./session-test-utils.ts";
 
 function textOutput(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : [])).join("\n");
+}
+
+// Normalize an absolute path to POSIX forward slashes. Used to compare
+// paths produced by Node (which returns Windows-native backslashes on
+// win32 via canonicalPath()/realpath()) against paths printed by the
+// bash subprocess (which always emits POSIX-style, e.g. /tmp/...).
+// On non-Windows platforms this is a no-op since `sep` is already "/".
+function toPosix(p: string): string {
+	return p.split(sep).join("/");
 }
 
 function createContext() {
@@ -561,7 +571,16 @@ describe("AgentHarness tools", () => {
 					execution.cwd = turnContext.workspace;
 					execution.env = { PI_BASH_PREPARE_EXPLICIT: "explicit" };
 					execution.inheritEnv = false;
-					execution.command += `\nprintf '%s:%s:%s:%s' "$prefix" "\${PI_BASH_PREPARE_INHERITED-}" "$PI_BASH_PREPARE_EXPLICIT" "$PWD"`;
+					// Use `pwd -W` on Windows git-bash (MSYS) where the bash
+					// builtin emits the Windows-native path with forward slashes,
+					// matching Node's canonicalPath() output (after toPosix
+					// normalization). Fall back to plain `pwd` on POSIX bash
+					// where `pwd -W` does not exist. Without this, bash's $PWD
+					// is the virtual MSYS POSIX path (e.g. /tmp/...) while
+					// canonicalPath() returns C:/Users/.../Temp/... for the
+					// same directory, and the assertion fails on Windows.
+					execution.command +=
+						`\npwd_str=$(pwd -W 2>/dev/null || pwd); printf '%s:%s:%s:%s' "$prefix" "\${PI_BASH_PREPARE_INHERITED-}" "$PI_BASH_PREPARE_EXPLICIT" "$pwd_str"`;
 				},
 			});
 
@@ -569,7 +588,7 @@ describe("AgentHarness tools", () => {
 
 			expect(receivedContext).toBe(context);
 			expect(receivedSignal).toBe(controller.signal);
-			expect(textOutput(result)).toBe(`ready::explicit:${getOrThrow(await env.canonicalPath(context.workspace))}`);
+			expect(textOutput(result)).toBe(`ready::explicit:${toPosix(getOrThrow(await env.canonicalPath(context.workspace)))}`);
 		});
 
 		it("supports command prefixes", async () => {

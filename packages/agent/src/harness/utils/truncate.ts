@@ -3,13 +3,21 @@
  *
  * Truncation is based on two independent limits - whichever is hit first wins:
  * - Line limit (default: 2000 lines)
- * - Byte limit (default: 50KB)
+ * - Byte limit (default: 50 KiB)
+ *
+ * These are the per-tool "fresh truncation" defaults — they apply
+ * to every tool call regardless of the DeepSeek Harness bundle.
+ * The bundle's lower thresholds (decision matrix item 15) are
+ * applied by the tool-result re-pruner downstream, not by the
+ * per-tool truncation. This keeps the default behaviour
+ * byte-identical to the pre-plan state for users who do not
+ * toggle the bundle.
  *
  * Never returns partial lines (except bash tail truncation edge case).
  */
 
 export const DEFAULT_MAX_LINES = 2000;
-export const DEFAULT_MAX_BYTES = 50 * 1024; // 50KB
+export const DEFAULT_MAX_BYTES = 50 * 1024; // 50 KiB
 export const GREP_MAX_LINE_LENGTH = 500; // Max chars per grep match line
 
 export interface TruncationResult {

@@ -388,6 +388,7 @@ export class AgentHarness implements AgentLane {
 	async steer(_input: string | AgentMessage, _images?: ImageContent[]): Promise<QueueResult> {
 		return this.unavailable("steer");
 	}
+
 	async followUp(_text: string, _images?: ImageContent[]): Promise<QueueResult>;
 	async followUp(_message: AgentMessage): Promise<QueueResult>;
 	async followUp(_input: string | AgentMessage, _images?: ImageContent[]): Promise<QueueResult> {
@@ -475,6 +476,7 @@ export class AgentHarness implements AgentLane {
 	async setStreamOptions(options: StreamOptions): Promise<void> {
 		this.streamOptions = { ...options };
 	}
+
 	async getRetryPolicy(): Promise<RetryPolicy> {
 		return { ...this.retryPolicy };
 	}

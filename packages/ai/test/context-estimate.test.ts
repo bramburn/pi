@@ -57,7 +57,12 @@ describe("context token estimation", () => {
 			trailingTokens: 1_005,
 			lastUsageIndex: null,
 		});
-		expect(buildBaseOptions(model, context).maxTokens).toBe(4_899);
+		// contextWindow 10000 - estimate 1005 - CONTEXT_SAFETY_TOKENS 1024 = 7971.
+		// (Test authored against the legacy 4096 default; updated for the
+		// tightened 1024 recovery-loop backstop introduced in DeepSeek
+		// Harness Phase 1, item 5. 7971 < model.maxTokens=8000 so the clamp
+		// is a no-op above the lower bound.)
+		expect(buildBaseOptions(model, context).maxTokens).toBe(7_971);
 	});
 
 	it("uses assistant usage again after a response to the inserted context", () => {

@@ -16,16 +16,16 @@ describe("TUI method wrapping", () => {
 
 	it("routes a captured method to a replacement renderer", () => {
 		const regularRequestRender = vi.fn();
-		const fullscreenRequestRender = vi.fn();
+		const newRequestRender = vi.fn();
 		let renderer = { requestRender: regularRequestRender } as unknown as TUI;
 		const tui = createInteractiveTuiReference(() => renderer);
 		const requestRender = tui.requestRender;
 
 		requestRender();
-		renderer = { requestRender: fullscreenRequestRender } as unknown as TUI;
+		renderer = { requestRender: newRequestRender } as unknown as TUI;
 		requestRender();
 
 		expect(regularRequestRender).toHaveBeenCalledOnce();
-		expect(fullscreenRequestRender).toHaveBeenCalledOnce();
+		expect(newRequestRender).toHaveBeenCalledOnce();
 	});
 });

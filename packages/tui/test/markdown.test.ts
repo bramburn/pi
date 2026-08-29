@@ -594,13 +594,15 @@ describe("Markdown component", () => {
 		});
 
 		it("should wrap long unbroken tokens inside table cells (not only at line start)", () => {
-			// Pin to no-hyperlinks so width checks work on plain text without OSC 8 sequences.
-			setCapabilities({ images: null, trueColor: false, hyperlinks: false });
-			const url = "https://example.com/this/is/a/very/long/url/that/should/wrap";
+			// Use a non-URL long unbroken token. URLs trigger CodeQL's
+			// js/incomplete-url-substring-sanitization rule when used
+			// with `.includes()` in tests, but here the intent is to
+			// verify wrapping of any long unbroken token, not URL handling.
+			const token = "alpha-beta-gamma-delta-epsilon-zeta-eta-theta-iota-kappa-lambda-mu-nu";
 			const markdown = new Markdown(
 				`| Value |
 | --- |
-| prefix ${url} |`,
+| prefix ${token} |`,
 				0,
 				0,
 				defaultMarkdownTheme,
@@ -608,7 +610,6 @@ describe("Markdown component", () => {
 
 			const width = 30;
 			const lines = markdown.render(width);
-			resetCapabilitiesCache();
 			const plainLines = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 
 			for (const line of plainLines) {
@@ -623,11 +624,11 @@ describe("Markdown component", () => {
 				assert.strictEqual(borderCount, 2, `Expected 2 borders, got ${borderCount}: "${line}"`);
 			}
 
-			// Strip box drawing characters + whitespace so we can assert the URL is preserved
+			// Strip box drawing characters + whitespace so we can assert the token is preserved
 			// even if it was split across multiple wrapped lines.
 			const extracted = plainLines.join("").replace(/[│├┤─\s]/g, "");
 			assert.ok(extracted.includes("prefix"), "Should preserve 'prefix'");
-			assert.ok(extracted.includes(url), "Should preserve URL");
+			assert.ok(extracted.includes(token), "Should preserve unbroken token");
 		});
 
 		it("should wrap styled inline code inside table cells without breaking borders", () => {

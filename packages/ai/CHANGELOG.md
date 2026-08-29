@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+- xAI models support both openai-completions and openai-responses APIs
+
 ### Fixed
 
 - Fixed OpenAI-compatible Chat Completions ignoring an explicitly requested `toolChoice` when no tools are defined.

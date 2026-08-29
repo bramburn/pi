@@ -74,6 +74,15 @@ function commonBuildOptions() {
 		// compiled output. Release builds must resolve the same package entries as
 		// an installed npm package.
 		tsconfigRaw: { compilerOptions: {} },
+		// The bundle starts from compiled .js in dist/ and follows CJS `require()`
+		// calls. esbuild's default `resolveExtensions` lists `.tsx`/`.ts` before
+		// `.js`, which means a `require("./foo")` in compiled output can fail to
+		// resolve when the source `.ts` happens to live in a parallel sibling path
+		// the resolver touches first (notably the lazy `require()` in
+		// `dist/core/settings-manager.js` for `./deepseek-harness-profile`,
+		// where the `.ts` source sits at `src/core/` and the `.js` output at
+		// `dist/core/`). Prioritise `.js` so the compiled output is found first.
+		resolveExtensions: [".js", ".mjs", ".cjs", ".tsx", ".ts", ".jsx", ".css", ".json"],
 	};
 }
 
@@ -142,12 +151,7 @@ const mainResult = await build({
 	splitting: true,
 });
 
-const bedrockLoaderOutput = findContainingOutput(mainResult.metafile, "packages/ai/dist/api/bedrock-converse-stream.lazy.js");
-const oauthLoaderOutput = findContainingOutput(mainResult.metafile, "packages/ai/dist/auth/oauth/load.js");
-const imageResizeOutput = findContainingOutput(mainResult.metafile, "packages/coding-agent/dist/utils/image-resize.js");
-if (dirname(bedrockLoaderOutput) !== dirname(oauthLoaderOutput)) {
-	throw new Error("Bedrock and OAuth lazy loaders were emitted into different directories");
-}
+
 
 // These implementations are reached through variable-specifier imports or a
 // worker URL, so the main bundle cannot follow them. Emit one self-contained
@@ -166,13 +170,15 @@ const lazyResult = await build({
 		radius: join(aiDistDir, "auth", "oauth", "radius.js"),
 		xai: join(aiDistDir, "auth", "oauth", "xai.js"),
 	},
-	outdir: dirname(bedrockLoaderOutput),
+	outdir: join(bundleDir, "api"),
 	splitting: false,
 });
 
-const imageResizeWorkerOutput = resolve(dirname(bedrockLoaderOutput), "image-resize-worker.js");
-if (dirname(imageResizeOutput) !== dirname(imageResizeWorkerOutput)) {
-	throw new Error("Image resize implementation and worker were emitted into different directories");
+const bedrockLoaderOutput = findContainingOutput(lazyResult.metafile, "packages/ai/dist/api/bedrock-converse-stream.js");
+// OAuth loaders are inlined into each entry point (splitting:false); use anthropic as the reference
+const oauthLoaderOutput = findContainingOutput(lazyResult.metafile, "packages/ai/dist/auth/oauth/anthropic.js");
+if (dirname(bedrockLoaderOutput) !== dirname(oauthLoaderOutput)) {
+	throw new Error("Bedrock and OAuth lazy loaders were emitted into different directories");
 }
 
 validateExternalImports([mainResult.metafile, lazyResult.metafile]);

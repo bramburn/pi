@@ -5,11 +5,12 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
-import { setCapabilityOverrides } from "@earendil-works/pi-tui";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { type ImageContent, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
-import { type Args, type Mode, normalizeSessionName, parseArgs, printHelp } from "./cli/args.ts";
+import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
 	checkProviderAuth,
@@ -33,7 +34,15 @@ import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
 import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
+import {
+	APP_NAME,
+	ENV_SESSION_DIR,
+	expandTildePath,
+	FORK_NAME,
+	getAgentDir,
+	getPackageDir,
+	VERSION,
+} from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
 	type AgentSessionRuntimeDiagnostic,
@@ -56,8 +65,8 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
-import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
-import { collectSettingsDiagnostics, deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
+import { assertValidSessionId, getSessionDefaultFromHeader, SessionManager } from "./core/session-manager.ts";
+import { deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/trust-manager.ts";
@@ -65,11 +74,35 @@ import { builtInExtensions } from "./extensions/index.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
-import { cleanupManagedInstall, handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
+import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
 const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
+
+/**
+ * Apply the `--cwd <dir>` CLI override before any `process.cwd()` read.
+ *
+ * Must be called before the bootstrap settings manager, migrations, package
+ * subcommands, or anything else that resolves a project root from
+ * `process.cwd()`. Resolves relative paths against the original cwd so
+ * `pi --cwd subdir` from a project still works. Exits with a clear error
+ * if the path is missing or not a directory.
+ */
+export function applyCwdOverride(cwdArg: string | undefined): void {
+	if (!cwdArg) return;
+	const resolved = resolvePath(cwdArg, process.cwd());
+	if (!existsSync(resolved)) {
+		console.error(chalk.red(`Error: --cwd path does not exist: ${cwdArg}`));
+		process.exit(1);
+	}
+	const stat = statSync(resolved);
+	if (!stat.isDirectory()) {
+		console.error(chalk.red(`Error: --cwd path is not a directory: ${cwdArg}`));
+		process.exit(1);
+	}
+	process.chdir(resolved);
+}
 
 /**
  * Read all content from piped stdin.
@@ -92,6 +125,16 @@ async function readPipedStdin(): Promise<string | undefined> {
 		});
 		process.stdin.resume();
 	});
+}
+
+function collectSettingsDiagnostics(
+	settingsManager: SettingsManager,
+	context: string,
+): AgentSessionRuntimeDiagnostic[] {
+	return settingsManager.drainErrors().map(({ scope, error }) => ({
+		type: "warning",
+		message: `(${context}, ${scope} settings) ${error.message}`,
+	}));
 }
 
 function reportDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]): void {
@@ -126,6 +169,25 @@ function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
 	return !parsed.print && parsed.mode === undefined && (parsed.help === true || parsed.listModels !== undefined);
+}
+
+/**
+ * Decides whether an interactive run with a non-TTY stdout should fail fast
+ * with a clear error instead of silently dropping into print mode and exiting
+ * with no output (which looks like a broken TUI).
+ *
+ * Pure stdout commands (--help, --list-models) and any explicit opt-in to
+ * non-interactive behavior (--print, --mode, message/file args) are exempt.
+ */
+export function shouldBlockInteractiveNonTTY(parsed: Args, stdoutIsTTY: boolean): boolean {
+	return (
+		!stdoutIsTTY &&
+		!parsed.print &&
+		!parsed.mode &&
+		parsed.messages.length === 0 &&
+		parsed.fileArgs.length === 0 &&
+		!isPlainRuntimeMetadataCommand(parsed)
+	);
 }
 
 async function runAuthCommand(args: string[]): Promise<boolean> {
@@ -349,7 +411,7 @@ function forkSessionOrExit(sourcePath: string, cwd: string, sessionDir?: string,
 	}
 }
 
-export async function createSessionManager(
+async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	sessionDir: string | undefined,
@@ -442,12 +504,17 @@ export async function createSessionManager(
 	return SessionManager.create(cwd, sessionDir, { id: parsed.sessionId });
 }
 
-function buildSessionOptions(
+export function buildSessionOptions(
 	parsed: Args,
 	scopedModels: ScopedModel[],
 	hasExistingSession: boolean,
 	modelRuntime: ModelRuntime,
 	settingsManager: SettingsManager,
+	sessionManager: SessionManager,
+	/** Session's preferred model (from session file header), overrides global default. */
+	sessionDefaultModel?: { provider: string; modelId: string },
+	/** Session's preferred thinking level (from session file header). */
+	sessionDefaultThinkingLevel?: ThinkingLevel,
 ): {
 	options: CreateAgentSessionOptions;
 	cliThinkingFromModel: boolean;
@@ -484,26 +551,97 @@ function buildSessionOptions(
 		}
 	}
 
-	if (!options.model && scopedModels.length > 0 && !hasExistingSession) {
-		// Check if saved default is in scoped models - use it if so, otherwise first scoped model
-		const savedProvider = settingsManager.getDefaultProvider();
-		const savedModelId = settingsManager.getDefaultModel();
-		const savedModel = savedProvider && savedModelId ? modelRuntime.getModel(savedProvider, savedModelId) : undefined;
-		const savedInScope = savedModel ? scopedModels.find((sm) => modelsAreEqual(sm.model, savedModel)) : undefined;
+	if (!options.model && !hasExistingSession) {
+		// Resolve the preferred model for a new session.
+		// Precedence (highest first):
+		// 1. Per-session default (from session file header) — if the user
+		//    forked or resumed a session that pinned a model, that wins.
+		// 2. newSessionModel preference:
+		//    - "lastUsed": most recently selected model (any session).
+		//    - "specific": user-chosen model from /settings.
+		//    - "global" / unset: leave options.model undefined so the
+		//      createAgentSession → findInitialModel safety net can pick
+		//      a model later (plan §3).
+		const sessionPreferred = sessionDefaultModel
+			? modelRuntime.getModel(sessionDefaultModel.provider, sessionDefaultModel.modelId)
+			: undefined;
+		const newSessionPref = settingsManager.getNewSessionModelPreference();
+		const lastUsed = newSessionPref?.mode === "lastUsed" ? settingsManager.getLastUsedModel() : undefined;
+		const specific = newSessionPref?.mode === "specific" ? newSessionPref.specific : undefined;
+		const lastUsedModel = lastUsed ? modelRuntime.getModel(lastUsed.provider, lastUsed.modelId) : undefined;
+		const specificModel = specific ? modelRuntime.getModel(specific.provider, specific.modelId) : undefined;
 
-		if (savedInScope) {
-			options.model = savedInScope.model;
-			// Use thinking level from scoped model config if explicitly set
-			if (!parsed.thinking && savedInScope.thinkingLevel) {
-				options.thinkingLevel = savedInScope.thinkingLevel;
+		let preferred: Model<any> | undefined;
+		if (sessionPreferred) {
+			preferred = sessionPreferred;
+		} else if (lastUsedModel) {
+			preferred = lastUsedModel;
+		} else if (specificModel) {
+			preferred = specificModel;
+		}
+		// When no preference resolves, `preferred` stays undefined so
+		// options.model is left undefined for findInitialModel (plan §3).
+
+		// Surface a soft diagnostic when a configured preference is no
+		// longer available, so the user knows the session needs a fallback.
+		if (newSessionPref?.mode === "lastUsed" && lastUsed && !lastUsedModel && !sessionPreferred) {
+			diagnostics.push({
+				type: "warning",
+				message: `Last used model ${lastUsed.provider}/${lastUsed.modelId} is no longer available; default model selection will be used instead.`,
+			});
+		}
+		if (newSessionPref?.mode === "specific" && specific && !specificModel && !sessionPreferred) {
+			diagnostics.push({
+				type: "warning",
+				message: `Configured new-session model ${specific.provider}/${specific.modelId} is no longer available; default model selection will be used instead.`,
+			});
+		}
+
+		// If we have a scoped model list, intersect with the scope.
+		if (scopedModels.length > 0) {
+			const preferredInScope = preferred
+				? scopedModels.find((sm) => modelsAreEqual(sm.model, preferred))
+				: undefined;
+			if (preferredInScope) {
+				options.model = preferredInScope.model;
+				if (!parsed.thinking) {
+					if (sessionDefaultThinkingLevel) {
+						options.thinkingLevel = sessionDefaultThinkingLevel;
+					} else if (preferredInScope.thinkingLevel) {
+						options.thinkingLevel = preferredInScope.thinkingLevel;
+					}
+				}
+			} else {
+				// Preferred model isn't in the scope. Use the first scoped
+				// model and inherit its thinking level if any.
+				options.model = scopedModels[0].model;
+				if (!parsed.thinking && scopedModels[0].thinkingLevel) {
+					options.thinkingLevel = scopedModels[0].thinkingLevel;
+				}
 			}
-		} else {
-			options.model = scopedModels[0].model;
-			// Use thinking level from first scoped model if explicitly set
-			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
-				options.thinkingLevel = scopedModels[0].thinkingLevel;
+		} else if (preferred) {
+			// No scoped models; honor the preferred model directly so the
+			// preference (lastUsed / specific) wins over the implicit
+			// first-available fallback further down the stack.
+			options.model = preferred;
+			if (!parsed.thinking && sessionDefaultThinkingLevel) {
+				options.thinkingLevel = sessionDefaultThinkingLevel;
 			}
 		}
+	}
+
+	// For a brand-new session, persist the resolved model into the
+	// session header so the model-selector, /tree, and forks all see a
+	// consistent "current" model. Plan §4. Skipped when:
+	//  - we're resuming an existing session (header is already set)
+	//  - the header already pinned a model (don't overwrite)
+	//  - no model was resolved (findInitialModel will pick later)
+	// Covers all resolution paths: --model CLI, lastUsed, specific, and
+	// the scoped-models[0] fallback.
+	if (!hasExistingSession && options.model && !sessionDefaultModel) {
+		sessionManager.setSessionDefault({
+			model: { provider: options.model.provider, modelId: options.model.id },
+		});
 	}
 
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
@@ -574,7 +712,10 @@ export async function main(args: string[], options?: MainOptions) {
 	if (process.platform === "win32") {
 		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
-	cleanupManagedInstall();
+
+	// Apply --cwd before anything reads process.cwd(). parseArgs is pure and
+	// idempotent; the main flow re-parses at line 694 below.
+	applyCwdOverride(parseArgs(args).cwd);
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
@@ -612,7 +753,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("parseArgs");
 
 	if (parsed.version) {
-		console.log(VERSION);
+		console.log(`pi ${VERSION} [${FORK_NAME}]`);
 		process.exit(0);
 	}
 
@@ -631,6 +772,22 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	let appMode = resolveAppMode(parsed, process.stdin.isTTY, process.stdout.isTTY);
+
+	// When the user did NOT explicitly opt in to non-interactive mode (no
+	// --print, no piped stdin, no initial message) but stdout still isn't a
+	// TTY, we are about to silently drop into print mode and exit with no
+	// output — which looks like a broken TUI. Surface a clear message so
+	// the user knows what to do.
+	if (shouldBlockInteractiveNonTTY(parsed, process.stdout.isTTY)) {
+		console.error(
+			chalk.red(
+				"Error: stdout is not a TTY. The interactive TUI needs a real terminal — run from Windows Terminal, ConEmu, or a plain cmd.exe window.\n" +
+					`Hint: pass --print (-p) for non-interactive single-shot mode, or remove any stdout redirect.`,
+			),
+		);
+		process.exit(1);
+	}
+
 	const shouldTakeOverStdout = appMode !== "interactive" && !isPlainRuntimeMetadataCommand(parsed);
 	if (shouldTakeOverStdout) {
 		takeOverStdout();
@@ -649,7 +806,7 @@ export async function main(args: string[], options?: MainOptions) {
 	time("runMigrations");
 
 	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
-	const startupSettingsDiagnostics = collectSettingsDiagnostics(startupSettingsManager);
+	const startupSettingsDiagnostics = collectSettingsDiagnostics(startupSettingsManager, "startup session lookup");
 
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
@@ -687,8 +844,8 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 	}
 	if (parsed.name !== undefined) {
-		const name = normalizeSessionName(parsed.name);
-		if (name === undefined) {
+		const name = parsed.name.trim();
+		if (!name) {
 			console.error(chalk.red("Error: --name requires a non-empty value"));
 			process.exit(1);
 		}
@@ -774,10 +931,23 @@ export async function main(args: string[], options?: MainOptions) {
 			},
 		});
 		const { settingsManager, modelRuntime, resourceLoader } = services;
+
+		// Apply CLI overrides for the DeepSeek Harness bundle. These run
+		// before the session is created so the session picks up the
+		// resolved settings on first read.
+		if (parsed.deepseekHarness === true) {
+			settingsManager.setDeepseekHarnessEnabled(true);
+		} else if (parsed.deepseekHarness === false) {
+			// --no-deepseek-harness overrides a true global setting for this run
+			settingsManager.setDeepseekHarnessEnabled(false);
+		}
+		if (parsed.deepseekHarnessMaxOverflowRetries !== undefined) {
+			settingsManager.setDeepseekHarnessField("maxOverflowRetries", parsed.deepseekHarnessMaxOverflowRetries);
+		}
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
 			...projectTrustDiagnostics,
 			...services.diagnostics,
-			...collectSettingsDiagnostics(settingsManager),
+			...collectSettingsDiagnostics(settingsManager, "runtime creation"),
 			...resourceLoader.getExtensions().errors.map(({ path, error }) => ({
 				type: "error" as const,
 				message: `Failed to load extension "${path}": ${error}`,
@@ -789,6 +959,11 @@ export async function main(args: string[], options?: MainOptions) {
 			modelPatterns && modelPatterns.length > 0
 				? await resolveModelScope(modelPatterns, modelRuntime, { signal: AbortSignal.timeout(15_000) })
 				: [];
+
+		// Read per-session model preference from the session file header.
+		const sessionDefault = getSessionDefaultFromHeader(sessionManager.getHeader());
+		const hasExistingSession = sessionManager.buildSessionContext().messages.length > 0;
+
 		const {
 			options: sessionOptions,
 			cliThinkingFromModel,
@@ -796,11 +971,18 @@ export async function main(args: string[], options?: MainOptions) {
 		} = buildSessionOptions(
 			parsed,
 			scopedModels,
-			sessionManager.buildSessionContext().messages.length > 0,
+			hasExistingSession,
 			modelRuntime,
 			settingsManager,
+			sessionManager,
+			sessionDefault?.model,
+			sessionDefault?.thinkingLevel,
 		);
 		diagnostics.push(...sessionOptionDiagnostics);
+
+		// Note: the setSessionDefault call for fresh sessions lives inside
+		// buildSessionOptions (plan §4) so the function's contract is
+		// self-contained.
 
 		if (parsed.apiKey) {
 			if (!sessionOptions.model) {
@@ -845,7 +1027,6 @@ export async function main(args: string[], options?: MainOptions) {
 	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;
 	const { settingsManager, modelRuntime, resourceLoader } = services;
-	setCapabilityOverrides(settingsManager.getTerminalCapabilityOverrides());
 	applyHttpProxySettings(settingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
 
@@ -928,6 +1109,18 @@ export async function main(args: string[], options?: MainOptions) {
 		printTimings();
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
+		// Surface the new-session-model fallback warnings in the TUI, not just stderr.
+		// Without this, a user whose `newSessionModel` preference points at a model the
+		// runtime can no longer find would see a one-line stderr message and then
+		// launch the TUI on the silent fallback with no in-product explanation.
+		const newSessionModelWarnings = runtime.diagnostics
+			.filter(
+				(diagnostic) =>
+					diagnostic.type === "warning" &&
+					(diagnostic.message.includes("is no longer available") ||
+						diagnostic.message.includes("default model selection will be used")),
+			)
+			.map((diagnostic) => diagnostic.message);
 		const interactiveMode = new InteractiveMode(runtime, {
 			migratedProviders,
 			startupDiagnostics,
@@ -937,8 +1130,8 @@ export async function main(args: string[], options?: MainOptions) {
 			initialImages,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
-			tuiMode: parsed.tuiMode,
 			initialThemeSetting: parsed.useTheme,
+			newSessionModelWarnings,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

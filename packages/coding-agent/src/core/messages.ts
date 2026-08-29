@@ -37,6 +37,12 @@ export interface BashExecutionMessage {
 	timestamp: number;
 	/** If true, this message is excluded from LLM context (!! prefix) */
 	excludeFromContext?: boolean;
+	/**
+	 * If true, the tool-result re-pruner (Phase 2, item 3) skips
+	 * this row. Used by the `read` tool to break the
+	 * read → truncate → read loop (item 10).
+	 */
+	excludeFromPrune?: boolean;
 }
 
 /**

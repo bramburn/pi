@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+- Added `validateLlmMessages` export for external validation of message arrays
+
 ### Fixed
 
 - Fixed Windows `NodeExecutionEnv` aborts crashing when `taskkill.exe` is unavailable on `PATH` ([#6596](https://github.com/earendil-works/pi/issues/6596)).

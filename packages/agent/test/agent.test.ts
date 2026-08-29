@@ -432,7 +432,13 @@ describe("Agent", () => {
 			details: { status: "late" },
 		});
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(events).toHaveLength(eventCountBeforeLateUpdate);
+		// After per-sibling fix (#7053), the settled tool's tool_result message_start/message_end
+		// events are emitted at the settled tool's own completion, before the late update fires.
+		// Subsequent late updates from the already-settled tool must not emit any new events.
+		const updateEventsBeforeLateUpdate = events
+			.slice(eventCountBeforeLateUpdate)
+			.filter((event) => event.type === "tool_execution_update");
+		expect(updateEventsBeforeLateUpdate).toHaveLength(0);
 
 		releaseSlow.resolve();
 		await promptPromise;
