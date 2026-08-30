@@ -122,6 +122,20 @@ If rebase conflicts occur:
 - If a conflict is in a file you did not modify, abort and ask the user.
 - Never force push.
 
+## Fork vs Upstream Remotes
+
+This checkout is a fork of `earendil-works/pi` (the original upstream). Two remotes are configured:
+
+- `origin` = `https://github.com/earendil-works/pi.git` (the upstream; read-only from this account)
+- `fork` = `https://github.com/bramburn/pi.git` (the maintainer's fork; writable)
+
+Rules:
+
+- **Never push to `origin`.** All pushes — branches, tags, force-with-lease — go to `fork` only. Treat `origin` as read-only.
+- **Never open a PR against `earendil-works/pi` from this account** unless the user explicitly approves the upstream PR. The standard workflow is: push the branch to `fork`, then the user opens the PR against upstream from the GitHub UI.
+- Before any push, double-check the remote name in the command. `git push origin <branch>` is the wrong command; `git push fork <branch>` is right.
+- If a `gh` command targets `earendil-works/pi` and the API returns `user is blocked` / `HTTP 422: user is blocked`, surface the block to the user and stop. Do not retry against upstream via a different endpoint or token.
+
 ## Issues and PRs
 
 See `CONTRIBUTING.md` for the contributor gate (auto-close workflows, `lgtm`/`lgtmi`, quality bar).
