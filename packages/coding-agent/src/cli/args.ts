@@ -6,7 +6,6 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
-import type { TuiMode } from "../core/settings-manager.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -16,6 +15,9 @@ export interface Args {
 	apiKey?: string;
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
+	deepseekHarness?: boolean;
+	deepseekHarnessMaxOverflowRetries?: number;
+	cwd?: string;
 	thinking?: ThinkingLevel;
 	continue?: boolean;
 	resume?: boolean;
@@ -47,7 +49,6 @@ export interface Args {
 	noContextFiles?: boolean;
 	listModels?: string | true;
 	offline?: boolean;
-	tuiMode?: TuiMode;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
 	messages: string[];
@@ -112,12 +113,21 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
 			result.appendSystemPrompt = result.appendSystemPrompt ?? [];
 			result.appendSystemPrompt.push(args[++i]);
+		} else if (arg === "--deepseek-harness") {
+			result.deepseekHarness = true;
+		} else if (arg === "--no-deepseek-harness") {
+			result.deepseekHarness = false;
+		} else if (arg === "--deepseek-harness-max-overflow-retries" && i + 1 < args.length) {
+			const v = parseInt(args[++i], 10);
+			if (Number.isFinite(v) && v >= 0) result.deepseekHarnessMaxOverflowRetries = v;
 		} else if (arg === "--name" || arg === "-n") {
 			if (i + 1 < args.length) {
 				result.name = args[++i];
 			} else {
 				result.diagnostics.push({ type: "error", message: "--name requires a value" });
 			}
+		} else if (arg === "--cwd" && i + 1 < args.length) {
+			result.cwd = args[++i];
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
@@ -200,20 +210,6 @@ export function parseArgs(args: string[]): Args {
 			} else {
 				result.listModels = true;
 			}
-		} else if (arg === "--tui-mode") {
-			const mode = args[i + 1];
-			if (mode === "regular" || mode === "fullscreen") {
-				result.tuiMode = mode;
-				i++;
-			} else if (mode === undefined || mode.startsWith("-")) {
-				result.diagnostics.push({ type: "error", message: "--tui-mode requires regular or fullscreen" });
-			} else {
-				i++;
-				result.diagnostics.push({
-					type: "error",
-					message: `Invalid TUI mode "${mode}". Valid values: regular, fullscreen`,
-				});
-			}
 		} else if (arg === "--verbose") {
 			result.verbose = true;
 		} else if (arg === "--approve" || arg === "-a") {
@@ -280,7 +276,11 @@ ${chalk.bold("Options:")}
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
+  --deepseek-harness              Enable the deepseek-harness-style context pipeline (opt-in)
+  --no-deepseek-harness           Disable the deepseek-harness-style context pipeline for this run
+  --deepseek-harness-max-overflow-retries <n>  Max compact-and-retry attempts on context overflow (default 2)
   --mode <mode>                  Output mode: text (default), json, or rpc
+  --cwd <dir>                    Change the project working directory before loading (must exist)
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
   --resume, -r                   Select a session to resume
@@ -312,8 +312,7 @@ ${chalk.bold("Options:")}
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)
-  --tui-mode <mode>              TUI mode: regular (default) or fullscreen
-  --approve, -a                  Trust project-local files for this run
+--approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run
   --offline                      Disable startup network operations (same as PI_OFFLINE=1)
   --                             End option parsing; treat remaining arguments as messages/files

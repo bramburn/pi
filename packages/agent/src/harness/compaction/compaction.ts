@@ -152,6 +152,19 @@ export interface CompactionSettings {
 	reserveTokens: number;
 	/** Approximate recent-context tokens to keep after compaction. */
 	keepRecentTokens: number;
+	/**
+	 * Optional ratio (0,1] of contextWindow above which compaction
+	 * triggers. Mutually exclusive with `reserveTokens`. When set,
+	 * `shouldCompact` uses `contextWindow * thresholdRatio` as the
+	 * trigger point instead of `contextWindow - reserveTokens`.
+	 */
+	thresholdRatio?: number;
+	/**
+	 * Optional ratio (0,1] of contextWindow to keep verbatim (the
+	 * priced-tail retention). When set, `findCutPoint` aims to retain
+	 * `contextWindow * retainRatio` recent tokens.
+	 */
+	retainRatio?: number;
 }
 
 /** Default compaction settings used by the harness. */
@@ -246,6 +259,13 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 /** Return whether context usage exceeds the configured compaction threshold. */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
+	// `thresholdRatio` (when set) takes precedence over the legacy
+	// `reserveTokens` subtraction. Both express the same intent
+	// (a budget reserved for the response) but the ratio is
+	// per-model-portable; the subtraction is absolute tokens.
+	if (settings.thresholdRatio !== undefined && settings.thresholdRatio > 0 && contextWindow > 0) {
+		return contextTokens > contextWindow * settings.thresholdRatio;
+	}
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 

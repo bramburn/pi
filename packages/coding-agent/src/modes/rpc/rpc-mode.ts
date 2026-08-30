@@ -459,6 +459,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					sessionId: session.sessionId,
 					sessionName: session.sessionName,
 					autoCompactionEnabled: session.autoCompactionEnabled,
+					deepseekHarnessEnabled: session.deepseekHarnessEnabled,
 					messageCount: session.messages.length,
 					pendingMessageCount: session.pendingMessageCount,
 				};
@@ -540,6 +541,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "set_auto_compaction": {
 				session.setAutoCompactionEnabled(command.enabled);
 				return success(id, "set_auto_compaction");
+			}
+
+			case "set_deepseek_harness": {
+				session.setDeepseekHarnessEnabled(command.enabled);
+				return success(id, "set_deepseek_harness");
 			}
 
 			// =================================================================

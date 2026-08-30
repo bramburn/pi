@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Transport } from "@earendil-works/pi-ai";
-import type { TuiMode as RendererTuiMode, ScrollViewScrollbar, TerminalCapabilities } from "@earendil-works/pi-tui";
+import type { TerminalCapabilities, TuiMode } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -8,12 +8,82 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
+}
+
+/**
+ * Settings for the opt-in "DeepSeek Harness" context-management bundle.
+ *
+ * When `enabled: true`, the agent uses a deepseek-harness-style
+ * pipeline: multi-attempt overflow recovery, tool-result re-pruning,
+ * replay-prefix summarisation (provider cache reuse), and
+ * byte-budgeted workspace instructions. All sub-toggles are optional
+ * and fall back to sensible defaults; the resolved settings layer
+ * user values on top of a built-in `MINIMAX_PROFILE` when the active
+ * provider is `minimax` or `minimax-cn`, then per-model and
+ * provider-wildcard overrides.
+ */
+export interface DeepseekHarnessSettings {
+	/** Master toggle. When true, the deepseek-harness-style pipeline is on. */
+	enabled?: boolean;
+	/** Compact when context > contextWindow * thresholdRatio. Default 0.8. */
+	thresholdRatio?: number;
+	/** Keep the most recent contextWindow * retainRatio verbatim. Default 0.16. */
+	retainRatio?: number;
+	/** Max overflow recovery attempts before surfacing an error. Default 2. */
+	maxOverflowRetries?: number;
+	/** Re-prune tool results every N turns. 0 disables. Default 5. */
+	toolResultPruneEveryN?: number;
+	/** Head chars kept when pruning tool results. Default 4096. */
+	toolResultHeadChars?: number;
+	/** Tail chars kept when pruning tool results. Default 1024. */
+	toolResultTailChars?: number;
+	/** Threshold (chars) at which a tool result is eligible for pruning. Default 8192. */
+	toolResultThresholdChars?: number;
+	/** Send the live conversation as the prefix of the summarisation call. */
+	replayPrefixSummarisation?: boolean;
+	/** Render workspace AGENTS.md inside a byte-budgeted <system-reminder>. */
+	budgetedInstructions?: boolean;
+	/** Per-model overrides keyed by "provider/model" (longest-prefix match). */
+	modelPolicies?: Record<string, Partial<DeepseekHarnessSettings>>;
+	/** Byte budget for the workspace instructions renderer. Default 20 KiB. */
+	maxBytesForInstructions?: number;
+}
+
+export const DEFAULT_DEEPSEEK_HARNESS: Required<Omit<DeepseekHarnessSettings, "modelPolicies">> = {
+	enabled: false,
+	thresholdRatio: 0.8,
+	retainRatio: 0.16,
+	maxOverflowRetries: 2,
+	toolResultPruneEveryN: 5,
+	toolResultHeadChars: 4096,
+	toolResultTailChars: 1024,
+	toolResultThresholdChars: 8192,
+	replayPrefixSummarisation: true,
+	budgetedInstructions: true,
+	maxBytesForInstructions: 20 * 1024,
+};
+
+export interface ResolvedDeepseekHarnessSettings {
+	enabled: boolean;
+	thresholdRatio: number;
+	retainRatio: number;
+	maxOverflowRetries: number;
+	toolResultPruneEveryN: number;
+	toolResultHeadChars: number;
+	toolResultTailChars: number;
+	toolResultThresholdChars: number;
+	replayPrefixSummarisation: boolean;
+	budgetedInstructions: boolean;
+	maxBytesForInstructions: number;
+	profile: "user" | "minimax";
+	modelPolicies: Record<string, Partial<DeepseekHarnessSettings>>;
 }
 
 export interface BranchSummarySettings {
@@ -34,9 +104,6 @@ export interface RetrySettings {
 	provider?: ProviderRetrySettings;
 }
 
-export type TuiMode = RendererTuiMode;
-export type FullscreenExitOutput = "transcript" | "resume-hint";
-
 export interface TerminalSettings {
 	showImages?: boolean; // default: true (only relevant if terminal supports images)
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
@@ -45,6 +112,10 @@ export interface TerminalSettings {
 	hyperlinks?: boolean | "auto";
 	images?: "kitty" | "iterm2" | "auto" | false;
 	trueColor?: boolean | "auto";
+	/** What to render in the scrollback after exiting fullscreen TUI. Default: "resume-hint". */
+	fullscreenExitOutput?: "resume-hint" | "transcript";
+	/** When to show the fullscreen-mode scrollbar. Default: "auto". */
+	fullscreenScrollbar?: "always" | "hidden" | "auto";
 }
 
 export interface ImageSettings {
@@ -64,6 +135,26 @@ export type MermaidRenderingMode = "off" | "final" | "streaming";
 export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 	mermaid?: MermaidRenderingMode; // default: "streaming"
+}
+
+export type NewSessionModelMode = "global" | "lastUsed" | "specific";
+
+/**
+ * User-configurable preference for which model a brand-new session starts
+ * with when no per-session default is set in the session header.
+ *
+ * - "global": fall back to the global defaultModel (existing behaviour).
+ * - "lastUsed": use the most recently selected model (tracked by
+ *   setLastUsedModel on every model change). Falls back to "global" if
+ *   the user has never picked a model.
+ * - "specific": use a user-chosen model. The `specific` field is
+ *   required for this mode; if the chosen model is no longer available
+ *   the runtime falls back to "global" and surfaces a diagnostic.
+ */
+export interface NewSessionModelPreference {
+	mode: NewSessionModelMode;
+	/** Required when mode === "specific". */
+	specific?: { provider: string; modelId: string };
 }
 
 export interface WarningSettings {
@@ -97,15 +188,21 @@ export interface Settings {
 	defaultModel?: string;
 	defaultThinkingLevel?: ThinkingLevel;
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
+	/** New-session model preference; global-only. */
+	newSessionModel?: NewSessionModelPreference;
+	/** Most recently selected model (provider + modelId). Updated on every
+	 * setModel / cycleModel call. Global-only. */
+	lastUsedModel?: { provider: string; modelId: string };
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
+	deepseekHarness?: DeepseekHarnessSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
-	showCacheMissNotices?: boolean; // default: false - show prompt-cache miss and compaction cost notices
+	showCacheMissNotices?: boolean; // default: false - show transcript notices for significant prompt-cache misses
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows); supports leading ~ expansion
 	quietStartup?: boolean;
@@ -133,16 +230,13 @@ export interface Settings {
 	outputPad?: 0 | 1; // Horizontal padding for chat message output (default: 1)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
+	tuiMode?: TuiMode; // default: "regular"
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
-	tuiMode?: TuiMode; // default: "regular"
-	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
-	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
-	fullscreenCopyOnSelect?: boolean; // default: true; no effect in regular TUI mode
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -200,15 +294,7 @@ export interface SettingsError {
 	error: Error;
 }
 
-type SettingsPaths = Partial<Record<SettingsScope, string>>;
-
-function toSettingsError(scope: SettingsScope, error: unknown, path?: string): SettingsError {
-	return {
-		scope,
-		...(path ? { path } : {}),
-		error: error instanceof Error ? error : new Error(String(error)),
-	};
-}
+export type SettingsPaths = Partial<Record<SettingsScope, string>>;
 
 export class FileSettingsStorage implements SettingsStorage {
 	private globalSettingsPath: string;
@@ -219,6 +305,14 @@ export class FileSettingsStorage implements SettingsStorage {
 		const resolvedAgentDir = resolvePath(agentDir);
 		this.globalSettingsPath = join(resolvedAgentDir, "settings.json");
 		this.projectSettingsPath = join(resolvedCwd, CONFIG_DIR_NAME, "settings.json");
+	}
+
+	getGlobalSettingsPath(): string {
+		return this.globalSettingsPath;
+	}
+
+	getProjectSettingsPath(): string {
+		return this.projectSettingsPath;
 	}
 
 	private acquireLockSyncWithRetry(path: string): () => void {
@@ -310,7 +404,6 @@ export class SettingsManager {
 	private projectSettingsLoadError: Error | null = null; // Track if project settings file had parse errors
 	private writeQueue: Promise<void> = Promise.resolve();
 	private errors: SettingsError[];
-	private settingsPaths: SettingsPaths;
 
 	private constructor(
 		storage: SettingsStorage,
@@ -320,7 +413,6 @@ export class SettingsManager {
 		projectLoadError: Error | null = null,
 		initialErrors: SettingsError[] = [],
 		projectTrusted = true,
-		settingsPaths: SettingsPaths = {},
 	) {
 		this.storage = storage;
 		this.globalSettings = initialGlobal;
@@ -329,7 +421,6 @@ export class SettingsManager {
 		this.globalSettingsLoadError = globalLoadError;
 		this.projectSettingsLoadError = projectLoadError;
 		this.errors = [...initialErrors];
-		this.settingsPaths = settingsPaths;
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
 	}
 
@@ -339,35 +430,25 @@ export class SettingsManager {
 		agentDir: string = getAgentDir(),
 		options: SettingsManagerCreateOptions = {},
 	): SettingsManager {
-		const resolvedCwd = resolvePath(cwd);
-		const resolvedAgentDir = resolvePath(agentDir);
-		const storage = new FileSettingsStorage(resolvedCwd, resolvedAgentDir);
-		return SettingsManager.fromStorageWithPaths(storage, options, {
-			global: join(resolvedAgentDir, "settings.json"),
-			project: join(resolvedCwd, CONFIG_DIR_NAME, "settings.json"),
-		});
+		const storage = new FileSettingsStorage(cwd, agentDir);
+		return SettingsManager.fromStorage(storage, options);
 	}
 
 	/** Create a SettingsManager from an arbitrary storage backend */
 	static fromStorage(storage: SettingsStorage, options: SettingsManagerCreateOptions = {}): SettingsManager {
-		return SettingsManager.fromStorageWithPaths(storage, options);
-	}
-
-	/** Create a manager while retaining optional file paths for reported storage errors. */
-	private static fromStorageWithPaths(
-		storage: SettingsStorage,
-		options: SettingsManagerCreateOptions,
-		settingsPaths: SettingsPaths = {},
-	): SettingsManager {
 		const projectTrusted = options.projectTrusted ?? true;
 		const globalLoad = SettingsManager.tryLoadFromStorage(storage, "global");
 		const projectLoad = SettingsManager.tryLoadFromStorage(storage, "project", projectTrusted);
+		const settingsPaths: SettingsPaths = {
+			global: (storage as FileSettingsStorage).getGlobalSettingsPath?.(),
+			project: (storage as FileSettingsStorage).getProjectSettingsPath?.(),
+		};
 		const initialErrors: SettingsError[] = [];
 		if (globalLoad.error) {
-			initialErrors.push(toSettingsError("global", globalLoad.error, settingsPaths.global));
+			initialErrors.push({ scope: "global", path: settingsPaths.global, error: globalLoad.error });
 		}
 		if (projectLoad.error) {
-			initialErrors.push(toSettingsError("project", projectLoad.error, settingsPaths.project));
+			initialErrors.push({ scope: "project", path: settingsPaths.project, error: projectLoad.error });
 		}
 
 		return new SettingsManager(
@@ -378,7 +459,6 @@ export class SettingsManager {
 			projectLoad.error,
 			initialErrors,
 			projectTrusted,
-			settingsPaths,
 		);
 	}
 
@@ -581,7 +661,12 @@ export class SettingsManager {
 	}
 
 	private recordError(scope: SettingsScope, error: unknown): void {
-		this.errors.push(toSettingsError(scope, error, this.settingsPaths[scope]));
+		const normalizedError = error instanceof Error ? error : new Error(String(error));
+		const path =
+			scope === "global"
+				? (this.storage as FileSettingsStorage).getGlobalSettingsPath?.()
+				: (this.storage as FileSettingsStorage).getProjectSettingsPath?.();
+		this.errors.push({ scope, error: normalizedError, ...(path ? { path } : {}) });
 	}
 
 	private clearModifiedScope(scope: SettingsScope): void {
@@ -742,6 +827,57 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getNewSessionModelPreference(): NewSessionModelPreference | undefined {
+		return this.settings.newSessionModel;
+	}
+
+	setNewSessionModelPreference(preference: NewSessionModelPreference): void {
+		this.globalSettings.newSessionModel = { ...preference };
+		this.markModified("newSessionModel");
+		this.save();
+	}
+
+	getLastUsedModel(): { provider: string; modelId: string } | undefined {
+		const lastUsed = this.settings.lastUsedModel;
+		if (!lastUsed) return undefined;
+		const { provider, modelId } = lastUsed;
+		if (typeof provider !== "string" || typeof modelId !== "string") return undefined;
+		return { provider, modelId };
+	}
+
+	setLastUsedModel(model: { provider: string; modelId: string }): void {
+		this.globalSettings.lastUsedModel = { provider: model.provider, modelId: model.modelId };
+		this.markModified("lastUsedModel");
+		this.save();
+	}
+
+	getModelThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
+		return this.settings.modelThinkingLevels?.[`${provider}/${modelId}`];
+	}
+
+	getAllModelThinkingLevels(): Record<string, ThinkingLevel> {
+		return { ...(this.settings.modelThinkingLevels ?? {}) };
+	}
+
+	setModelThinkingLevel(provider: string, modelId: string, level: ThinkingLevel): void {
+		if (!this.globalSettings.modelThinkingLevels) {
+			this.globalSettings.modelThinkingLevels = {};
+		}
+		this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`] = level;
+		this.markModified("modelThinkingLevels");
+		this.save();
+	}
+
+	removeModelThinkingLevel(provider: string, modelId: string): void {
+		if (!this.globalSettings.modelThinkingLevels) return;
+		delete this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`];
+		if (Object.keys(this.globalSettings.modelThinkingLevels).length === 0) {
+			delete this.globalSettings.modelThinkingLevels;
+		}
+		this.markModified("modelThinkingLevels");
+		this.save();
+	}
+
 	getSteeringMode(): "all" | "one-at-a-time" {
 		return this.settings.steeringMode || "one-at-a-time";
 	}
@@ -789,31 +925,14 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getModelThinkingLevel(provider: string, modelId: string): ThinkingLevel | undefined {
-		return this.settings.modelThinkingLevels?.[`${provider}/${modelId}`];
-	}
-
-	getAllModelThinkingLevels(): Record<string, ThinkingLevel> {
-		return { ...(this.settings.modelThinkingLevels ?? {}) };
-	}
-
-	setModelThinkingLevel(provider: string, modelId: string, level: ThinkingLevel): void {
-		if (!this.globalSettings.modelThinkingLevels) {
-			this.globalSettings.modelThinkingLevels = {};
-		}
-		this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`] = level;
-		this.markModified("modelThinkingLevels");
-		this.save();
-	}
-
-	removeModelThinkingLevel(provider: string, modelId: string): void {
-		if (!this.globalSettings.modelThinkingLevels) return;
-		delete this.globalSettings.modelThinkingLevels[`${provider}/${modelId}`];
-		if (Object.keys(this.globalSettings.modelThinkingLevels).length === 0) {
-			delete this.globalSettings.modelThinkingLevels;
-		}
-		this.markModified("modelThinkingLevels");
-		this.save();
+	getTerminalCapabilityOverrides(): Partial<TerminalCapabilities> {
+		const terminal = this.settings.terminal;
+		const images = terminal?.images;
+		return {
+			...(images === "kitty" || images === "iterm2" ? { images } : images === false ? { images: null } : {}),
+			...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
+			...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
+		};
 	}
 
 	getTransport(): TransportSetting {
@@ -847,12 +966,74 @@ export class SettingsManager {
 		return this.settings.compaction?.keepRecentTokens ?? 20000;
 	}
 
-	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+	getCompactionSettings(): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		thresholdRatio?: number;
+		retainRatio?: number;
+	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
 		};
+	}
+
+	/**
+	 * Resolved DeepSeek Harness settings. Layers user values on top of
+	 * the built-in `MINIMAX_PROFILE` when the active model is `minimax`
+	 * or `minimax-cn`, then per-model exact override, then
+	 * provider-wildcard override.
+	 */
+	getDeepseekHarnessSettings(model?: { provider: string; id: string }): ResolvedDeepseekHarnessSettings {
+		const user = this.settings.deepseekHarness ?? {};
+		const base: ResolvedDeepseekHarnessSettings = {
+			...DEFAULT_DEEPSEEK_HARNESS,
+			...user,
+			profile: "user",
+			modelPolicies: user.modelPolicies ?? {},
+		} as ResolvedDeepseekHarnessSettings;
+		if (!model || (model.provider !== "minimax" && model.provider !== "minimax-cn")) {
+			return base;
+		}
+		// Built-in MiniMax profile layered UNDER user-level overrides
+		// (user wins). The profile module only imports a TypeScript type
+		// from this file, which is erased at compile time, so the
+		// runtime value is safe to reference directly.
+		const merged: ResolvedDeepseekHarnessSettings = {
+			...base,
+			...MINIMAX_PROFILE,
+			...user,
+			profile: "minimax",
+		};
+		const exact = user.modelPolicies?.[`${model.provider}/${model.id}`];
+		if (exact) Object.assign(merged, exact);
+		const wild = user.modelPolicies?.[`${model.provider}/*`];
+		if (wild) Object.assign(merged, wild);
+		return merged;
+	}
+
+	getDeepseekHarnessEnabled(): boolean {
+		return this.settings.deepseekHarness?.enabled ?? false;
+	}
+
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		if (!this.globalSettings.deepseekHarness) {
+			this.globalSettings.deepseekHarness = {};
+		}
+		this.globalSettings.deepseekHarness.enabled = enabled;
+		this.markModified("deepseekHarness", "enabled");
+		this.save();
+	}
+
+	setDeepseekHarnessField<K extends keyof DeepseekHarnessSettings>(key: K, value: DeepseekHarnessSettings[K]): void {
+		if (!this.globalSettings.deepseekHarness) {
+			this.globalSettings.deepseekHarness = {};
+		}
+		(this.globalSettings.deepseekHarness as Record<string, unknown>)[key as string] = value as unknown;
+		this.markModified("deepseekHarness", key as string);
+		this.save();
 	}
 
 	getBranchSummarySettings(): { reserveTokens: number; skipPrompt: boolean } {
@@ -1129,16 +1310,6 @@ export class SettingsManager {
 		return this.settings.thinkingBudgets;
 	}
 
-	getTerminalCapabilityOverrides(): Partial<TerminalCapabilities> {
-		const terminal = this.settings.terminal;
-		const images = terminal?.images;
-		return {
-			...(images === "kitty" || images === "iterm2" ? { images } : images === false ? { images: null } : {}),
-			...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
-			...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
-		};
-	}
-
 	getShowImages(): boolean {
 		return this.settings.terminal?.showImages ?? true;
 	}
@@ -1199,44 +1370,29 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getTuiMode(): TuiMode {
-		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
+	getFullscreenExitOutput(): "resume-hint" | "transcript" {
+		return this.settings.terminal?.fullscreenExitOutput ?? "resume-hint";
 	}
 
-	setTuiMode(mode: TuiMode): void {
-		this.globalSettings.tuiMode = mode;
-		this.markModified("tuiMode");
+	setFullscreenExitOutput(output: "resume-hint" | "transcript"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenExitOutput = output;
+		this.markModified("terminal", "fullscreenExitOutput");
 		this.save();
 	}
 
-	getFullscreenExitOutput(): FullscreenExitOutput {
-		return this.settings.fullscreenExitOutput === "resume-hint" ? "resume-hint" : "transcript";
+	getFullscreenScrollbar(): "always" | "hidden" | "auto" {
+		return this.settings.terminal?.fullscreenScrollbar ?? "auto";
 	}
 
-	setFullscreenExitOutput(output: FullscreenExitOutput): void {
-		this.globalSettings.fullscreenExitOutput = output;
-		this.markModified("fullscreenExitOutput");
-		this.save();
-	}
-
-	getFullscreenScrollbar(): ScrollViewScrollbar {
-		const mode = this.settings.fullscreenScrollbar;
-		return mode === "always" || mode === "hidden" ? mode : "auto";
-	}
-
-	setFullscreenScrollbar(mode: ScrollViewScrollbar): void {
-		this.globalSettings.fullscreenScrollbar = mode;
-		this.markModified("fullscreenScrollbar");
-		this.save();
-	}
-
-	getFullscreenCopyOnSelect(): boolean {
-		return this.settings.fullscreenCopyOnSelect ?? true;
-	}
-
-	setFullscreenCopyOnSelect(enabled: boolean): void {
-		this.globalSettings.fullscreenCopyOnSelect = enabled;
-		this.markModified("fullscreenCopyOnSelect");
+	setFullscreenScrollbar(mode: "always" | "hidden" | "auto"): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.fullscreenScrollbar = mode;
+		this.markModified("terminal", "fullscreenScrollbar");
 		this.save();
 	}
 
@@ -1310,6 +1466,16 @@ export class SettingsManager {
 	setShowHardwareCursor(enabled: boolean): void {
 		this.globalSettings.showHardwareCursor = enabled;
 		this.markModified("showHardwareCursor");
+		this.save();
+	}
+
+	getTuiMode(): TuiMode {
+		return this.settings.tuiMode === "fullscreen" ? "fullscreen" : "regular";
+	}
+
+	setTuiMode(mode: TuiMode): void {
+		this.globalSettings.tuiMode = mode;
+		this.markModified("tuiMode");
 		this.save();
 	}
 

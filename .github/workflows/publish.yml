@@ -1,0 +1,109 @@
+name: Publish npm packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g., v0.83.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          # No `registry-url` here: setup-node's `registry-url` writes
+          # NODE_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }} into the step env,
+          # which makes npm CLI use the GitHub token (no publish rights
+          # to npm) instead of the OIDC token trusted publishing relies on.
+          # We install the npm CLI v11.5.1+ explicitly below.
+          cache: npm
+
+      # npm CLI v11.5.1+ is required for OIDC trusted publishing; the
+      # version of npm bundled with Node 22.x is too old (npm 10.x).
+      # See https://docs.npmjs.com/trusted-publishers
+      - name: Install npm 11 for trusted publishing
+        run: npm install -g npm@^11.5.1
+        shell: bash
+
+      # Install all workspace dependencies (including tsgo at root devDeps)
+      # at the repo root first; per-package npm ci inside subdirs would skip
+      # workspace devDeps and break the tsgo build.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Build all packages in dependency order (no internal deps → leaf → dependent).
+      # ai, tui, telemetry, protocol: no internal dependencies
+      # agent: depends on ai
+      # session-backends/sqlite-node (renamed from storage/sqlite-node in v0.84.2)
+      # coding-agent: depends on agent, ai, tui
+      # server: depends on coding-agent
+      - name: Build all packages
+        run: npm run build
+
+      # Per-package npm publish steps.
+      # Trusted publishing via OIDC: the workflow's `id-token: write` permission
+      # plus the `npm-publish` environment lets npm CLI auto-detect the OIDC
+      # token from the GitHub Actions environment. Do NOT set NODE_AUTH_TOKEN
+      # here — that would force the legacy token path and re-trigger 2FA.
+      - name: Publish @bramburn/pi-ai
+        run: |
+          # scripts/fork-publish-rename.mjs swaps the package name to
+          # @bramburn/pi-ai, runs the rest of the command line, then
+          # restores the original @earendil-works/pi-ai name. This way
+          # npm publish publishes under the trusted-publisher-protected
+          # name while the workspace name on disk stays untouched.
+          # The trailing '|| echo' makes the step idempotent: re-running
+          # a tag whose version already exists on npm fails fast at the
+          # npm CLI but the workflow continues to the other packages.
+          node scripts/fork-publish-rename.mjs packages/ai npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-tui
+        run: |
+          node scripts/fork-publish-rename.mjs packages/tui npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-telemetry
+        run: |
+          node scripts/fork-publish-rename.mjs packages/telemetry npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-protocol
+        run: |
+          node scripts/fork-publish-rename.mjs packages/protocol npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-client
+        run: |
+          node scripts/fork-publish-rename.mjs packages/client npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-agent-core
+        run: |
+          node scripts/fork-publish-rename.mjs packages/agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-session-backend-sqlite-node
+        run: |
+          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-coding-agent
+        run: |
+          node scripts/fork-publish-rename.mjs packages/coding-agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-server
+        run: |
+          node scripts/fork-publish-rename.mjs packages/server npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"

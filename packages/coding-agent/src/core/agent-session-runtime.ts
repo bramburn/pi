@@ -1,5 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Model } from "@earendil-works/pi-ai";
 import { resolvePath } from "../utils/paths.ts";
 import type { AgentSession } from "./agent-session.ts";
 import type { AgentSessionRuntimeDiagnostic, AgentSessionServices } from "./agent-session-services.ts";
@@ -38,6 +40,10 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
+	/** Initial model from session header (overrides global default). */
+	initialModel?: Model<any>;
+	/** Initial thinking level from session header. */
+	initialThinkingLevel?: ThinkingLevel;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -418,6 +424,10 @@ export async function createAgentSessionRuntime(
 		agentDir: string;
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
+		/** Initial model from session header (overrides global default). */
+		initialModel?: Model<any>;
+		/** Initial thinking level from session header. */
+		initialThinkingLevel?: ThinkingLevel;
 	},
 ): Promise<AgentSessionRuntime> {
 	assertSessionCwdExists(options.sessionManager, options.cwd);

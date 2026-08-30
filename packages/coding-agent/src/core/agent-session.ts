@@ -13,7 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type {
 	Agent,
@@ -49,23 +49,25 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
+import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
-	type CompactionPreparation,
 	type CompactionResult,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
+	DEFAULT_PRUNER_CONFIG,
 	estimateContextTokens,
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	pruneSession,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { DEFAULT_THINKING_LEVEL, THINKING_LEVEL_OPTIONS } from "./defaults.ts";
+import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -82,7 +84,6 @@ import {
 	type ReplacedSessionContext,
 	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
-	type SessionCompactFailedEvent,
 	type SessionStartEvent,
 	type ShutdownHandler,
 	type ToolDefinition,
@@ -101,9 +102,8 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
-import { exportSessionToJsonl } from "./session-export.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
-import { getLatestCompactionEntry } from "./session-manager.ts";
+import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -154,7 +154,13 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
+	| {
+			type: "compaction_start";
+			reason: "manual" | "threshold" | "overflow";
+			attempt?: number;
+			maxAttempts?: number;
+			willRetry?: boolean;
+	  }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
@@ -253,12 +259,6 @@ export interface PromptOptions {
 	preflightResult?: (success: boolean) => void;
 }
 
-/** Options for model/thinking mutations. */
-export interface ModelMutationOptions {
-	/** Persist the new value to global defaults. Defaults to session-only. */
-	persist?: boolean;
-}
-
 /** Result from cycleModel() */
 export interface ModelCycleResult {
 	model: Model<any>;
@@ -304,6 +304,9 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 // Constants
 // ============================================================================
 
+/** Standard thinking levels */
+const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -334,7 +337,18 @@ export class AgentSession {
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
-	private _overflowRecoveryAttempted = false;
+	private _overflowRecoveryAttempts = 0;
+
+	// DeepSeek Harness bundle state. The master toggle is the user's
+	// `deepseekHarness.enabled` setting; `_deepseekHarnessEnabled` is
+	// the in-memory mirror that the runtime reads on every turn.
+	private _deepseekHarnessEnabled: boolean = false;
+	private _refreshDeepseekHarnessPipeline(): void {
+		// No-op for Phase 0. Subsequent phases (1-4) register their
+		// pipeline functions here. The phase-by-phase work is owned
+		// by the implementation plans for items 2, 3, 5, 6, 7, 10, 11,
+		// 12, 15 in the decision matrix.
+	}
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -397,6 +411,11 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+
+		// Seed the in-memory mirror of the DeepSeek Harness toggle from
+		// the user's settings.json. The setter is the public surface;
+		// the constructor only reads.
+		this._deepseekHarnessEnabled = this.settingsManager.getDeepseekHarnessEnabled();
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -602,12 +621,6 @@ export class AgentSession {
 		});
 	}
 
-	private async _emitSessionCompactFailed(event: Omit<SessionCompactFailedEvent, "type">): Promise<void> {
-		if (this._extensionRunner.hasHandlers("session_compact_failed")) {
-			await this._extensionRunner.emit({ type: "session_compact_failed", ...event });
-		}
-	}
-
 	private _getIdleWaitPromise(): Promise<void> {
 		if (!this._idleWaitPromise) {
 			this._idleWaitPromise = new Promise((resolve) => {
@@ -645,7 +658,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
-			this._overflowRecoveryAttempted = false;
+			this._overflowRecoveryAttempts = 0;
 			const messageText = contentText(event.message.content, "");
 			if (messageText) {
 				// Check steering queue first
@@ -697,7 +710,7 @@ export class AgentSession {
 
 				const assistantMsg = event.message as AssistantMessage;
 				if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "length") {
-					this._overflowRecoveryAttempted = false;
+					this._overflowRecoveryAttempts = 0;
 				}
 
 				// Reset retry counter immediately on successful assistant response
@@ -711,15 +724,6 @@ export class AgentSession {
 					this._retryAttempt = 0;
 				}
 			}
-		}
-
-		// A turn ends after its assistant message and every tool result has been appended,
-		// so this is the first point in the run where a context-only custom message can be
-		// inserted without landing between a tool call and its result. Flushing after the
-		// extension and listener dispatch above also picks up messages that turn_end
-		// handlers queued.
-		if (event.type === "turn_end") {
-			this._flushPendingCustomMessages();
 		}
 	};
 
@@ -789,6 +793,13 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
+
+			// A turn ends after its assistant message and every tool result has been appended,
+			// so this is the first point in the run where a context-only custom message can be
+			// inserted without landing between a tool call and its result. Flushing after the
+			// extension and listener dispatch above also picks up messages that turn_end
+			// handlers queued.
+			this._flushPendingCustomMessages();
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
 				type: "message_start",
@@ -1095,6 +1106,16 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			// The DeepSeek Harness bundle (decision matrix item 7)
+			// renders the AGENTS.md chain inside a byte-budgeted
+			// `<system-reminder>` envelope. Without the bundle, the
+			// legacy inline `<project_context>` path is preserved.
+			budgetedInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined).budgetedInstructions
+				: false,
+			maxBytesForInstructions: this._deepseekHarnessEnabled
+				? this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined).maxBytesForInstructions
+				: undefined,
 		};
 		return buildSystemPrompt(this._baseSystemPromptOptions);
 	}
@@ -1118,6 +1139,8 @@ export class AgentSession {
 		}
 	}
 
+	private _prunerLastRunTurn: number = 0;
+
 	private async _handlePostAgentRun(): Promise<boolean> {
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
@@ -1137,6 +1160,24 @@ export class AgentSession {
 				finalError: msg.errorMessage,
 			});
 			this._retryAttempt = 0;
+		}
+
+		// Tool-result re-pruner (item 3 of the decision matrix). Runs
+		// every N turns when the DeepSeek Harness bundle is enabled.
+		// The pruner walks the agent's current message array and
+		// rewrites over-budget tool results in place. `read` is exempt
+		// (item 10) to break the read → truncate → read loop.
+		const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+		if (dh.enabled && dh.toolResultPruneEveryN > 0) {
+			this._prunerLastRunTurn += 1;
+			if (this._prunerLastRunTurn >= dh.toolResultPruneEveryN) {
+				this._prunerLastRunTurn = 0;
+				const before = this.agent.state.messages.length;
+				const pruned = pruneSession(this.agent.state.messages, DEFAULT_PRUNER_CONFIG);
+				if (pruned.length === before) {
+					this.agent.state.messages = pruned;
+				}
+			}
 		}
 
 		if (await this._checkCompaction(msg)) {
@@ -1470,9 +1511,8 @@ export class AgentSession {
 	/**
 	 * Send a custom message to the session. Creates a CustomMessageEntry.
 	 *
-	 * Handles four cases:
+	 * Handles three cases:
 	 * - Streaming: queues message, processed when loop pulls from queue
-	 * - Streaming + triggerTurn false: appended to state/session once the current turn ends
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn
 	 * - Not streaming + no trigger: appends to state/session, no turn
 	 *
@@ -1650,11 +1690,25 @@ export class AgentSession {
 
 	/**
 	 * Set model directly.
-	 * Validates that auth is configured and saves to the session transcript.
-	 * Persists to global defaults only when options.persist is true.
+	 * Validates that auth is configured, saves to session and (when `persist: true`)
+	 * updates the persisted default.
+	 *
+	 * `setModel` is session-only by default: it writes a `model_change` entry to the
+	 * session and updates the `lastUsedModel` tracking hint, but does NOT change the
+	 * user's persisted `defaultProvider` / `defaultModel`. Pass `{ persist: true }`
+	 * to also promote the model to the persisted default.
+	 *
+	 * When persisting and a scoped model list (runtime or persisted) already exists,
+	 * the new model is appended to both lists so cycling continues to include the
+	 * newly chosen model. With no existing scope, the persisted scope list is left
+	 * untouched (no list is created) — matching the "do not create a scoped model
+	 * list when all models are available" semantics.
+	 *
+	 * @param options.persist - Also update the default model in settings and extend
+	 *   the scoped model list (default: false)
 	 * @throws Error if no auth is configured for the model
 	 */
-	async setModel(model: Model<any>, options: ModelMutationOptions = {}): Promise<void> {
+	async setModel(model: Model<any>, options?: { persist?: boolean }): Promise<void> {
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1663,31 +1717,46 @@ export class AgentSession {
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(model);
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
-		if (options.persist) {
+		if (options?.persist === true) {
 			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
-			this._addPersistedDefaultToNonEmptyScope(model);
+
+			// When a scoped list already exists (runtime OR persisted), append the new
+			// model to both so cycling keeps it in the rotation. With no existing
+			// scope we leave the persisted list alone — it represents a user choice
+			// to expose every model, not an implicit permission to start one.
+			const hasRuntimeScope = this._scopedModels.length > 0;
+			const persistedEnabled = this.settingsManager.getEnabledModels();
+			const hasPersistedScope = persistedEnabled !== undefined;
+
+			if (hasRuntimeScope || hasPersistedScope) {
+				if (hasRuntimeScope && !this._scopedModels.some((sm) => modelsAreEqual(sm.model, model))) {
+					this._scopedModels.push({ model });
+				}
+				if (hasPersistedScope) {
+					const modelRef = `${model.provider}/${model.id}`;
+					if (!persistedEnabled.includes(modelRef)) {
+						this.settingsManager.setEnabledModels([...persistedEnabled, modelRef]);
+					}
+				}
+			}
+		}
+		// `setLastUsedModel` is logically independent of the global default
+		// write above: if a transient error (e.g. lockfile contention) makes
+		// the default write fail, we still want the "most recent selection"
+		// tracking to be updated. The tracking is best-effort — failures
+		// here are not worth surfacing because the user's intended model
+		// change has already taken effect on this session.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: model.provider, modelId: model.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
 		}
 
-		// Apply thinking level for the new model.
-		// Per-model thinking level overrides take priority over the global default.
-		// Model persistence does not implicitly rewrite the global thinking default.
-		this.setThinkingLevel(thinkingLevel);
+		// Re-clamp thinking level for new model's capabilities (never persist here;
+		// session-level thinking clamps are not the same as a user-requested default)
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(model, previousModel, "set");
-	}
-
-	private _addPersistedDefaultToNonEmptyScope(model: Model<any>): void {
-		if (this._scopedModels.length === 0) return;
-		if (this._scopedModels.some((scoped) => modelsAreEqual(scoped.model, model))) return;
-
-		this._scopedModels = [...this._scopedModels, { model }];
-
-		const enabledModels = this.settingsManager.getEnabledModels();
-		if (!enabledModels?.length) return;
-
-		const modelReference = `${model.provider}/${model.id}`;
-		if (enabledModels.some((pattern) => pattern.toLowerCase() === modelReference.toLowerCase())) return;
-		this.settingsManager.setEnabledModels([...enabledModels, modelReference]);
 	}
 
 	/**
@@ -1696,20 +1765,14 @@ export class AgentSession {
 	 * @param direction - "forward" (default) or "backward"
 	 * @returns The new model info, or undefined if only one model available
 	 */
-	async cycleModel(
-		direction: "forward" | "backward" = "forward",
-		options: ModelMutationOptions = {},
-	): Promise<ModelCycleResult | undefined> {
+	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
 		if (this._scopedModels.length > 0) {
-			return this._cycleScopedModel(direction, options);
+			return this._cycleScopedModel(direction);
 		}
-		return this._cycleAvailableModel(direction, options);
+		return this._cycleAvailableModel(direction);
 	}
 
-	private async _cycleScopedModel(
-		direction: "forward" | "backward",
-		options: ModelMutationOptions,
-	): Promise<ModelCycleResult | undefined> {
+	private async _cycleScopedModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
 		const availableIds = new Set(
 			this._modelRuntime.getAvailableSnapshot().map((model) => `${model.provider}\0${model.id}`),
 		);
@@ -1730,27 +1793,27 @@ export class AgentSession {
 		// Apply model
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
-		if (options.persist) {
-			this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
-			this._addPersistedDefaultToNonEmptyScope(next.model);
+		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: next.model.provider, modelId: next.model.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
 		}
 
-		// Apply thinking level for the new model.
-		// - Explicit scoped model thinking level overrides defaults
-		// - Per-model thinking level overrides take priority over the global default
+		// Apply thinking level.
+		// - Explicit scoped model thinking level overrides current session level
+		// - Undefined scoped model thinking level inherits the current session preference
 		// setThinkingLevel clamps to model capabilities.
-		// Model persistence does not implicitly rewrite the global thinking default.
-		this.setThinkingLevel(thinkingLevel);
+		// Cycling must NOT touch persisted state — defaults only move when the user
+		// explicitly opts in via setModel({ persist: true }).
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
 
 		return { model: next.model, thinkingLevel: this.thinkingLevel, isScoped: true };
 	}
 
-	private async _cycleAvailableModel(
-		direction: "forward" | "backward",
-		options: ModelMutationOptions,
-	): Promise<ModelCycleResult | undefined> {
+	private async _cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
 		const availableModels = this._modelRuntime.getAvailableSnapshot();
 		if (availableModels.length <= 1) return undefined;
 
@@ -1765,14 +1828,16 @@ export class AgentSession {
 		const thinkingLevel = this._getThinkingLevelForModelSwitch(nextModel);
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
-		if (options.persist) {
-			this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
-			this._addPersistedDefaultToNonEmptyScope(nextModel);
+		// `setLastUsedModel` is best-effort — see `setModel` for rationale.
+		try {
+			this.settingsManager.setLastUsedModel({ provider: nextModel.provider, modelId: nextModel.id });
+		} catch {
+			// best-effort: ignore tracking-write failures
 		}
 
-		// Apply thinking level for the new model.
-		// Model persistence does not implicitly rewrite the global thinking default.
-		this.setThinkingLevel(thinkingLevel);
+		// Re-clamp thinking level for new model's capabilities
+		// Cycling must NOT touch persisted state — see _cycleScopedModel.
+		this.setThinkingLevel(thinkingLevel, { persist: false });
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
@@ -1786,10 +1851,20 @@ export class AgentSession {
 	/**
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
-	 * Saves the clamped level to the session transcript only if the level actually changes.
-	 * Persists the requested level to global defaults only when options.persist is true.
+	 * Saves to session and (when `persist: true`) updates the persisted default.
+	 *
+	 * Session-only by default: a thinking level change is reflected in the agent
+	 * state and recorded as a `thinking_level_change` session entry, but does NOT
+	 * update `defaultThinkingLevel` in settings. Pass `{ persist: true }` to also
+	 * promote the level to the persisted default.
+	 *
+	 * When persisting and the current model clamps the requested level to a
+	 * different effective level, the requested level is what gets persisted (so
+	 * switching back to a model that supports the original level restores it).
+	 *
+	 * @param options.persist - Also update the default thinking level in settings (default: false)
 	 */
-	setThinkingLevel(level: ThinkingLevel, options: ModelMutationOptions = {}): void {
+	setThinkingLevel(level: ThinkingLevel, options?: { persist?: boolean }): void {
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
@@ -1799,12 +1874,13 @@ export class AgentSession {
 
 		this.agent.state.thinkingLevel = effectiveLevel;
 
-		if (options.persist) {
-			this.settingsManager.setDefaultThinkingLevel(level);
-		}
-
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
+			if (options?.persist === true && (this.supportsThinking() || level !== "off")) {
+				// Persist the user-requested level, not the clamped effective level,
+				// so the original preference survives model switches that re-clamp it.
+				this.settingsManager.setDefaultThinkingLevel(level);
+			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
 			void this._extensionRunner.emit({
 				type: "thinking_level_select",
@@ -1818,7 +1894,7 @@ export class AgentSession {
 	 * Cycle to next thinking level.
 	 * @returns New level, or undefined if model doesn't support thinking
 	 */
-	cycleThinkingLevel(options: ModelMutationOptions = {}): ThinkingLevel | undefined {
+	cycleThinkingLevel(): ThinkingLevel | undefined {
 		if (!this.supportsThinking()) return undefined;
 
 		const levels = this.getAvailableThinkingLevels();
@@ -1826,7 +1902,7 @@ export class AgentSession {
 		const nextIndex = (currentIndex + 1) % levels.length;
 		const nextLevel = levels[nextIndex];
 
-		this.setThinkingLevel(nextLevel, options);
+		this.setThinkingLevel(nextLevel);
 		return nextLevel;
 	}
 
@@ -1835,7 +1911,7 @@ export class AgentSession {
 	 * The provider will clamp to what the specific model supports internally.
 	 */
 	getAvailableThinkingLevels(): ThinkingLevel[] {
-		if (!this.model) return [...THINKING_LEVEL_OPTIONS];
+		if (!this.model) return THINKING_LEVELS;
 		return getSupportedThinkingLevels(this.model) as ThinkingLevel[];
 	}
 
@@ -1846,18 +1922,39 @@ export class AgentSession {
 		return !!this.model?.reasoning;
 	}
 
-	private _getThinkingLevelForModelSwitch(targetModel?: Model<any>, explicitLevel?: ThinkingLevel): ThinkingLevel {
+	/**
+	 * Decide which thinking level to apply on a model switch.
+	 *
+	 * Resolution order:
+	 * 1. `explicitLevel` (caller-provided, e.g. scoped-model entry's thinking level).
+	 * 2. Per-model override from settings for the model being switched TO.
+	 * 3. Global `defaultThinkingLevel` from settings.
+	 * 4. Current session level, falling back to {@link DEFAULT_THINKING_LEVEL} when
+	 *    the current model doesn't support thinking.
+	 *
+	 * Per-model overrides take priority over both the global default and the
+	 * current session level — the user wants a specific level on a specific
+	 * model, so cycling to it should restore that preference even if the prior
+	 * session had a different level.
+	 */
+	private _getThinkingLevelForModelSwitch(newModel?: Model<any>, explicitLevel?: ThinkingLevel): ThinkingLevel {
 		if (explicitLevel !== undefined) {
 			return explicitLevel;
 		}
-		// Per-model default takes priority when switching to a model that has one
-		if (targetModel) {
-			const perModel = this.settingsManager.getModelThinkingLevel(targetModel.provider, targetModel.id);
-			if (perModel !== undefined) {
+		if (newModel) {
+			const perModel = this.settingsManager.getModelThinkingLevel(newModel.provider, newModel.id);
+			if (perModel) {
 				return perModel;
 			}
+			const globalDefault = this.settingsManager.getDefaultThinkingLevel();
+			if (globalDefault) {
+				return globalDefault;
+			}
 		}
-		return this.settingsManager.getDefaultThinkingLevel() ?? this.thinkingLevel ?? DEFAULT_THINKING_LEVEL;
+		if (!this.supportsThinking()) {
+			return this.settingsManager.getDefaultThinkingLevel() ?? DEFAULT_THINKING_LEVEL;
+		}
+		return this.thinkingLevel;
 	}
 
 	private _clampThinkingLevel(level: ThinkingLevel, _availableLevels: ThinkingLevel[]): ThinkingLevel {
@@ -1895,53 +1992,15 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
-	/** Generate Pi's built-in compaction summary for manual and automatic compaction. */
-	private async _runDefaultCompaction(
-		preparation: CompactionPreparation,
-		requestModel: Model<any>,
-		apiKey: string | undefined,
-		headers: Record<string, string> | undefined,
-		customInstructions: string | undefined,
-		signal: AbortSignal,
-		env: Record<string, string> | undefined,
-		reason: "manual" | "threshold" | "overflow",
-	): Promise<CompactionResult> {
-		return compact(
-			preparation,
-			requestModel,
-			apiKey,
-			headers,
-			customInstructions,
-			signal,
-			this.thinkingLevel,
-			this.agent.streamFunction,
-			env,
-			this.settingsManager.getRetrySettings(),
-			this._summarizationRetryCallbacks({ source: "compaction", reason }),
-			undefined, // sessionId
-		);
-	}
-
 	/**
 	 * Manually compact the session context.
-	 *
-	 * This is the manual entry point used by `/compact`, RPC, and extensions. It is
-	 * separate from automatic threshold/overflow compaction, which enters through
-	 * `_checkCompaction()` and `_runAutoCompaction()`. After preparation and the
-	 * `session_before_compact` hook, both paths call the lower-level `compact()`
-	 * function imported from `./compaction/index.ts`, unless the hook cancels or
-	 * supplies a custom result.
-	 *
-	 * Aborts the current agent operation first. Manual compaction never retries or
-	 * continues the interrupted agent turn.
-	 *
+	 * Aborts current agent operation first.
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
 		await this.abort();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
-		let fromExtension = false;
 
 		try {
 			if (!this.model) {
@@ -1952,6 +2011,19 @@ export class AgentSession {
 
 			const pathEntries = this.sessionManager.getBranch();
 			const settings = this.settingsManager.getCompactionSettings();
+
+			// When the DeepSeek Harness bundle is enabled, layer the
+			// ratio-based policy on top of the legacy absolute-token
+			// settings. The harness module's `shouldCompact` and
+			// `findCutPoint` use whichever values are present.
+			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+			if (dh.enabled) {
+				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+				}
+			}
 
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
@@ -1964,6 +2036,7 @@ export class AgentSession {
 			}
 
 			let extensionCompaction: CompactionResult | undefined;
+			let fromExtension = false;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 				const result = (await this._extensionRunner.emit({
@@ -2000,16 +2073,19 @@ export class AgentSession {
 				usage = extensionCompaction.usage;
 				details = extensionCompaction.details;
 			} else {
-				// Shared default summary generator, also used by automatic compaction.
-				const result = await this._runDefaultCompaction(
+				// Generate compaction result
+				const result = await compact(
 					preparation,
 					requestModel,
 					apiKey,
 					headers,
 					customInstructions,
 					this._compactionAbortController.signal,
+					this.thinkingLevel,
+					this.agent.streamFunction,
 					env,
-					"manual",
+					this.settingsManager.getRetrySettings(),
+					this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
 				);
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
@@ -2064,7 +2140,6 @@ export class AgentSession {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
-			const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
 			this._compactionAbortController = undefined;
 			this._emit({
 				type: "compaction_end",
@@ -2072,14 +2147,7 @@ export class AgentSession {
 				result: undefined,
 				aborted,
 				willRetry: false,
-				errorMessage,
-			});
-			await this._emitSessionCompactFailed({
-				reason: "manual",
-				errorMessage,
-				aborted,
-				willRetry: false,
-				fromExtension,
+				errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
 			});
 			throw error;
 		} finally {
@@ -2103,25 +2171,16 @@ export class AgentSession {
 	}
 
 	/**
-	 * Dispatch automatic compaction after `agent_end` or before prompt submission.
-	 * Manual compaction does not call this method; it enters through `compact()`.
+	 * Check if compaction is needed and run it.
+	 * Called after agent_end and before prompt submission.
 	 *
-	 * Automatic cases:
-	 * 1. Overflow with retry: a context-overflow error or recoverable length stop;
-	 *    remove the failed assistant message, compact, and retry the turn once.
-	 * 2. Overflow without retry: a successful response exceeded the configured
-	 *    context window; compact but preserve the completed response.
-	 * 3. Threshold without retry: valid or estimated context usage crossed the
-	 *    configured threshold; compact without retrying the completed response.
-	 *
-	 * Each case calls `_runAutoCompaction()`. After preparation and the
-	 * `session_before_compact` hook, that method calls the lower-level `compact()`
-	 * function imported from `./compaction/index.ts`, unless the hook cancels or
-	 * supplies a custom result.
+	 * Two cases:
+	 * 1. Recoverable failure: LLM returned context overflow or stopped below its desired output limit;
+	 *    remove the assistant message, compact, and auto-retry once
+	 * 2. Threshold: Context over threshold, compact, NO auto-retry (user continues manually)
 	 *
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
-	 * @returns Whether the post-run loop should call `agent.continue()` for overflow recovery or queued messages
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
@@ -2149,24 +2208,31 @@ export class AgentSession {
 			return false;
 		}
 
-		// Automatic cases 1 and 2: context overflow.
+		// Case 1: Recoverable failure. Explicit/silent context overflow still uses context metadata.
 		// A length stop is recoverable when output ended below the model's original desired limit,
 		// independent of the configured context size or any context-clamped provider request limit.
-		const contextOverflow = sameModel && isContextOverflow(assistantMessage, contextWindow);
+		// A successful response over the configured window should compact but must not retry: the
+		// assistant answer already completed and agent.continue() cannot continue from an assistant.
 		const recoverableLength = sameModel && isRecoverableLength(assistantMessage, this.model?.maxTokens ?? 0);
-		if (contextOverflow || recoverableLength) {
+		if (sameModel && (isContextOverflow(assistantMessage, contextWindow) || recoverableLength)) {
 			const willRetry = assistantMessage.stopReason !== "stop";
 
-			// Case 2: the response completed successfully. Compact, but do not retry because
-			// agent.continue() cannot continue from a completed assistant response.
 			if (!willRetry) {
 				return await this._runAutoCompaction("overflow", false);
 			}
 
-			if (this._overflowRecoveryAttempted) {
-				const errorMessage = contextOverflow
-					? "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model."
-					: "Truncated response recovery failed after one compact-and-retry attempt.";
+			// Multi-attempt recovery loop. When the DeepSeek Harness
+			// bundle is enabled, the user-configured
+			// `maxOverflowRetries` drives the budget; otherwise the
+			// legacy single-attempt behaviour is preserved.
+			const settings = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+			const maxAttempts = settings.enabled ? Math.max(1, settings.maxOverflowRetries) : 1;
+			if (this._overflowRecoveryAttempts >= maxAttempts) {
+				const overflow = isContextOverflow(assistantMessage, contextWindow);
+				const errorMessage =
+					!overflow && recoverableLength
+						? `Truncated response recovery failed after one compact-and-retry attempt.`
+						: `Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.`;
 				this._emit({
 					type: "compaction_end",
 					reason: "overflow",
@@ -2175,19 +2241,13 @@ export class AgentSession {
 					willRetry: false,
 					errorMessage,
 				});
-				await this._emitSessionCompactFailed({
-					reason: "overflow",
-					errorMessage,
-					aborted: false,
-					willRetry: false,
-					fromExtension: false,
-				});
 				return false;
 			}
 
-			// Case 1: remove the failed or truncated message from agent state, compact, and
-			// retry once. The message remains in session history but is excluded from retry context.
-			this._overflowRecoveryAttempted = true;
+			this._overflowRecoveryAttempts += 1;
+			// _runAutoCompaction emits its own compaction_start event with attempt/maxAttempts.
+			// Remove the failed or truncated message from agent state. It remains in session history,
+			// but must not be included in the compact-and-retry context.
 			const messages = this.agent.state.messages;
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
 				this.agent.state.messages = messages.slice(0, -1);
@@ -2195,7 +2255,7 @@ export class AgentSession {
 			return await this._runAutoCompaction("overflow", willRetry);
 		}
 
-		// Case 3: threshold compaction without retry.
+		// Case 2: Threshold - context is getting large
 		// For error messages or all-zero usage messages, estimate from the last valid response.
 		// This ensures sessions that hit persistent API errors (e.g. 529) or malformed zero-usage
 		// responses can still compact and do not reset context accounting.
@@ -2204,9 +2264,12 @@ export class AgentSession {
 		if (assistantMessage.stopReason === "error" || directContextTokens === 0) {
 			const messages = this.agent.state.messages;
 			const estimate = estimateContextTokens(messages);
-			// Without provider usage, estimate.tokens is the pure message-size estimate.
-			// Only usage-backed estimates need the stale pre-compaction check.
-			if (estimate.lastUsageIndex !== null) {
+			if (estimate.lastUsageIndex === null) {
+				// No usage data at all — fall back to the pure chars/4 estimate.
+				// The estimate is deterministic and grows monotonically with message count,
+				// so it enables threshold compaction for zero-usage providers.
+				contextTokens = estimate.tokens;
+			} else {
 				// Verify the usage source is post-compaction. Kept pre-compaction messages
 				// have stale usage reflecting the old (larger) context and would falsely
 				// trigger compaction right after one just finished.
@@ -2218,8 +2281,8 @@ export class AgentSession {
 				) {
 					return false;
 				}
+				contextTokens = estimate.tokens;
 			}
-			contextTokens = estimate.tokens;
 		} else {
 			contextTokens = directContextTokens;
 		}
@@ -2230,14 +2293,7 @@ export class AgentSession {
 	}
 
 	/**
-	 * Execute threshold or overflow compaction. Manual compaction uses
-	 * `AgentSession.compact()` instead. Both paths call the lower-level `compact()`
-	 * function imported from `./compaction/index.ts` after preparation and extension
-	 * interception.
-	 *
-	 * @param reason Automatic trigger selected by `_checkCompaction()`
-	 * @param willRetry Whether to continue the interrupted turn after overflow compaction
-	 * @returns Whether the post-run loop should call `agent.continue()`
+	 * Internal: Run auto-compaction with events.
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
 		const settings = this.settingsManager.getCompactionSettings();
@@ -2283,12 +2339,6 @@ export class AgentSession {
 						aborted: true,
 						willRetry: false,
 					});
-					await this._emitSessionCompactFailed({
-						reason,
-						aborted: true,
-						willRetry: false,
-						fromExtension: false,
-					});
 					return false;
 				}
 
@@ -2312,16 +2362,25 @@ export class AgentSession {
 				usage = extensionCompaction.usage;
 				details = extensionCompaction.details;
 			} else {
-				// Shared default summary generator, also used by manual compaction.
-				const compactResult = await this._runDefaultCompaction(
+				// Generate compaction result. Replay-prefix summarisation
+				// (decision matrix item 12) sends the live conversation
+				// as the request prefix when the DeepSeek Harness bundle
+				// is enabled, reusing the provider's prompt cache for
+				// the conversation bytes.
+				const dhForReplay = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+				const compactResult = await compact(
 					preparation,
 					requestModel,
 					apiKey,
 					headers,
 					undefined,
 					this._autoCompactionAbortController.signal,
+					this.thinkingLevel,
+					this.agent.streamFunction,
 					env,
-					reason,
+					this.settingsManager.getRetrySettings(),
+					this._summarizationRetryCallbacks({ source: "compaction", reason }),
+					dhForReplay.enabled && dhForReplay.replayPrefixSummarisation,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2337,12 +2396,6 @@ export class AgentSession {
 					result: undefined,
 					aborted: true,
 					willRetry: false,
-				});
-				await this._emitSessionCompactFailed({
-					reason,
-					aborted: true,
-					willRetry: false,
-					fromExtension,
 				});
 				return false;
 			}
@@ -2397,7 +2450,7 @@ export class AgentSession {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
 			if (started) {
-				const formattedErrorMessage =
+				const fullErrorMessage =
 					reason === "overflow"
 						? `Context overflow recovery failed: ${errorMessage}`
 						: `Auto-compaction failed: ${errorMessage}`;
@@ -2407,15 +2460,18 @@ export class AgentSession {
 					result: undefined,
 					aborted: false,
 					willRetry: false,
-					errorMessage: formattedErrorMessage,
+					errorMessage: fullErrorMessage,
 				});
-				await this._emitSessionCompactFailed({
-					reason,
-					errorMessage: formattedErrorMessage,
-					aborted: false,
-					willRetry: false,
-					fromExtension,
-				});
+				if (this._extensionRunner) {
+					await this._extensionRunner.emit({
+						type: "session_compact_failed",
+						reason,
+						errorMessage: fullErrorMessage,
+						aborted: false,
+						willRetry: false,
+						fromExtension,
+					});
+				}
 			}
 			return false;
 		} finally {
@@ -2433,6 +2489,21 @@ export class AgentSession {
 	/** Whether auto-compaction is enabled */
 	get autoCompactionEnabled(): boolean {
 		return this.settingsManager.getCompactionEnabled();
+	}
+
+	/**
+	 * Toggle the DeepSeek Harness context pipeline bundle. The next
+	 * turn reads the new value; the in-flight turn is unaffected.
+	 */
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		this._deepseekHarnessEnabled = enabled;
+		this.agent.setDeepseekHarnessEnabled(enabled);
+		this._refreshDeepseekHarnessPipeline();
+	}
+
+	/** Whether the DeepSeek Harness context pipeline is enabled */
+	get deepseekHarnessEnabled(): boolean {
+		return this._deepseekHarnessEnabled;
 	}
 
 	async bindExtensions(bindings: ExtensionBindings): Promise<void> {
@@ -2642,6 +2713,7 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				isDeepseekHarnessEnabled: () => this._deepseekHarnessEnabled,
 				getSystemPromptOptions: () => this._baseSystemPromptOptions,
 			},
 			{
@@ -3450,7 +3522,36 @@ export class AgentSession {
 	 * @returns The resolved output file path.
 	 */
 	exportToJsonl(outputPath?: string): string {
-		return exportSessionToJsonl(this.sessionManager, outputPath);
+		const filePath = resolvePath(
+			outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`,
+			process.cwd(),
+		);
+		const dir = dirname(filePath);
+		if (!existsSync(dir)) {
+			mkdirSync(dir, { recursive: true });
+		}
+
+		const header: SessionHeader = {
+			type: "session",
+			version: CURRENT_SESSION_VERSION,
+			id: this.sessionManager.getSessionId(),
+			timestamp: new Date().toISOString(),
+			cwd: this.sessionManager.getCwd(),
+		};
+
+		const branchEntries = this.sessionManager.getBranch();
+		const lines = [JSON.stringify(header)];
+
+		// Re-chain parentIds to form a linear sequence
+		let prevId: string | null = null;
+		for (const entry of branchEntries) {
+			const linear = { ...entry, parentId: prevId };
+			lines.push(JSON.stringify(linear));
+			prevId = entry.id;
+		}
+
+		writeFileSync(filePath, `${lines.join("\n")}\n`);
+		return filePath;
 	}
 
 	// =========================================================================

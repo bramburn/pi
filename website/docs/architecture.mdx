@@ -1,0 +1,30 @@
+---
+id: architecture
+title: Architecture
+sidebar_label: Overview
+---
+
+# Architecture
+
+This section documents the internal architecture of the pi monorepo.
+
+## Contents
+
+- [Package Overview](./architecture/packages) — the five core packages and how they interact
+- [Agent Event Loop](./architecture/event-loop) — how a single turn flows through the agent runtime
+
+## High-level picture
+
+```
+coding-agent (CLI + TUI)
+  └── agent (state machine, tool execution, message loop)
+        └── ai (multi-provider LLM API)
+  └── tui (terminal UI)
+  └── telemetry (event schemas)
+```
+
+The agent package is the core. It receives messages, calls the LLM, executes tools, and emits events. It knows nothing about the terminal. The coding-agent package wires it to the TUI.
+
+The `ai` package is intentionally isolated — any package that needs an LLM call goes through it, never directly to a provider SDK.
+
+For package-level detail, see [Package Overview](./architecture/packages).

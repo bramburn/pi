@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { getModel, streamSimple } from "../src/compat.ts";
+import { getModel, getModels, streamSimple } from "../src/compat.ts";
 import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 import type { Context, Model, Tool } from "../src/types.ts";
 
@@ -35,6 +35,18 @@ describe("Fireworks models", () => {
 			cacheRead: 0.16,
 			cacheWrite: 0,
 		});
+	});
+
+	it("does not register a deprecated 'turbo' router model", () => {
+		// The original "Fire Pass turbo" router was retired from the
+		// built-in catalog when Fireworks consolidated routing around
+		// glm-5p2-fast / kimi-k3-fast. Verify it stays retired so we
+		// notice if the deprecated ID returns unexpectedly.
+		const model = getModels("fireworks").find(
+			(candidate) => candidate.id.startsWith("accounts/fireworks/routers/") && candidate.id.endsWith("-turbo"),
+		);
+
+		expect(model).toBeUndefined();
 	});
 
 	it("aligns GLM 5.2 Fast with GLM 5.2's OpenAI-compatible config", () => {

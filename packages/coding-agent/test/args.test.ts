@@ -363,31 +363,6 @@ describe("parseArgs", () => {
 		});
 	});
 
-	describe("--tui-mode flag", () => {
-		test.each(["regular", "fullscreen"] as const)("parses %s mode", (mode) => {
-			const result = parseArgs(["--tui-mode", mode]);
-			expect(result.tuiMode).toBe(mode);
-		});
-
-		test("rejects invalid modes", () => {
-			const result = parseArgs(["--tui-mode", "other"]);
-			expect(result.diagnostics).toEqual([
-				{ type: "error", message: 'Invalid TUI mode "other". Valid values: regular, fullscreen' },
-			]);
-		});
-
-		test("requires a mode", () => {
-			const result = parseArgs(["--tui-mode"]);
-			expect(result.diagnostics).toEqual([{ type: "error", message: "--tui-mode requires regular or fullscreen" }]);
-		});
-
-		test("does not recognize the old --ui-mode flag", () => {
-			const result = parseArgs(["--ui-mode", "fullscreen"]);
-			expect(result.tuiMode).toBeUndefined();
-			expect(result.unknownFlags.get("ui-mode")).toBe("fullscreen");
-		});
-	});
-
 	describe("tool flags", () => {
 		test("parses --no-tools flag", () => {
 			const result = parseArgs(["--no-tools"]);
@@ -495,6 +470,46 @@ describe("parseArgs", () => {
 			expect(result.thinking).toBe("high");
 			expect(result.fileArgs).toEqual(["prompt.md"]);
 			expect(result.messages).toEqual(["Do the task"]);
+		});
+	});
+
+	describe("--cwd flag", () => {
+		test("parses --cwd with absolute path", () => {
+			const result = parseArgs(["--cwd", "/tmp/project"]);
+			expect(result.cwd).toBe("/tmp/project");
+		});
+
+		test("parses --cwd with relative path", () => {
+			const result = parseArgs(["--cwd", "subdir/inner"]);
+			expect(result.cwd).toBe("subdir/inner");
+		});
+
+		test("--cwd value is not consumed as a positional message", () => {
+			const result = parseArgs(["--cwd", "/tmp/project", "hello"]);
+			expect(result.cwd).toBe("/tmp/project");
+			expect(result.messages).toEqual(["hello"]);
+		});
+	});
+
+	describe("--no-deepseek-harness flag", () => {
+		test("parses --deepseek-harness as true", () => {
+			const result = parseArgs(["--deepseek-harness"]);
+			expect(result.deepseekHarness).toBe(true);
+		});
+
+		test("parses --no-deepseek-harness as false", () => {
+			const result = parseArgs(["--no-deepseek-harness"]);
+			expect(result.deepseekHarness).toBe(false);
+		});
+
+		test("unset when neither flag is passed", () => {
+			const result = parseArgs(["--print"]);
+			expect(result.deepseekHarness).toBeUndefined();
+		});
+
+		test("--no-deepseek-harness overrides --deepseek-harness when it appears later", () => {
+			const result = parseArgs(["--deepseek-harness", "--no-deepseek-harness"]);
+			expect(result.deepseekHarness).toBe(false);
 		});
 	});
 });

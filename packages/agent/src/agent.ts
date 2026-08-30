@@ -100,6 +100,14 @@ export interface AgentOptions {
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 	streamFn: StreamFn;
+	/**
+	 * Whether the DeepSeek Harness context pipeline is enabled.
+	 * When true, the agent loop lowers the safety margin for
+	 * `clampMaxTokensToContext` from 4096 to 1024. The session
+	 * calls `agent.setDeepseekHarnessEnabled(enabled)` when the
+	 * user toggles the setting.
+	 */
+	deepseekHarnessEnabled?: boolean;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
@@ -172,6 +180,13 @@ type ActiveRun = {
  */
 export class Agent {
 	private _state: MutableAgentState;
+	/**
+	 * Whether the DeepSeek Harness context pipeline is enabled.
+	 * When true, the agent loop passes a 1024-token safety margin to
+	 * `clampMaxTokensToContext` instead of the default 4096. The
+	 * session's `setDeepseekHarnessEnabled` updates this mirror.
+	 */
+	private _deepseekHarnessEnabled: boolean = false;
 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
 	private readonly steeringQueue: PendingMessageQueue;
 	private readonly followUpQueue: PendingMessageQueue;
@@ -235,6 +250,17 @@ export class Agent {
 		this.transport = runtimeOptions.transport ?? "auto";
 		this.maxRetryDelayMs = runtimeOptions.maxRetryDelayMs;
 		this.toolExecution = runtimeOptions.toolExecution ?? "parallel";
+		this._deepseekHarnessEnabled = runtimeOptions.deepseekHarnessEnabled ?? false;
+	}
+
+	/** Toggle the DeepSeek Harness context pipeline. The next turn reads the new value. */
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		this._deepseekHarnessEnabled = enabled;
+	}
+
+	/** Whether the DeepSeek Harness context pipeline is enabled. */
+	get deepseekHarnessEnabled(): boolean {
+		return this._deepseekHarnessEnabled;
 	}
 
 	/**
@@ -448,6 +474,11 @@ export class Agent {
 		return {
 			model: this._state.model,
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
+			// The DeepSeek Harness bundle lowers the safety margin from
+			// the default 4096 to 1024 (backed by the multi-attempt
+			// recovery loop). When the bundle is off we leave the
+			// safety margin undefined and the provider defaults apply.
+			safetyMargin: this.deepseekHarnessEnabled ? 1024 : 4096,
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
 			onResponse: this.onResponse,

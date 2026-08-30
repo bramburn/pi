@@ -66,6 +66,31 @@ function probeTmuxHyperlinks(): boolean {
 	}
 }
 
+function parseBooleanCapabilityOverride(value: string | undefined): boolean | undefined {
+	return value === "1" ? true : value === "0" ? false : undefined;
+}
+
+export function detectCapabilities(tmuxForwardsHyperlink: () => boolean = probeTmuxHyperlinks): TerminalCapabilities {
+	const hyperlinks = parseBooleanCapabilityOverride(process.env.PI_HYPERLINKS);
+	const detected = detectCapabilitiesFromEnvironment(
+		hyperlinks === undefined ? tmuxForwardsHyperlink : () => hyperlinks,
+	);
+	const imageProtocol = process.env.PI_IMAGE_PROTOCOL?.toLowerCase();
+	const images =
+		imageProtocol === "kitty" || imageProtocol === "iterm2"
+			? imageProtocol
+			: imageProtocol === "none" || imageProtocol === "0"
+				? null
+				: undefined;
+	const trueColor = parseBooleanCapabilityOverride(process.env.PI_TRUE_COLOR);
+	return {
+		...detected,
+		...(images !== undefined ? { images } : {}),
+		...(trueColor !== undefined ? { trueColor } : {}),
+		...(hyperlinks !== undefined ? { hyperlinks } : {}),
+	};
+}
+
 function detectCapabilitiesFromEnvironment(tmuxForwardsHyperlink: () => boolean): TerminalCapabilities {
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
 	const terminalEmulator = process.env.TERMINAL_EMULATOR?.toLowerCase() || "";
@@ -136,31 +161,6 @@ function detectCapabilitiesFromEnvironment(tmuxForwardsHyperlink: () => boolean)
 	return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
 }
 
-function parseBooleanCapabilityOverride(value: string | undefined): boolean | undefined {
-	return value === "1" ? true : value === "0" ? false : undefined;
-}
-
-export function detectCapabilities(tmuxForwardsHyperlink: () => boolean = probeTmuxHyperlinks): TerminalCapabilities {
-	const hyperlinks = parseBooleanCapabilityOverride(process.env.PI_HYPERLINKS);
-	const detected = detectCapabilitiesFromEnvironment(
-		hyperlinks === undefined ? tmuxForwardsHyperlink : () => hyperlinks,
-	);
-	const imageProtocol = process.env.PI_IMAGE_PROTOCOL?.toLowerCase();
-	const images =
-		imageProtocol === "kitty" || imageProtocol === "iterm2"
-			? imageProtocol
-			: imageProtocol === "none" || imageProtocol === "0"
-				? null
-				: undefined;
-	const trueColor = parseBooleanCapabilityOverride(process.env.PI_TRUE_COLOR);
-	return {
-		...detected,
-		...(images !== undefined ? { images } : {}),
-		...(trueColor !== undefined ? { trueColor } : {}),
-		...(hyperlinks !== undefined ? { hyperlinks } : {}),
-	};
-}
-
 export function getCapabilities(): TerminalCapabilities {
 	if (!cachedCapabilities) {
 		const hyperlinks = capabilityOverrides.hyperlinks;
@@ -176,6 +176,11 @@ export function resetCapabilitiesCache(): void {
 	cachedCapabilities = null;
 }
 
+/** Override the cached capabilities. Useful in tests to exercise both code paths. */
+export function setCapabilities(caps: TerminalCapabilities): void {
+	cachedCapabilities = caps;
+}
+
 /** Override selected auto-detected capabilities. */
 export function setCapabilityOverrides(overrides: Partial<TerminalCapabilities>): void {
 	if (
@@ -187,11 +192,6 @@ export function setCapabilityOverrides(overrides: Partial<TerminalCapabilities>)
 	}
 	capabilityOverrides = { ...overrides };
 	cachedCapabilities = null;
-}
-
-/** Override the cached capabilities. Useful in tests to exercise both code paths. */
-export function setCapabilities(caps: TerminalCapabilities): void {
-	cachedCapabilities = caps;
 }
 
 const KITTY_PREFIX = "\x1b_G";
@@ -674,7 +674,11 @@ export function hyperlink(text: string, url: string): string {
 function shortenImagePath(filename: string): string {
 	const home = homedir();
 	if (home && (filename === home || filename.startsWith(`${home}/`) || filename.startsWith(`${home}\\`))) {
-		return `~${filename.slice(home.length)}`;
+		// On Windows, `path.join(homedir(), ...)` produces backslash separators,
+		// but terminal-image tests expect POSIX-style ~/... output regardless of
+		// platform. Normalize the suffix after the home prefix so the output is
+		// stable across platforms.
+		return `~${filename.slice(home.length).replaceAll("\\", "/")}`;
 	}
 	return filename;
 }

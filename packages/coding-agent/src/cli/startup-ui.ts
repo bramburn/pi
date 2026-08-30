@@ -1,6 +1,7 @@
 import {
+	getCapabilities,
 	ProcessTerminal,
-	setCapabilityOverrides,
+	setCapabilities,
 	setKeybindings,
 	type TUI,
 	TuiMainScreen,
@@ -81,7 +82,12 @@ async function loadStartupThemes(settingsManager: SettingsManager): Promise<Them
 }
 
 export async function createStartupTui(settingsManager: SettingsManager): Promise<TUI> {
-	setCapabilityOverrides(settingsManager.getTerminalCapabilityOverrides());
+	// Apply user-configured terminal capability overrides (images, trueColor,
+	// hyperlinks). We use `setCapabilities` (full cache replace) rather than
+	// `setCapabilityOverrides` (added to the workspace later) so the bundle
+	// resolves cleanly against published 0.84.x builds where the partial
+	// override helper is not yet available.
+	setCapabilities({ ...getCapabilities(), ...settingsManager.getTerminalCapabilityOverrides() });
 	setRegisteredThemes(await loadStartupThemes(settingsManager));
 	const terminalTheme = detectTerminalBackgroundFromEnv().theme;
 	initTheme(resolveThemeSetting(settingsManager.getThemeSetting(), terminalTheme) ?? terminalTheme);

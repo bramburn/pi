@@ -1,0 +1,82 @@
+---
+id: intro
+title: Introduction
+sidebar_label: Introduction
+slug: /intro
+---
+
+# pi — Local AI Coding Agent
+
+pi is a local-first, terminal-native AI coding agent. It reads your codebase, edits files, runs shell commands, and searches the web — using your own API credentials, running entirely on your machine.
+
+This site documents the **bramburn/pi** fork of the upstream [earendil-works/pi](https://github.com/earendil-works/pi) project. For the canonical upstream documentation, see [pi.dev/docs/latest](https://pi.dev/docs/latest).
+
+## What pi does
+
+pi is an interactive CLI tool. You run it from your terminal, describe what you want to build or fix, and pi plans and executes the changes:
+
+- **Reads and edits source files** across your project
+- **Runs shell commands** — builds, tests, git operations, anything in your `$PATH`
+- **Uses your own LLM provider** — no data leaves your machine
+- **Augments itself** with custom tools and prompts
+- **Supports multiple providers** — Anthropic Claude, OpenAI GPT, Google Gemini, Groq, and more
+
+## Who this fork is for
+
+This fork (`bramburn/pi`) exists because the author wanted:
+
+1. **Build autonomy** — independent npm publishing and binary releases, not tied to upstream's pipeline
+2. **Windows-first iteration** — faster dev loop on Windows with worktree-based agents
+3. **Selected fork features** — changes that don't (yet) have a path into upstream
+
+For the full list of differences, see [Why a Fork?](./fork/why-fork)
+
+## Quick start
+
+```bash
+# Install the latest release
+npm install -g @bramburn/pi-coding-agent
+
+# Or use the prebuilt binary
+# Download from https://github.com/bramburn/pi/releases
+
+# Set your API key
+export ANTHROPIC_API_KEY=sk-...
+
+# Launch the interactive TUI
+pi
+
+# Or run a one-shot prompt
+pi -p "Explain this function"
+```
+
+For full installation steps, see [Installation](./getting-started/installation).
+
+## Architecture overview
+
+pi is a TypeScript monorepo with five core packages:
+
+| Package | Role |
+|---------|------|
+| `packages/coding-agent` | The CLI entry point, TUI, and user-facing commands |
+| `packages/agent` | The agent runtime: state machine, tool execution, message loop |
+| `packages/ai` | Unified multi-provider LLM API (OpenAI, Anthropic, Google, …) |
+| `packages/tui` | Terminal UI primitives: input, rendering, keybindings |
+| `packages/telemetry` | Vendor-neutral telemetry contracts and schemas |
+
+For a deep dive, see the [Architecture](./architecture) section.
+
+## Fork vs upstream
+
+:::caution This is a fork
+The `bramburn/pi` fork diverges from `earendil-works/pi` in several ways. Not all upstream changes are merged, and not all fork changes go upstream. Always check which repo you are reading from.
+:::
+
+Key differences:
+
+- **npm publishing** — fork publishes to `@bramburn/*` scope; upstream publishes to `@earendil-works/*`
+- **Binary naming** — fork binary is `pi-bramburn`; upstream is `pi`
+- **Release process** — fork has its own CI pipeline; upstream uses a different one
+- **Build tooling** — fork uses a custom `build-both` orchestrator
+
+See [Fork Features](./fork/features) for the full list.

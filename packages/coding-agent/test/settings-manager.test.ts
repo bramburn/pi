@@ -420,62 +420,6 @@ describe("SettingsManager", () => {
 		});
 	});
 
-	describe("TUI mode", () => {
-		it("defaults to regular and persists fullscreen mode", async () => {
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("regular");
-
-			manager.setTuiMode("fullscreen");
-			await manager.flush();
-
-			expect(manager.getTuiMode()).toBe("fullscreen");
-			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-			expect(savedSettings.tuiMode).toBe("fullscreen");
-		});
-
-		it("falls back to regular for unsupported values", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ tuiMode: "other" }));
-
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("regular");
-		});
-
-		it("does not recognize the old uiMode setting", () => {
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ uiMode: "fullscreen" }));
-
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			expect(manager.getTuiMode()).toBe("regular");
-		});
-	});
-
-	it("validates and persists fullscreen settings", async () => {
-		const manager = SettingsManager.create(projectDir, agentDir);
-		expect(manager.getFullscreenExitOutput()).toBe("transcript");
-		expect(manager.getFullscreenScrollbar()).toBe("auto");
-		expect(manager.getFullscreenCopyOnSelect()).toBe(true);
-
-		manager.setFullscreenExitOutput("resume-hint");
-		manager.setFullscreenScrollbar("hidden");
-		manager.setFullscreenCopyOnSelect(false);
-		await manager.flush();
-		const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-		expect(savedSettings.fullscreenExitOutput).toBe("resume-hint");
-		expect(savedSettings.fullscreenScrollbar).toBe("hidden");
-		expect(savedSettings.fullscreenCopyOnSelect).toBe(false);
-
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ fullscreenExitOutput: "nothing", fullscreenScrollbar: "sometimes" }),
-		);
-		const reloadedManager = SettingsManager.create(projectDir, agentDir);
-		expect(reloadedManager.getFullscreenExitOutput()).toBe("transcript");
-		expect(reloadedManager.getFullscreenScrollbar()).toBe("auto");
-		expect(reloadedManager.getFullscreenCopyOnSelect()).toBe(true);
-	});
-
 	describe("outputPad", () => {
 		it("should default to 1 and persist binary values", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -623,6 +567,79 @@ describe("SettingsManager", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "~" }));
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe(homedir());
+		});
+	});
+
+	describe("newSessionModel + lastUsedModel", () => {
+		it("returns undefined for newSessionModel when unset", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getNewSessionModelPreference()).toBeUndefined();
+		});
+
+		it("round-trips mode='lastUsed' across reload", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setNewSessionModelPreference({ mode: "lastUsed" });
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getNewSessionModelPreference()).toEqual({ mode: "lastUsed" });
+		});
+
+		it("round-trips mode='specific' with a chosen model", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setNewSessionModelPreference({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+			});
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getNewSessionModelPreference()).toEqual({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-haiku-4-5" },
+			});
+		});
+
+		it("clones the preference so callers cannot mutate the stored object", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			const original: {
+				mode: "global" | "lastUsed" | "specific";
+				specific?: { provider: string; modelId: string };
+			} = {
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			};
+			manager.setNewSessionModelPreference(original);
+			original.specific = undefined;
+			original.mode = "global";
+
+			const stored = manager.getNewSessionModelPreference();
+			expect(stored).toEqual({
+				mode: "specific",
+				specific: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+			});
+		});
+
+		it("returns undefined for lastUsedModel when unset", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getLastUsedModel()).toBeUndefined();
+		});
+
+		it("round-trips lastUsedModel across reload", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setLastUsedModel({ provider: "openai", modelId: "gpt-5" });
+			await manager.flush();
+
+			const reloaded = SettingsManager.create(projectDir, agentDir);
+			expect(reloaded.getLastUsedModel()).toEqual({ provider: "openai", modelId: "gpt-5" });
+		});
+
+		it("setDefaultModelAndProvider keeps lastUsedModel untouched when not called", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setLastUsedModel({ provider: "openai", modelId: "gpt-5" });
+			manager.setDefaultModelAndProvider("anthropic", "claude-sonnet-4-5");
+			expect(manager.getLastUsedModel()).toEqual({ provider: "openai", modelId: "gpt-5" });
+			expect(manager.getDefaultModel()).toBe("claude-sonnet-4-5");
 		});
 	});
 });

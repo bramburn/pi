@@ -1,0 +1,93 @@
+---
+id: installation
+title: Installation
+sidebar_label: Installation
+---
+
+# Installation
+
+## Requirements
+
+- **Node.js** 20+ (for npm releases)
+- **Bun** 1.0+ (for Bun releases, faster startup)
+- **Windows**, **macOS**, or **Linux**
+- An API key for at least one LLM provider (Anthropic, OpenAI, Google, etc.)
+
+## Prebuilt binaries (fastest)
+
+Download a prebuilt binary from the [GitHub releases](https://github.com/bramburn/pi/releases) page. Pick the archive for your platform:
+
+| Platform | Archive |
+|----------|---------|
+| Windows x64 | `pi-bramburn-win32-x64.zip` |
+| Windows ARM64 | `pi-bramburn-win32-arm64.zip` |
+| macOS x64 | `pi-bramburn-darwin-x64.tar.gz` |
+| macOS ARM64 | `pi-bramburn-darwin-arm64.tar.gz` |
+| Linux x64 | `pi-bramburn-linux-x64.tar.gz` |
+
+Extract and put the binary somewhere on your `PATH`. On Windows, the binary is `pi.exe`.
+
+## npm
+
+```bash
+npm install -g @bramburn/pi-coding-agent
+pi --version
+```
+
+## Bun
+
+```bash
+bun add -g @bramburn/pi-coding-agent
+pi --version
+```
+
+## From source
+
+```bash
+git clone https://github.com/bramburn/pi.git
+cd pi
+
+# Install dependencies
+npm install --ignore-scripts
+
+# Build
+npm run build
+
+# Run from source (no install needed)
+./pi-test.sh
+```
+
+## API key setup
+
+pi needs at least one provider API key. Set it as an environment variable before launching:
+
+```bash
+# Anthropic (recommended for coding)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+
+# Google
+export GOOGLE_API_KEY=...
+```
+
+For multiple providers, set all the keys you want to use. pi will let you switch between them interactively.
+
+## Verifying the install
+
+```bash
+pi --version
+pi --list-models
+```
+
+If models appear, the install is working. Launch the interactive TUI:
+
+```bash
+pi
+```
+
+## Next steps
+
+- [Configuration](./configuration) — how to configure providers, defaults, and tool permissions
+- [Architecture](../architecture) — how the monorepo is structured
