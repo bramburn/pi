@@ -4,6 +4,13 @@
 
 ### Added
 
+- Added `@sentry/node` as a dependency and wired the official Sentry Node SDK into the coding-agent. When `PI_AI_DEBUG=1` and `SENTRY_DSN` are both set, the SDK initializes at startup, captures uncaught exceptions, unhandled rejections, and process warnings, and flushes on process exit. Both env vars are required; either alone is a no-op.
+- Added an opt-in live smoke test under `test/sentry-live.test.ts` that ships a real event to a configured Sentry DSN. Run with `PI_SENTRY_LIVE_TEST=1 npx vitest --run test/sentry-live.test.ts`.
+
+### Documentation
+
+- Documented the new `PI_AI_DEBUG`, `SENTRY_DSN`, and `SENTRY_TRACES_SAMPLE_RATE` environment variables in the `--help` output.
+
 - **DeepSeek Harness: Phase 0 — toggle surface** (item 1) — new opt-in `deepseekHarness` setting that routes the agent's prompt and context through a deepseek-harness-style pipeline. The toggle is off by default. Wired through every surface: TUI `/settings` row, RPC `set_deepseek_harness` command + `get_state` field, CLI `--deepseek-harness` and `--deepseek-harness-max-overflow-retries` flags, extension API `isDeepseekHarnessEnabled()`, and a built-in `MINIMAX_PROFILE` for the `minimax` / `minimax-cn` provider family. The resolver layers `DEFAULT_DEEPSEEK_HARNESS` → user → `MINIMAX_PROFILE` → exact-model override → provider-wildcard override. New `AgentSession._deepseekHarnessEnabled` mirror + `_refreshDeepseekHarnessPipeline()` placeholder for Phases 1-4.
 
 - **DeepSeek Harness: Phase 1 — overflow recovery + maxTokens + per-model policy + graceful notice** (items 2, 5, 6, 11) — multi-attempt overflow recovery driven by `maxOverflowRetries` (default 2, 3 for `minimax`/`minimax-cn`); `clampMaxTokensToContext` now accepts a per-call `safetyMargin` (1024 with the bundle, 4096 without); `CompactionSettings` gains `thresholdRatio` and `retainRatio`; on `length` finish with no tool calls, a trailing "Run /compact to continue" notice is appended.

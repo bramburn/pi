@@ -8,6 +8,7 @@ import type {
 	ToolCall,
 	ToolResultMessage,
 } from "../types.ts";
+import { sanitizeRequestText } from "../utils/sanitize-text.ts";
 
 const NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)";
 const NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)";
@@ -57,6 +58,76 @@ function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model
 }
 
 /**
+ * Strip unpaired UTF-16 surrogates and U+FFFD from text content on a message.
+ * Used as the first pass in `transformMessages` so that all text reaching a
+ * provider is free of characters some providers reject with 400 "invalid
+ * params" (e.g. MiniMax sub-code 2013).
+ *
+ * Returns the same message reference if no sanitization was needed, so the
+ * downstream passes can rely on reference identity to skip work on clean
+ * messages.
+ */
+function sanitizeMessageText(msg: Message): Message {
+	if (msg.role === "user") {
+		if (typeof msg.content === "string") {
+			const cleaned = sanitizeRequestText(msg.content);
+			return cleaned === msg.content ? msg : { ...msg, content: cleaned };
+		}
+		let changed = false;
+		const next = msg.content.map((block) => {
+			if (block.type === "text") {
+				const cleaned = sanitizeRequestText(block.text);
+				if (cleaned !== block.text) {
+					changed = true;
+					return { ...block, text: cleaned };
+				}
+			}
+			return block;
+		});
+		return changed ? { ...msg, content: next } : msg;
+	}
+
+	if (msg.role === "assistant") {
+		let changed = false;
+		const next = msg.content.map((block) => {
+			if (block.type === "text") {
+				const cleaned = sanitizeRequestText(block.text);
+				if (cleaned !== block.text) {
+					changed = true;
+					return { ...block, text: cleaned };
+				}
+			} else if (block.type === "thinking") {
+				const thinking = block.thinking;
+				const cleaned = sanitizeRequestText(thinking);
+				if (cleaned !== thinking) {
+					changed = true;
+					return { ...block, thinking: cleaned };
+				}
+			}
+			return block;
+		});
+		return changed ? { ...msg, content: next } : msg;
+	}
+
+	if (msg.role === "toolResult") {
+		let changed = false;
+		const next = msg.content.map((block) => {
+			if (block.type === "text") {
+				const cleaned = sanitizeRequestText(block.text);
+				if (cleaned !== block.text) {
+					changed = true;
+					return { ...block, text: cleaned };
+				}
+			}
+			return block;
+		});
+		return changed ? { ...msg, content: next } : msg;
+	}
+
+	return msg;
+}
+
+/**
  * Normalize tool call ID for cross-provider compatibility.
  * OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
  * Anthropic APIs require IDs matching ^[a-zA-Z0-9_-]+$ (max 64 chars).
@@ -71,7 +142,11 @@ export function transformMessages<TApi extends Api>(
 	// Normalize null/undefined content from untyped callers (custom tools, hand-built
 	// histories, old session files) so downstream code can rely on the type contract.
 	const normalizedMessages = messages.map((msg) => (msg.content == null ? { ...msg, content: [] } : msg));
-	const imageAwareMessages = downgradeUnsupportedImages(normalizedMessages, model);
+	// Strip characters that some providers (e.g. MiniMax) reject with 400 "invalid params":
+	// unpaired UTF-16 surrogates and the U+FFFD replacement character. Runs before
+	// image downgrade so all downstream text is provider-safe.
+	const sanitizedMessages = normalizedMessages.map(sanitizeMessageText);
+	const imageAwareMessages = downgradeUnsupportedImages(sanitizedMessages, model);
 
 	// First pass: transform messages (unsupported image downgrade, thinking blocks, tool call ID normalization)
 	const transformed = imageAwareMessages.map((msg) => {
