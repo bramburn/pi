@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isSentryDebugEnabled } from "../src/core/sentry.ts";
+import { _resetSentryInitializedForTests, isSentryDebugEnabled, reportProviderError } from "../src/core/sentry.ts";
 
 const DSN = "https://public@o123.ingest.sentry.io/4505252978903040";
 
@@ -125,5 +125,121 @@ describe("Sentry Node SDK wiring (end-to-end)", () => {
 		const handle = initSentryIfEnabled();
 		expect(handle).toBeUndefined();
 		expect(mock.requests.length).toBe(0);
+	});
+});
+
+describe("reportProviderError (provider/stream error path)", () => {
+	let mock: Awaited<ReturnType<typeof startSentryMockServer>> | undefined;
+
+	beforeEach(() => {
+		delete process.env.PI_AI_DEBUG;
+		delete process.env.SENTRY_DSN;
+		// Reset the module-level `sentryInitialized` flag from any prior test that
+		// called initSentryIfEnabled. Without this, the "is a no-op" test would
+		// observe a leaked `true` from the previous describe block.
+		_resetSentryInitializedForTests();
+	});
+
+	afterEach(async () => {
+		await mock?.close();
+		mock = undefined;
+	});
+
+	it("is a no-op when Sentry is not initialized", () => {
+		// Should not throw and should not try to send anything.
+		expect(() =>
+			reportProviderError({
+				message: '400 {"type":"error","error":{"type":"invalid_request_error","message":"invalid params, 400 (2013)"},"request_id":"06e38aa94e9229002663399d42323bf3"}',
+				stopReason: "error",
+				provider: "anthropic",
+				model: "claude-opus-4-1",
+			}),
+		).not.toThrow();
+	});
+
+	it("ships an envelope with provider_error tags and parses request_id from the message", async () => {
+		mock = await startSentryMockServer((_req, res) => {
+			res.setHeader("x-sentry-id", "abc123");
+			return { status: 200 };
+		});
+		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
+		process.env.SENTRY_DSN = dsn;
+		process.env.PI_AI_DEBUG = "1";
+		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
+
+		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
+		const handle = initSentryIfEnabled();
+		expect(handle).toBeDefined();
+
+		const message =
+			'400 {"type":"error","error":{"type":"invalid_request_error","message":"invalid params, 400 (2013)"},"request_id":"06e38aa94e9229002663399d42323bf3"}';
+		reportProviderError({
+			message,
+			stopReason: "error",
+			provider: "anthropic",
+			model: "claude-opus-4-1",
+		});
+		await handle?.dispose();
+
+		expect(mock.requests.length).toBeGreaterThan(0);
+		const envelopeReq = mock.requests[0]!;
+		const lines = envelopeReq.body.split("\n").filter((line) => line.length > 0);
+		const event = JSON.parse(lines[2]!);
+		expect(event.exception?.values?.[0]?.value).toBe(message);
+		expect(event.exception?.values?.[0]?.type).toBe("ProviderError[error]");
+		expect(event.tags?.source).toBe("provider_error");
+		expect(event.tags?.stop_reason).toBe("error");
+		expect(event.tags?.request_id).toBe("06e38aa94e9229002663399d42323bf3");
+		// provider/model are scope extras, surfaced on the event under `extra`.
+		const extras = event.extra ?? {};
+		expect(extras.provider).toBe("anthropic");
+		expect(extras.model).toBe("claude-opus-4-1");
+		expect(extras.request_id).toBe("06e38aa94e9229002663399d42323bf3");
+	});
+
+	it("uses the explicit requestId over the parsed one when both are present", async () => {
+		mock = await startSentryMockServer(() => ({ status: 200 }));
+		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
+		process.env.SENTRY_DSN = dsn;
+		process.env.PI_AI_DEBUG = "1";
+		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
+
+		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
+		const handle = initSentryIfEnabled();
+		expect(handle).toBeDefined();
+
+		reportProviderError({
+			message: '400 {"request_id":"fromMessage"}',
+			stopReason: "error",
+			requestId: "fromArgument",
+		});
+		await handle?.dispose();
+
+		const envelopeReq = mock.requests[0]!;
+		const lines = envelopeReq.body.split("\n").filter((line) => line.length > 0);
+		const event = JSON.parse(lines[2]!);
+		expect(event.tags?.request_id).toBe("fromArgument");
+	});
+
+	it("omits the request_id tag when the message has no JSON-shaped request id", async () => {
+		mock = await startSentryMockServer(() => ({ status: 200 }));
+		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
+		process.env.SENTRY_DSN = dsn;
+		process.env.PI_AI_DEBUG = "1";
+		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
+
+		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
+		const handle = initSentryIfEnabled();
+		expect(handle).toBeDefined();
+
+		reportProviderError({ message: "Plain network error", stopReason: "error" });
+		await handle?.dispose();
+
+		const envelopeReq = mock.requests[0]!;
+		const lines = envelopeReq.body.split("\n").filter((line) => line.length > 0);
+		const event = JSON.parse(lines[2]!);
+		expect(event.tags?.source).toBe("provider_error");
+		expect(event.tags?.stop_reason).toBe("error");
+		expect(event.tags?.request_id).toBeUndefined();
 	});
 });
