@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Sanitized unpaired UTF-16 surrogates and the U+FFFD replacement character from message text before sending to providers that reject them with 400 "invalid params" (e.g. MiniMax sub-code 2013). Valid surrogate pairs (e.g. emoji, supplementary plane characters) are preserved.
+
 ## [0.84.4] - 2026-08-28
 
 ### Added
