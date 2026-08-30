@@ -54,6 +54,14 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'doc',
+<<<<<<< HEAD
+=======
+      id: 'fork/experimental-mode',
+      label: 'Experimental Mode',
+    },
+    {
+      type: 'doc',
+>>>>>>> f919dc217 (docs: experimental-mode page in docusaurus site)
       id: 'fork/sync',
       label: 'Sync Process',
     },
