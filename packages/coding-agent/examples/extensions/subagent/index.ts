@@ -1,21 +1,32 @@
 /**
- * Subagent Tool - Delegate tasks to specialized agents
+ * Subagent Tool + Experimental Mode
  *
- * Spawns a separate `pi` process for each subagent invocation,
- * giving it an isolated context window.
+ * Two capabilities in one extension:
+ *   1. Subagent: spawn isolated `pi` subprocesses for parallel/chain/single tasks.
+ *   2. Experimental mode: hypothesis-driven worktree-based parallel exploration
+ *      with E.D.I.T. loop tooling, registry persistence, status pill, and
+ *      Research Mode auto-trigger on 3x-same-error.
  *
- * Supports three modes:
+ * The subagent tool supports three modes:
  *   - Single: { agent: "name", task: "..." }
- *   - Parallel: { tasks: [{ agent: "name", task: "..." }, ...] }
- *   - Chain: { chain: [{ agent: "name", task: "... {previous} ..." }, ...] }
+ *   - Parallel: { tasks: [{ agent, task, cwd? }, ...] }
+ *   - Chain: { chain: [{ agent, task, cwd? }, ...] }
  *
- * Uses JSON mode to capture structured output from subagents.
+ * The experimental mode adds 8 sibling tools: experiment_start, experiment_run,
+ * experiment_test, experiment_diff, experiment_merge, experiment_discard,
+ * experiment_list, experiment_compare. Each is a top-level pi.registerTool call;
+ * the subagent extension is the single entry point.
+ *
+ * JSON mode is used to capture structured output from subagents.
  */
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { readFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -26,9 +37,45 @@ import {
 	getMarkdownTheme,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, Key, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import {
+	addExperiment as addExperimentRow,
+	type ExperimentRow,
+	logPath as experimentLogPath,
+	getExperiment as getExperimentRow,
+	listExperiments,
+	makeExperimentId,
+	updateExperiment,
+} from "./registry.ts";
+import { ResearchModeTracker } from "./research-mode.ts";
+import {
+	appendLogEvent as appendExperimentLogEvent,
+	ensureLogFile as ensureExperimentLog,
+	runCommand as runShellCommand,
+} from "./runner.ts";
+import {
+	CompareParams,
+	DiffParams,
+	DiscardParams,
+	ListParams,
+	MergeParams,
+	RunParams,
+	StartParams,
+	TestParams,
+} from "./tools.ts";
+import { clearDashboard, refreshStatusPill, showDashboard } from "./ui.ts";
+import {
+	cherryPickFromBranch,
+	createWorktree,
+	currentHead,
+	diffVsParent,
+	isGitRepo,
+	pruneWorktrees,
+	removeWorktree,
+	squashSinceParent,
+} from "./worktree.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -468,7 +515,616 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
+// ============================================================================
+// Experimental Mode (worktree-based E.D.I.T. loop)
+// ============================================================================
+//
+// Adds 8 tools (experiment_start / run / test / diff / merge / discard / list /
+// compare) plus a registry, status pill, /experimental + /experiments commands,
+// Ctrl+E shortcut, Research Mode auto-trigger, and a before_agent_start fragment
+// injector. See README.md §"Experimental mode" for the full design.
+
+const EDIT_LOOP_FRAGMENT = readFileSync(
+	join(dirname(fileURLToPath(import.meta.url)), "prompts", "edit-loop.md"),
+	"utf-8",
+);
+const RESEARCH_MODE_FRAGMENT = readFileSync(
+	join(dirname(fileURLToPath(import.meta.url)), "prompts", "research-mode.md"),
+	"utf-8",
+);
+
+interface ExperimentalSessionState {
+	enabled: boolean;
+	researchModeEnabled: boolean;
+}
+
+function getSessionId(ctx: { sessionManager: { getSessionId(): string } }): string {
+	return ctx.sessionManager.getSessionId() || "default";
+}
+
+function readFragments(): { editLoop: string; research: string } {
+	return { editLoop: EDIT_LOOP_FRAGMENT, research: RESEARCH_MODE_FRAGMENT };
+}
+
+function errorToolResult(message: string): AgentToolResult<unknown> {
+	return {
+		content: [{ type: "text", text: message }],
+		details: { error: message },
+	};
+}
+
+function successToolResult(message: string, details: unknown = {}): AgentToolResult<unknown> {
+	return {
+		content: [{ type: "text", text: message }],
+		details,
+	};
+}
+
+function detectTestRunner(cwd: string): { name: string; command: string; filterFlag: string } | null {
+	if (fs.existsSync(join(cwd, "bun.lockb")) || fs.existsSync(join(cwd, "bun.lock"))) {
+		return { name: "bun", command: "bun test", filterFlag: "-t" };
+	}
+	if (fs.existsSync(join(cwd, "vitest.config.ts")) || fs.existsSync(join(cwd, "vitest.config.js"))) {
+		return { name: "vitest", command: "npx vitest run", filterFlag: "-t" };
+	}
+	if (fs.existsSync(join(cwd, "jest.config.ts")) || fs.existsSync(join(cwd, "jest.config.js"))) {
+		return { name: "jest", command: "npx jest", filterFlag: "-t" };
+	}
+	if (fs.existsSync(join(cwd, "package.json"))) {
+		return { name: "npm", command: "npm test --", filterFlag: "--" };
+	}
+	return null;
+}
+
+function parseTestSummary(output: string, runner: string): { passed: number; failed: number; skipped: number } {
+	let passed = 0;
+	let failed = 0;
+	let skipped = 0;
+	const passedMatch = output.match(/(\d+)\s+pass(?:ed|ing)?/i);
+	const failedMatch = output.match(/(\d+)\s+fail(?:ed|ing)?/i);
+	const skippedMatch = output.match(/(\d+)\s+skip(?:ped|ping)?/i);
+	if (passedMatch) passed = Number.parseInt(passedMatch[1], 10);
+	if (failedMatch) failed = Number.parseInt(failedMatch[1], 10);
+	if (skippedMatch) skipped = Number.parseInt(skippedMatch[1], 10);
+	if (runner === "vitest" && passed === 0 && failed === 0) {
+		const m = output.match(/Tests?\s+(\d+)\s+passed\s*\((\d+)\)/i);
+		if (m) passed = Number.parseInt(m[1], 10);
+		const f = output.match(/Tests?\s+(\d+)\s+failed\s*\((\d+)\)/i);
+		if (f) failed = Number.parseInt(f[1], 10);
+	}
+	return { passed, failed, skipped };
+}
+
+function tailOf(s: string, lines: number): string {
+	const arr = s.split("\n");
+	return arr.length > lines ? `... ${arr.length - lines} earlier lines\n${arr.slice(-lines).join("\n")}` : s;
+}
+
+function truncate(s: string, n: number): string {
+	return s.length > n ? `${s.slice(0, n - 3)}...` : s;
+}
+
+function registerExperimentalMode(pi: ExtensionAPI): void {
+	const sessionState = new Map<string, ExperimentalSessionState>();
+	const researchTracker = new ResearchModeTracker({ notify: () => {} });
+
+	function stateFor(ctx: { sessionManager: { getSessionId(): string } }): ExperimentalSessionState {
+		const id = getSessionId(ctx);
+		let s = sessionState.get(id);
+		if (!s) {
+			s = { enabled: false, researchModeEnabled: true };
+			sessionState.set(id, s);
+		}
+		return s;
+	}
+
+	function activeExperimentLog(ctx: { cwd: string }): string | undefined {
+		const all = listExperiments(ctx.cwd, "all");
+		const running = all.filter((r) => r.status === "running").slice(-1);
+		return running[0] ? experimentLogPath(ctx.cwd, running[0].id) : undefined;
+	}
+
+	// -------------------------------------------------------------------------
+	// Lifecycle: session_start (crash recovery for running experiments)
+	// -------------------------------------------------------------------------
+	pi.on("session_start", async (_event, ctx) => {
+		if (!(await isGitRepo(ctx.cwd))) return;
+		const all = listExperiments(ctx.cwd, "all");
+		let changed = false;
+		for (const row of all) {
+			if (row.status === "running" && row.pid) {
+				let alive = true;
+				try {
+					process.kill(row.pid, 0);
+				} catch (_err) {
+					alive = false;
+				}
+				if (!alive) {
+					updateExperiment(ctx.cwd, row.id, {
+						status: "failed",
+						completedAt: new Date().toISOString(),
+						result: { ...row.result, notes: "no process after restart" },
+					});
+					changed = true;
+				}
+			}
+		}
+		if (changed) {
+			ctx.ui.notify(
+				"Experimental mode: stale running experiments marked failed (no process after restart).",
+				"warning",
+			);
+		}
+		refreshStatusPill(ctx, ctx.cwd, stateFor(ctx).enabled);
+	});
+
+	// -------------------------------------------------------------------------
+	// before_agent_start: inject the E.D.I.T. + Research Mode fragments when enabled
+	// -------------------------------------------------------------------------
+	pi.on("before_agent_start", async (event, ctx) => {
+		if (!stateFor(ctx).enabled) return;
+		const { editLoop, research } = readFragments();
+		return { systemPrompt: `${event.systemPrompt}\n\n${editLoop}\n\n${research}` };
+	});
+
+	// -------------------------------------------------------------------------
+	// tool_result: Research Mode 3x-same-error watcher
+	// -------------------------------------------------------------------------
+	pi.on("tool_result", async (event, ctx) => {
+		const s = stateFor(ctx);
+		if (!s.enabled || !s.researchModeEnabled) return;
+		if (!event.isError) return;
+		const text = event.content
+			.filter((b): b is { type: "text"; text: string } => (b as { type: string }).type === "text")
+			.map((b) => b.text)
+			.join("\n");
+		if (!text) return;
+		const toolName = (event as { toolName?: string }).toolName ?? "unknown";
+		const activeLog = activeExperimentLog(ctx);
+		researchTracker.recordToolResult(getSessionId(ctx), toolName, true, text, activeLog);
+	});
+
+	// -------------------------------------------------------------------------
+	// Commands
+	// -------------------------------------------------------------------------
+	pi.registerCommand("experimental", {
+		description: "Toggle experimental mode (E.D.I.T. loop + worktree substrate).",
+		handler: async (args, ctx) => {
+			const arg = (args ?? "").trim().toLowerCase();
+			const s = stateFor(ctx);
+			if (arg === "on") s.enabled = true;
+			else if (arg === "off") s.enabled = false;
+			else s.enabled = !s.enabled;
+			ctx.ui.notify(
+				s.enabled
+					? "Experimental mode ON — E.D.I.T. loop fragment appended to the system prompt."
+					: "Experimental mode OFF — system prompt unchanged.",
+				"info",
+			);
+			refreshStatusPill(ctx, ctx.cwd, s.enabled);
+		},
+	});
+
+	pi.registerCommand("experiments", {
+		description: "Show the experiment dashboard overlay.",
+		handler: async (_args, ctx) => {
+			await showDashboard(ctx, ctx.cwd);
+		},
+	});
+
+	pi.registerShortcut(Key.ctrl("e"), {
+		description: "Open the experiment dashboard.",
+		handler: async (ctx) => {
+			await showDashboard(ctx, ctx.cwd);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_start
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_start",
+		label: "Experiment Start",
+		description: "Fork a worktree for one experimental approach. Use once per approach when comparing 2+ candidates.",
+		parameters: StartParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const s = stateFor(ctx);
+			if (!s.enabled) return errorToolResult("Experimental mode is off. Use /experimental on to enable it.");
+			if (!(await isGitRepo(ctx.cwd))) {
+				return errorToolResult(`Not a git repository: ${ctx.cwd}. Experimental mode requires git.`);
+			}
+			let parentCommit: string;
+			try {
+				parentCommit = params.parent_commit ?? (await currentHead(ctx.cwd));
+			} catch (err) {
+				return errorToolResult(`Could not resolve parent commit: ${(err as Error).message}`);
+			}
+			const id = makeExperimentId(params.approach_name);
+			const work = await createWorktree(ctx.cwd, params.approach_name, parentCommit);
+			if (work.exitCode !== 0) {
+				return errorToolResult(
+					`git worktree add failed (exit ${work.exitCode}): ${work.stderr.trim() || work.stdout.trim()}`,
+				);
+			}
+			const logFile = experimentLogPath(ctx.cwd, id);
+			ensureExperimentLog(logFile);
+			appendExperimentLogEvent(logFile, {
+				type: "STARTED",
+				hypothesis: params.hypothesis,
+				approach: params.approach_name,
+				parentCommit,
+			});
+			const now = new Date().toISOString();
+			const row: ExperimentRow = {
+				id,
+				hypothesis: params.hypothesis,
+				approach: params.approach_name,
+				worktreePath: work.worktreePath,
+				branch: work.branch,
+				parentCommit,
+				startedInCwd: ctx.cwd,
+				status: "scaffolded",
+				outputPath: logFile,
+				result: {},
+				merged: false,
+				createdAt: now,
+				updatedAt: now,
+			};
+			addExperimentRow(ctx.cwd, row);
+			refreshStatusPill(ctx, ctx.cwd, true);
+			clearDashboard(ctx);
+			return successToolResult(
+				`Created experiment ${id}\n  branch: ${work.branch}\n  worktree: ${work.worktreePath}\n  parent: ${parentCommit.slice(0, 12)}\n  status: scaffolded`,
+				{ id, branch: work.branch, worktree_path: work.worktreePath, status: "scaffolded" },
+			);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_run
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_run",
+		label: "Experiment Run",
+		description:
+			"Run a shell command inside the experiment's worktree. Output is captured to log.jsonl and returned.",
+		parameters: RunParams,
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const row = getExperimentRow(ctx.cwd, params.experiment_id);
+			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			const logFile = experimentLogPath(ctx.cwd, row.id);
+			ensureExperimentLog(logFile);
+			appendExperimentLogEvent(logFile, {
+				type: "RUN_STARTED",
+				command: params.command,
+				timeoutMs: params.timeout_ms,
+			});
+			const result = await runShellCommand(params.command, {
+				cwd: row.worktreePath,
+				timeoutMs: params.timeout_ms,
+				signal,
+				experimentLogPath: logFile,
+			});
+			appendExperimentLogEvent(logFile, {
+				type: "RUN_COMPLETED",
+				command: params.command,
+				exitCode: result.exitCode,
+				durationMs: result.durationMs,
+				timedOut: result.timedOut,
+				cancelled: result.cancelled,
+			});
+			const newStatus = result.exitCode === 0 ? "completed" : result.cancelled ? "cancelled" : "failed";
+			updateExperiment(ctx.cwd, row.id, { status: newStatus });
+			const summary =
+				`exit ${result.exitCode} · ${result.durationMs}ms` +
+				(result.timedOut ? " · TIMED OUT" : "") +
+				(result.cancelled ? " · CANCELLED" : "");
+			return successToolResult(
+				`${summary}\n\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`.trim(),
+				{
+					experiment_id: row.id,
+					exitCode: result.exitCode,
+					durationMs: result.durationMs,
+				},
+			);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_test
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_test",
+		label: "Experiment Test",
+		description:
+			"Auto-detect the test runner and run it inside the worktree. Records passed/failed counts in the registry.",
+		parameters: TestParams,
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const row = getExperimentRow(ctx.cwd, params.experiment_id);
+			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			const detector = detectTestRunner(row.worktreePath);
+			if (!detector) {
+				return errorToolResult(
+					"Could not detect a test runner. Pass an explicit command via experiment_run instead.",
+				);
+			}
+			const command = params.filter
+				? `${detector.command} ${detector.filterFlag} ${`'${params.filter.replace(/'/g, "'\\''")}'`}`
+				: detector.command;
+			const logFile = experimentLogPath(ctx.cwd, row.id);
+			ensureExperimentLog(logFile);
+			appendExperimentLogEvent(logFile, { type: "TEST_STARTED", runner: detector.name, command });
+			const result = await runShellCommand(command, {
+				cwd: row.worktreePath,
+				signal,
+				experimentLogPath: logFile,
+			});
+			const { passed, failed, skipped } = parseTestSummary(`${result.stdout}\n${result.stderr}`, detector.name);
+			appendExperimentLogEvent(logFile, {
+				type: "TEST_COMPLETED",
+				runner: detector.name,
+				exitCode: result.exitCode,
+				passed,
+				failed,
+				skipped,
+			});
+			updateExperiment(ctx.cwd, row.id, {
+				status: failed > 0 || result.exitCode !== 0 ? "failed" : "completed",
+				result: { ...row.result, testPassed: passed, testFailed: failed, testSkipped: skipped },
+			});
+			return successToolResult(
+				`runner: ${detector.name}\nexit: ${result.exitCode}\n` +
+					`passed: ${passed} · failed: ${failed} · skipped: ${skipped}\n\n` +
+					tailOf(result.stdout, 50),
+				{ experiment_id: row.id, runner: detector.name, passed, failed, skipped },
+			);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_diff
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_diff",
+		label: "Experiment Diff",
+		description: "Show what changed in the experiment's worktree vs the parent commit.",
+		parameters: DiffParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const row = getExperimentRow(ctx.cwd, params.experiment_id);
+			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			const diff = await diffVsParent(row.worktreePath, row.parentCommit);
+			if (diff.raw.exitCode !== 0) {
+				return errorToolResult(
+					`git diff failed (exit ${diff.raw.exitCode}): ${diff.raw.stderr.trim() || diff.raw.stdout.trim()}`,
+				);
+			}
+			const commitList =
+				diff.commits.map((c) => `${c.sha.slice(0, 7)}  ${c.subject}`).join("\n") || "(no commits yet)";
+			return successToolResult(
+				`files changed: ${diff.filesChanged}\ninsertions:    ${diff.insertions}\ndeletions:     ${diff.deletions}\ncommits:\n${commitList}\n\n--- diff (truncated) ---\n${tailOf(diff.diff, 80)}`,
+				{
+					experiment_id: row.id,
+					files_changed: diff.filesChanged,
+					insertions: diff.insertions,
+					deletions: diff.deletions,
+					commits: diff.commits,
+				},
+			);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_merge
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_merge",
+		label: "Experiment Merge",
+		description: "Transfer the winning experiment back to the main worktree via cherry-pick, squash, or merge.",
+		parameters: MergeParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const row = getExperimentRow(ctx.cwd, params.experiment_id);
+			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			if (row.merged) return errorToolResult(`Experiment ${row.id} is already merged.`);
+
+			// Refuse to merge if the main worktree has uncommitted changes (ignoring the
+			// .pi-experiments/ registry dir which is expected to be untracked).
+			const status = await runShellCommand("git status --porcelain -- . :!./.pi-experiments :!./.pi-experiments/", {
+				cwd: ctx.cwd,
+			});
+			if (status.stdout.trim().length > 0) {
+				return errorToolResult(
+					`Main worktree has uncommitted changes. Commit or stash them before merging an experiment.\n${status.stdout}`,
+				);
+			}
+
+			if (params.strategy === "cherry-pick") {
+				const head = await runShellCommand(`git rev-parse ${row.branch}`, { cwd: ctx.cwd });
+				if (head.exitCode !== 0) {
+					return errorToolResult(`Could not resolve ${row.branch}: ${head.stderr.trim() || head.stdout.trim()}`);
+				}
+				const pick = await cherryPickFromBranch(ctx.cwd, row.branch, head.stdout.trim());
+				if (pick.exitCode !== 0) {
+					return errorToolResult(
+						`Cherry-pick failed (exit ${pick.exitCode}): ${pick.stderr.trim() || pick.stdout.trim()}`,
+					);
+				}
+				await finalizeExperimentMerge(ctx, row, "cherry-pick", pick.newCommit);
+				return successToolResult(
+					`Cherry-picked ${row.branch} into main as ${pick.newCommit?.slice(0, 7) ?? "(no commit)"}`,
+				);
+			}
+
+			if (params.strategy === "squash") {
+				if (!params.squash_message) {
+					return errorToolResult("strategy='squash' requires squash_message.");
+				}
+				const sq = await squashSinceParent(ctx.cwd, row.branch, row.parentCommit, params.squash_message);
+				if (sq.exitCode !== 0) {
+					return errorToolResult(`Squash failed (exit ${sq.exitCode}): ${sq.stderr.trim() || sq.stdout.trim()}`);
+				}
+				if (sq.wasNoOp) {
+					return errorToolResult(
+						"No commits to squash. The experiment worktree has no commits beyond the parent.",
+					);
+				}
+				await finalizeExperimentMerge(ctx, row, "squash", sq.newCommit);
+				return successToolResult(
+					`Squashed ${row.branch} into main as ${sq.newCommit?.slice(0, 7) ?? "(no commit)"}`,
+				);
+			}
+
+			const merge = await runShellCommand(
+				`git merge --no-ff ${row.branch} -m "Merge experiment ${row.id} (${row.approach})"`,
+				{ cwd: ctx.cwd },
+			);
+			if (merge.exitCode !== 0) {
+				return errorToolResult(
+					`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`,
+				);
+			}
+			const head = await runShellCommand("git rev-parse HEAD", { cwd: ctx.cwd });
+			await finalizeExperimentMerge(ctx, row, "merge", head.exitCode === 0 ? head.stdout.trim() : undefined);
+			return successToolResult(`Merged ${row.branch} into main as ${head.stdout.trim().slice(0, 7)}`);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_discard
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_discard",
+		label: "Experiment Discard",
+		description:
+			"Remove the worktree and mark the experiment as discarded. The branch is kept by default with WHY_IT_FAILED.md for archaeology.",
+		parameters: DiscardParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const row = getExperimentRow(ctx.cwd, params.experiment_id);
+			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			const keepBranch = params.keep_branch ?? true;
+			if (keepBranch) {
+				const whyPath = join(row.worktreePath, "WHY_IT_FAILED.md");
+				try {
+					fs.writeFileSync(
+						whyPath,
+						`# Why this experiment failed\n\n` +
+							`**Approach:** ${row.approach}\n` +
+							`**Hypothesis:** ${row.hypothesis}\n` +
+							`**Discarded at:** ${new Date().toISOString()}\n\n` +
+							`## Reason\n\n${params.reason}\n\n` +
+							`## Original result\n\n\`\`\`json\n${JSON.stringify(row.result, null, 2)}\n\`\`\`\n`,
+						"utf-8",
+					);
+					await runShellCommand('git add WHY_IT_FAILED.md && git commit -m "experiment: record discard reason"', {
+						cwd: row.worktreePath,
+					});
+				} catch {
+					/* worktree may already be unwriteable; continue with removal */
+				}
+			}
+			const removed = await removeWorktree(ctx.cwd, row.worktreePath, true);
+			if (removed.exitCode !== 0) {
+				return errorToolResult(
+					`git worktree remove failed (exit ${removed.exitCode}): ${removed.stderr.trim()}\n\n` +
+						`On Windows this often means MAX_PATH or a handle lock. Move the build dir aside and retry:\n` +
+						`  Move-Item "${row.worktreePath}\\node_modules" "${row.worktreePath}\\__nm_backup" -Force\n` +
+						`  git worktree remove --force "${row.worktreePath}"`,
+				);
+			}
+			await pruneWorktrees(ctx.cwd);
+			if (!keepBranch) {
+				await runShellCommand(`git branch -D ${row.branch}`, { cwd: ctx.cwd });
+			}
+			updateExperiment(ctx.cwd, row.id, { status: "discarded" });
+			refreshStatusPill(ctx, ctx.cwd, stateFor(ctx).enabled);
+			return successToolResult(
+				`Discarded ${row.id} (${row.approach}). Branch ${keepBranch ? "kept" : "deleted"}: ${row.branch}`,
+			);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_list
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_list",
+		label: "Experiment List",
+		description: "List experiments, optionally filtered by status.",
+		parameters: ListParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const status = (params.status as ExperimentRow["status"] | "all" | undefined) ?? "all";
+			const rows = listExperiments(ctx.cwd, status);
+			if (rows.length === 0) {
+				return successToolResult(`No experiments${status === "all" ? "" : ` with status ${status}`}.`);
+			}
+			const text = rows
+				.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+				.map(
+					(r) =>
+						`[${r.status}] ${r.approach}  ${r.id}  (${r.createdAt.slice(0, 16)})  ${truncate(r.hypothesis, 60)}`,
+				)
+				.join("\n");
+			return successToolResult(`${rows.length} experiment(s):\n\n${text}`);
+		},
+	});
+
+	// -------------------------------------------------------------------------
+	// Tool: experiment_compare
+	// -------------------------------------------------------------------------
+	pi.registerTool({
+		name: "experiment_compare",
+		label: "Experiment Compare",
+		description: "Side-by-side diff of two experiments' benchmarks, tests, and diff stats.",
+		parameters: CompareParams,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const a = getExperimentRow(ctx.cwd, params.exp_id_1);
+			const b = getExperimentRow(ctx.cwd, params.exp_id_2);
+			if (!a) return errorToolResult(`Unknown experiment: ${params.exp_id_1}`);
+			if (!b) return errorToolResult(`Unknown experiment: ${params.exp_id_2}`);
+			const axes = params.axes ?? Object.keys({ ...a.result.benchmarks, ...b.result.benchmarks });
+			const lines: string[] = [];
+			for (const axis of axes) {
+				const av = a.result.benchmarks?.[axis];
+				const bv = b.result.benchmarks?.[axis];
+				if (typeof av !== "number" || typeof bv !== "number") continue;
+				const winner = av < bv ? a.approach : b.approach;
+				lines.push(`${axis}:  ${a.approach}=${av}  vs  ${b.approach}=${bv}  ->  winner=${winner}`);
+			}
+			const text =
+				`Comparing ${a.approach} (${a.id}) vs ${b.approach} (${b.id})\n\n` +
+				`hypotheses:\n  A: ${a.hypothesis}\n  B: ${b.hypothesis}\n\n` +
+				`tests: A=${a.result.testPassed ?? "?"}P/${a.result.testFailed ?? "?"}F  ` +
+				`B=${b.result.testPassed ?? "?"}P/${b.result.testFailed ?? "?"}F\n\n` +
+				(lines.length > 0 ? `benchmarks:\n${lines.join("\n")}\n` : "(no comparable benchmarks)\n");
+			return successToolResult(text);
+		},
+	});
+}
+
+async function finalizeExperimentMerge(
+	ctx: { cwd: string; ui: { setStatus(key: string, text: string | undefined): void } },
+	row: ExperimentRow,
+	strategy: "cherry-pick" | "squash" | "merge",
+	newCommit: string | undefined,
+): Promise<void> {
+	const logFile = experimentLogPath(ctx.cwd, row.id);
+	appendExperimentLogEvent(logFile, { type: "MERGED", strategy, commit: newCommit });
+	try {
+		await removeWorktree(ctx.cwd, row.worktreePath, true);
+	} catch {
+		/* removal may fail on Windows; leave it for the user to clean up */
+	}
+	updateExperiment(ctx.cwd, row.id, {
+		status: "merged",
+		merged: true,
+		mergeStrategy: strategy,
+		mergeCommit: newCommit,
+	});
+	ctx.ui.setStatus("experiments", undefined);
+	refreshStatusPill(ctx, ctx.cwd, false);
+}
+
 export default function (pi: ExtensionAPI) {
+	registerExperimentalMode(pi);
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Experimental mode in the `subagent` extension. Adds 8 tools (`experiment_start`, `experiment_run`, `experiment_test`, `experiment_diff`, `experiment_merge`, `experiment_discard`, `experiment_list`, `experiment_compare`) for hypothesis-driven worktree-based parallel exploration. Plus a `.pi-experiments/registry.json` audit trail, a footer status pill (`● N running`), a `Ctrl+E` / `/experiments` dashboard overlay, a `before_agent_start` prompt-fragment injector for the E.D.I.T. loop, and Research Mode auto-trigger after 3x-same-error. See the [Experimental mode section](examples/extensions/subagent/README.md#experimental-mode) for the full design and a worked example.
+
 - Added `@sentry/node` as a dependency and wired the official Sentry Node SDK into the coding-agent. When `PI_AI_DEBUG=1` and `SENTRY_DSN` are both set, the SDK initializes at startup, captures uncaught exceptions, unhandled rejections, and process warnings, and flushes on process exit. Both env vars are required; either alone is a no-op.
 - Added an opt-in live smoke test under `test/sentry-live.test.ts` that ships a real event to a configured Sentry DSN. Run with `PI_SENTRY_LIVE_TEST=1 npx vitest --run test/sentry-live.test.ts`.
 

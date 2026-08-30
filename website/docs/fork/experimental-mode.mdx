@@ -1,0 +1,199 @@
+---
+id: experimental-mode
+title: Experimental Mode (worktree-based subagent exploration)
+sidebar_label: Experimental Mode
+---
+
+# Experimental Mode
+
+Fork-only feature. When the implementation approach is uncertain,
+Experimental Mode turns the `subagent` extension into a hypothesis-driven
+worktree explorer. The agent forks one git worktree per candidate
+approach, runs each in parallel, measures the result, and merges the
+winner back to the main branch.
+
+This page is the design reference. For install + verification, see
+[Experimental Mode in the subagent README](https://github.com/bramburn/pi/blob/main/packages/coding-agent/examples/extensions/subagent/README.md#experimental-mode).
+
+## The E.D.I.T. loop
+
+For every non-trivial implementation, the agent runs through four
+phases. Skipping a phase is the most common failure mode.
+
+**E — Explore.** Generate 2–4 candidate approaches. State the
+**workload-mix assumption** (I/O-bound vs CPU-bound) up front — every
+conclusion flips if the workload is the other shape. Write the
+**one-sentence falsification condition** for the eventual winner.
+
+**D — Deploy.** For the top 2 candidates, call `experiment_start` to
+fork a worktree per approach. Write the smallest possible
+implementation that could answer the question. Throwaway is fine.
+
+**I — Investigate.** Call `experiment_run` and `experiment_test` for
+each worktree. Record the result. If the same tool-call error appears
+3 times in a row, Research Mode fires a `notify()` and appends a log
+event.
+
+**T — Transfer.** Write `decisions.md` with the winner, then call
+`experiment_merge` on the winner and `experiment_discard` on the
+losers with a one-line reason. The branch and `WHY_IT_FAILED.md` stay
+on disk for archaeology.
+
+## The 8 tools
+
+Each is a top-level `pi.registerTool` call inside the existing
+`subagent` extension. No new extension, no new package.
+
+| Tool | When |
+|---|---|
+| `experiment_start` | Fork a worktree + branch for one approach. One per candidate. |
+| `experiment_run` | Run a shell command inside the worktree. Output goes to `log.jsonl`. |
+| `experiment_test` | Auto-detect bun / vitest / jest / npm test, run, record pass/fail. |
+| `experiment_diff` | files changed / insertions / deletions / commits vs parent. |
+| `experiment_merge` | cherry-pick / squash / merge the winner back to main. |
+| `experiment_discard` | Remove the worktree; keep the branch + `WHY_IT_FAILED.md`. |
+| `experiment_list` | Filter by status. |
+| `experiment_compare` | Side-by-side benchmark + test comparison. |
+
+## Commands and shortcuts
+
+| Command / shortcut | What it does |
+|---|---|
+| `/experimental on` | Inject the E.D.I.T. loop fragment into the system prompt. |
+| `/experimental off` | Remove the fragment. Active experiments continue. |
+| `/experiments` | Open the dashboard overlay. |
+| `Ctrl+E` | Open the dashboard overlay. |
+
+The footer shows a status pill (`● N running · M total · Ctrl+E for
+dashboard`) when experimental mode is on.
+
+## Worktree substrate
+
+Every worktree lives at `<repo>/.pi-experiments/<approach-slug>/`. One
+branch per approach: `exp/<approach-slug>`. The registry at
+`.pi-experiments/registry.json` is the single source of truth, with
+`registry.lock` (5-second retry) for multi-process safety. Per-experiment
+output streams to `.pi-experiments/<id>/log.jsonl` (append-only, one
+JSON event per line, 1 MB cap per line).
+
+## Composing with the existing subagent tool
+
+The two capabilities compose at the tool-call level. After
+`experiment_start`, call the existing `subagent` tool with
+`cwd: experiment.worktreePath` to dispatch a specialised agent in
+that worktree:
+
+```text
+experiment_start(approach_name="bench", hypothesis="...")
+subagent({ agent: "worker", task: "implement and benchmark",
+           cwd: "<worktreePath from previous tool result>" })
+experiment_test(experiment_id)
+experiment_merge(experiment_id, "cherry-pick")
+```
+
+The subagent subprocess runs in the worktree via the `cwd` parameter
+that already existed on `runSingleAgent`. Isolated context + filesystem
+isolation, no API change to the existing subagent tool.
+
+## Security model
+
+- **No remote.** Every worktree is at `<repo>/.pi-experiments/`. No
+  network calls, no telemetry, no external services.
+- **Registry is gitignored.** The agent's scratch space is never
+  committed. Add `<repo>/.pi-experiments/` to `.gitignore` to make
+  this explicit.
+- **Branch is kept after merge/discard.** The audit trail (branch +
+  `WHY_IT_FAILED.md` for losers, `MERGED.md` note for winners) is
+  the permanent record. The worktree directory is removed once the
+  merge commit lands.
+- **Project-local agents gated by confirmation.** The existing
+  `subagent` extension's `agentScope: "project" | "both"` flow still
+  applies when subagents run inside an experiment worktree.
+
+## Failure handling
+
+| Failure | Behaviour |
+|---|---|
+| `git` not on PATH | `experiment_start` fails with "experimental mode requires git" |
+| Worktree path already exists | `experiment_start` returns the offending path; run `experiment_discard` first |
+| `git worktree remove` fails (Windows MAX_PATH, handle lock) | Error message includes the `Move-Item` command to move the build dir aside |
+| Lock contention (another pi process) | After 5s, surface a `notify()` and fall back to read-only |
+| `experiment_run` hangs >10 min | `SIGTERM` at 10 min, `SIGKILL` at 10:05 min; registry marks `cancelled` |
+| Same tool fails 3x | Research Mode `notify()` + log event |
+| Pi crashes mid-experiment | On `session_start`, `running` rows whose pid is gone are flipped to `failed` |
+
+## Worked example
+
+```text
+/experimental on
+```
+
+User: *"We're not sure how to structure the subagent primitive — try Bun IPC vs in-process AsyncLocalStorage."*
+
+Agent (E — Explore):
+
+| Approach | Conf | Risk | Hypothesis | Disconfirming evidence |
+|---|---|---|---|---|
+| `bun-ipc-worker` | 7 | M | `Bun.spawn({ ipc: true })` gives sub-ms IPC, clean process isolation | spawn p95 > 50 ms; structuredClone cost > 1 ms at 100 KB |
+| `als-teammate` | 5 | L | In-process teammates via `AsyncLocalStorage` avoid IPC entirely | Context leak between teammates; memory > 200 MB at 4 teammates |
+
+Workload assumption: assumed I/O-bound. Falsification condition: if a
+single concrete teammate workload has p95 latency dominated by CPU
+(not I/O) and the TUI visibly stutters, move to Bun workers.
+
+Agent (D — Deploy):
+
+```text
+experiment_start(hypothesis="...", approach_name="bun-ipc")
+experiment_start(hypothesis="...", approach_name="als-teammate")
+```
+
+Agent (I — Investigate):
+
+```text
+experiment_run(bun-ipc, "bun bench/spawn.ts 1000")
+experiment_run(als-teammate, "bun bench/als-ctx.ts 1000")
+experiment_test(bun-ipc)
+experiment_test(als-teammate)
+```
+
+Agent (T — Transfer):
+
+```text
+experiment_compare(bun-ipc, als-teammate)
+experiment_merge(bun-ipc, "cherry-pick")
+experiment_discard(als-teammate, keep_branch=true, reason="...")
+```
+
+Result: a clean audit trail (runlog rows, `decisions.md`,
+`WHY_IT_FAILED.md` on the discarded branch), one `merged` registry
+entry, and a `● 0 running` status pill.
+
+## Phase ladder
+
+The skill behind this extension is `pi-experimental-mode`. It is
+gated on Phase 1 (extension) → Phase 2 (background task registry in
+`packages/agent-core`) → Phase 3 (shared `SubagentSpec` primitive).
+This feature ships as Phase 1. The other phases are gated on
+real-world usage and are out of scope for this release.
+
+## Tests
+
+E2E coverage lives in
+`packages/coding-agent/test/suite/regressions/subagent-experimental-mode-e2e.test.ts`
+(25 tests, all green). The suite covers:
+
+- Registry: atomic write, lock contention, corrupted-file recovery, multi-row round-trip.
+- Research Mode: 3x-same-error trigger, success-reset, disabled-flag.
+- Runner: stdout capture, non-zero exit, abort signal.
+- Worktree: isGitRepo, create/remove round-trip, duplicate-path rejection, diff accuracy, cherry-pick, squash.
+- Extension factory: 9 tools registered, prompt-injection gating.
+- E2E: full E.D.I.T. cycle on a real worktree — start 2 approaches, run commands, diff, compare, merge the winner, discard the loser with branch + `WHY_IT_FAILED.md` kept, plus status-pill tracking.
+
+Run with:
+
+```bash
+cd packages/coding-agent
+node ../../node_modules/vitest/dist/cli.js --run \
+  test/suite/regressions/subagent-experimental-mode-e2e.test.ts
+```
