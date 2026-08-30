@@ -115,7 +115,7 @@ function validateExternalImports(metafiles) {
 	for (const metafile of metafiles) {
 		for (const input of Object.values(metafile.inputs)) {
 			for (const imported of input.imports) {
-				if (!imported.external || isBuiltin(imported.path) || allowedExternalPackages.has(imported.path)) {
+				if (!imported.external || isBuiltin(imported.path) || allowedExternalPackages.has(imported.path) || imported.path === "<runtime>") {
 					continue;
 				}
 				unexpected.add(imported.path);
