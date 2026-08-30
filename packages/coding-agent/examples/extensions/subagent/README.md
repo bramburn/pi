@@ -1,6 +1,7 @@
-# Subagent Example
+# Subagent Extension
 
-Delegate tasks to specialized subagents with isolated context windows.
+Delegate tasks to specialized subagents with isolated context windows, and run
+hypothesis-driven parallel experiments in git worktrees.
 
 ## Features
 
@@ -10,6 +11,10 @@ Delegate tasks to specialized subagents with isolated context windows.
 - **Markdown rendering**: Final output rendered with proper formatting (expanded view)
 - **Usage tracking**: Shows turns, tokens, cost, and context usage per agent
 - **Abort support**: Ctrl+C propagates to kill subagent processes
+- **Experimental mode**: 8 sibling tools (`experiment_start`, `experiment_run`,
+  `experiment_test`, `experiment_diff`, `experiment_merge`, `experiment_discard`,
+  `experiment_list`, `experiment_compare`) for hypothesis-driven worktree
+  exploration, plus a registry, status pill, and Research Mode auto-trigger.
 
 ## Structure
 
@@ -168,6 +173,142 @@ Project agents override user agents with the same name when `agentScope: "both"`
 - **stopReason "error"**: LLM error propagated with error message
 - **stopReason "aborted"**: User abort (Ctrl+C) kills subprocess, throws error
 - **Chain mode**: Stops at first failing step, reports which step failed
+
+## Experimental mode
+
+When the implementation approach is uncertain, turn on experimental mode to fork
+worktrees per candidate, run each, measure, and pick a winner with evidence.
+
+```
+/experimental on          # injects the E.D.I.T. loop fragment into the system prompt
+```
+
+Then the agent has 8 new tools:
+
+| Tool | When |
+|---|---|
+| `experiment_start` | Fork a worktree + branch for one approach. One per candidate. |
+| `experiment_run` | Run a shell command inside the worktree. Output goes to `log.jsonl`. |
+| `experiment_test` | Auto-detect bun / vitest / jest / npm test, run, record pass/fail. |
+| `experiment_diff` | files changed / insertions / deletions / commits vs parent. |
+| `experiment_merge` | cherry-pick / squash / merge the winner back to main. |
+| `experiment_discard` | Remove the worktree; keep the branch + `WHY_IT_FAILED.md`. |
+| `experiment_list` | Filter by status. |
+| `experiment_compare` | Side-by-side benchmark + test comparison. |
+
+The footer shows a status pill (`● N running`). `Ctrl+E` (or `/experiments`)
+opens the dashboard overlay with the full registry.
+
+### The E.D.I.T. loop
+
+For every non-trivial implementation, the agent runs through:
+
+**E**xplore — generate 2–4 candidate approaches. State the workload-mix
+assumption (I/O-bound vs CPU-bound) up front. Write the one-sentence
+falsification condition for the eventual winner.
+
+**D**eploy — for the top 2 candidates, call `experiment_start` to fork a
+worktree per approach. Write the smallest possible implementation that could
+answer the question. Throwaway is fine.
+
+**I**nvestigate — call `experiment_run` and `experiment_test` for each
+worktree. Record the result. If the same tool-call error appears 3 times in
+a row, Research Mode fires a `notify()` and appends a log event.
+
+**T**ransfer — write `decisions.md` with the winner, then call
+`experiment_merge` on the winner and `experiment_discard` on the losers with a
+one-line reason. The branch and `WHY_IT_FAILED.md` stay on disk for
+archaeology.
+
+### Worktree substrate
+
+Every worktree lives at `<repo>/.pi-experiments/<approach-slug>/`. One
+branch per approach: `exp/<approach-slug>`. The registry at
+`.pi-experiments/registry.json` is the single source of truth. Per-experiment
+output streams to `.pi-experiments/<id>/log.jsonl` (append-only, one JSON
+event per line, 1 MB cap per line).
+
+### Composing subagent with experiments
+
+The two capabilities compose at the tool-call level. After `experiment_start`,
+call the existing `subagent` tool with `cwd: experiment.worktreePath` to
+dispatch a specialized agent in that worktree:
+
+```
+experiment_start(hypothesis: "Bun IPC vs ALS for subagent primitive", approach_name: "bun-ipc")
+subagent({ agent: "worker", task: "implement + benchmark", cwd: "<worktreePath>" })
+experiment_test(experiment_id)
+experiment_diff(experiment_id)
+experiment_merge(experiment_id, "cherry-pick")
+```
+
+### Security model
+
+- Worktrees don't escape the project — every worktree is at
+  `<repo>/.pi-experiments/`, no remote, no containers.
+- `.pi-experiments/` is gitignored. Add it to your repo's `.gitignore` to
+  keep the agent's scratch space out of git.
+- `registry.lock` is a file lock with 5-second retry; a second pi process
+  opening the same repo gets a clear "registry locked" error and falls back
+  to read-only.
+- The branch is kept after merge/discard. The worktree directory is removed
+  once the merge commit lands.
+
+### Failure handling
+
+| Failure | Behaviour |
+|---|---|
+| `git` not on PATH | `experiment_start` fails with "experimental mode requires git" |
+| Worktree path already exists | `experiment_start` returns the offending path; run `experiment_discard` first |
+| `git worktree remove` fails (Windows MAX_PATH, handle lock) | Error message includes the `Move-Item` command to move the build dir aside |
+| Lock contention (another pi process) | After 5s, surface a `notify()` and fall back to read-only |
+| `experiment_run` hangs >10 min | `SIGTERM` at 10 min, `SIGKILL` at 10:05 min; registry marks `cancelled` |
+| Same tool fails 3x | Research Mode `notify()` + log event |
+| Pi crashes mid-experiment | On `session_start`, `running` rows whose pid is gone are flipped to `failed` |
+
+### Worked example
+
+```
+/experimental on
+```
+
+User: *"We're not sure how to structure the subagent primitive — try Bun IPC vs in-process AsyncLocalStorage."*
+
+Agent (E — Explore):
+
+| Approach | Conf | Risk | Hypothesis | Disconfirming evidence |
+|---|---|---|---|---|
+| `bun-ipc-worker` | 7 | M | `Bun.spawn({ ipc: true })` gives sub-ms IPC, clean process isolation | spawn p95 > 50 ms; structuredClone cost > 1 ms at 100 KB |
+| `als-teammate` | 5 | L | In-process teammates via `AsyncLocalStorage` avoid IPC entirely | Context leak between teammates; memory > 200 MB at 4 teammates |
+
+Workload assumption: assumed I/O-bound. Falsification condition: if a single
+concrete teammate workload has p95 latency dominated by CPU (not I/O) and the
+TUI visibly stutters, move to Bun workers.
+
+Agent (D — Deploy):
+```
+experiment_start(hypothesis="...", approach_name="bun-ipc")
+experiment_start(hypothesis="...", approach_name="als-teammate")
+```
+
+Agent (I — Investigate):
+```
+experiment_run(bun-ipc, "bun bench/spawn.ts 1000")
+experiment_run(als-teammate, "bun bench/als-ctx.ts 1000")
+experiment_test(bun-ipc)
+experiment_test(als-teammate)
+```
+
+Agent (T — Transfer):
+```
+experiment_compare(bun-ipc, als-teammate)
+experiment_merge(bun-ipc, "cherry-pick")
+experiment_discard(als-teammate, keep_branch=true, reason="...")
+```
+
+Result: a clean audit trail (runlog rows, `decisions.md`, `WHY_IT_FAILED.md`
+on the discarded branch), one `merged` registry entry, and a `● 0 running`
+status pill.
 
 ## Limitations
 

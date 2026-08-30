@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `SentryTelemetryContext`, a Sentry-backed adapter that implements the existing `TelemetryContext` contract, captures exceptions and messages, and emits Sentry `event` and `transaction` envelopes through a caller-supplied transport. The adapter has no runtime dependencies; the transport is injected so packages without HTTP client dependencies can wire their own.
+- Added `parseSentryDsn` to extract protocol, public key, host, optional port, path, and project id from a Sentry DSN string.
+
 ## [0.84.4] - 2026-08-28
 
 ## [0.84.3] - 2026-08-24

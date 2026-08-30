@@ -432,6 +432,9 @@ ${chalk.bold("Environment Variables:")}
   PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
   PI_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
   PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
+  PI_AI_DEBUG                      - Enable Sentry error reporting when set to 1/true/yes (requires SENTRY_DSN)
+  SENTRY_DSN                       - Sentry DSN (https://<key>@<host>/<project>) used when PI_AI_DEBUG=1
+  SENTRY_TRACES_SAMPLE_RATE        - Fraction (0..1) of root spans sent as Sentry transactions; default 0
 
 ${chalk.bold("Built-in Tool Names:")}
   read       - Read file contents

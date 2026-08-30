@@ -1396,16 +1396,6 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getFullscreenCopyOnSelect(): boolean {
-		return this.settings.fullscreenCopyOnSelect ?? true;
-	}
-
-	setFullscreenCopyOnSelect(enabled: boolean): void {
-		this.globalSettings.fullscreenCopyOnSelect = enabled;
-		this.markModified("fullscreenCopyOnSelect");
-		this.save();
-	}
-
 	getImageAutoResize(): boolean {
 		return this.settings.images?.autoResize ?? true;
 	}

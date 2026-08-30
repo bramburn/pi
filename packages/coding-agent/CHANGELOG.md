@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental mode in the `subagent` extension. Adds 8 tools (`experiment_start`, `experiment_run`, `experiment_test`, `experiment_diff`, `experiment_merge`, `experiment_discard`, `experiment_list`, `experiment_compare`) for hypothesis-driven worktree-based parallel exploration. Plus a `.pi-experiments/registry.json` audit trail, a footer status pill (`● N running`), a `Ctrl+E` / `/experiments` dashboard overlay, a `before_agent_start` prompt-fragment injector for the E.D.I.T. loop, and Research Mode auto-trigger after 3x-same-error. See the [Experimental mode section](examples/extensions/subagent/README.md#experimental-mode) for the full design and a worked example.
+
+- Added `@sentry/node` as a dependency and wired the official Sentry Node SDK into the coding-agent. When `PI_AI_DEBUG=1` and `SENTRY_DSN` are both set, the SDK initializes at startup, captures uncaught exceptions, unhandled rejections, and process warnings, and flushes on process exit. Both env vars are required; either alone is a no-op.
+- Added an opt-in live smoke test under `test/sentry-live.test.ts` that ships a real event to a configured Sentry DSN. Run with `PI_SENTRY_LIVE_TEST=1 npx vitest --run test/sentry-live.test.ts`.
+### Documentation
+
+- Documented the new `PI_AI_DEBUG`, `SENTRY_DSN`, and `SENTRY_TRACES_SAMPLE_RATE` environment variables in the `--help` output.
+
+- **DeepSeek Harness: Phase 0 — toggle surface** (item 1) — new opt-in `deepseekHarness` setting that routes the agent's prompt and context through a deepseek-harness-style pipeline. The toggle is off by default. Wired through every surface: TUI `/settings` row, RPC `set_deepseek_harness` command + `get_state` field, CLI `--deepseek-harness` and `--deepseek-harness-max-overflow-retries` flags, extension API `isDeepseekHarnessEnabled()`, and a built-in `MINIMAX_PROFILE` for the `minimax` / `minimax-cn` provider family. The resolver layers `DEFAULT_DEEPSEEK_HARNESS` → user → `MINIMAX_PROFILE` → exact-model override → provider-wildcard override. New `AgentSession._deepseekHarnessEnabled` mirror + `_refreshDeepseekHarnessPipeline()` placeholder for Phases 1-4.
+
+- **DeepSeek Harness: Phase 1 — overflow recovery + maxTokens + per-model policy + graceful notice** (items 2, 5, 6, 11) — multi-attempt overflow recovery driven by `maxOverflowRetries` (default 2, 3 for `minimax`/`minimax-cn`); `clampMaxTokensToContext` now accepts a per-call `safetyMargin` (1024 with the bundle, 4096 without); `CompactionSettings` gains `thresholdRatio` and `retainRatio`; on `length` finish with no tool calls, a trailing "Run /compact to continue" notice is appended.
+
+- **DeepSeek Harness: Phase 2 — tool-result re-pruner + read exemption + defaults** (items 3, 10, 15) — new `tool-result-pruner.ts` walks the agent's message array and rewrites over-budget tool results in place (head 4 KiB + marker + tail 1 KiB, default threshold 8 KiB). The `read` tool is exempt via `toolName === "read"` to break the read→truncate→read loop. The pruner cadence is every N turns (default 5, 3 for `minimax`/`minimax-cn`).
+
+- **DeepSeek Harness: Phase 3 — replay-prefix summarisation** (item 12) — `generateSummaryWithUsage` gains a `replayPrefix` flag. When the bundle is on, the live conversation is sent as the request prefix with the summarisation instruction as a new user message, so the provider's prompt cache (Anthropic prompt caching, OpenAI prompt cache) hits for the conversation bytes. The text-block fallback is preserved when the bundle is off.
+
+- **DeepSeek Harness: Phase 4 — byte-budgeted AGENTS.md** (item 7) — new `system-prompt-render.ts` wraps the AGENTS.md chain in a `<system-reminder>` envelope with a `maxBytes` budget (default 20 KiB), UTF-8-safe truncation at code-point boundaries, and per-file omission diagnostics. The legacy inline `<project_context>` path is preserved when the bundle is off.
 ## [0.84.4] - 2026-08-28
 
 ### New Features

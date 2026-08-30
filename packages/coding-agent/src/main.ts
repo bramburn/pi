@@ -59,6 +59,7 @@ import { ModelRuntime } from "./core/model-runtime.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
+import { initSentryIfEnabled, type SentryContextHandle } from "./core/sentry.ts";
 import {
 	formatMissingSessionCwdPrompt,
 	getMissingSessionCwdIssue,
@@ -705,6 +706,21 @@ export async function main(args: string[], options?: MainOptions) {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 	}
 
+	const sentryContext = initSentryIfEnabled();
+	try {
+		await runMainBody(args, options, extensionFactories, offlineMode, sentryContext);
+	} finally {
+		await sentryContext?.dispose();
+	}
+}
+
+async function runMainBody(
+	args: string[],
+	_options: MainOptions | undefined,
+	extensionFactories: InlineExtension[],
+	offlineMode: boolean,
+	_sentryContext: SentryContextHandle | undefined,
+): Promise<void> {
 	if (await runAuthCommand(args)) {
 		return;
 	}
