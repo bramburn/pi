@@ -4,11 +4,12 @@
 
 ### Added
 
-- Added opt-in Sentry error reporting controlled by the `PI_AI_DEBUG` and `SENTRY_DSN` environment variables. When `PI_AI_DEBUG=1` and `SENTRY_DSN` point to a Sentry project, the coding-agent captures uncaught exceptions, unhandled rejections, and process warnings, and flushes them to the Sentry envelope endpoint via `undici` on exit. Both env vars are required; either alone is a no-op.
+- Added `@sentry/node` as a dependency and wired the official Sentry Node SDK into the coding-agent. When `PI_AI_DEBUG=1` and `SENTRY_DSN` are both set, the SDK initializes at startup, captures uncaught exceptions, unhandled rejections, and process warnings, and flushes on process exit. Both env vars are required; either alone is a no-op.
+- Added an opt-in live smoke test under `test/sentry-live.test.ts` that ships a real event to a configured Sentry DSN. Run with `PI_SENTRY_LIVE_TEST=1 npx vitest --run test/sentry-live.test.ts`.
 
 ### Documentation
 
-- Documented the new `PI_AI_DEBUG` and `SENTRY_DSN` environment variables in the `--help` output.
+- Documented the new `PI_AI_DEBUG`, `SENTRY_DSN`, and `SENTRY_TRACES_SAMPLE_RATE` environment variables in the `--help` output.
 
 ## [0.84.4] - 2026-08-28
 
