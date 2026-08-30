@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" fill="none">
+  <!-- Logo mark: stylized pi -->
+  <rect x="0" y="8" width="44" height="44" rx="10" fill="#4f86f7"/>
+  <text x="7" y="43" font-family="system-ui, sans-serif" font-size="34" font-weight="700" fill="white">π</text>
+  <!-- Wordmark -->
+  <text x="54" y="40" font-family="system-ui, sans-serif" font-size="30" font-weight="600" fill="#e6edf3">pi</text>
+  <text x="100" y="40" font-family="system-ui, sans-serif" font-size="14" font-weight="400" fill="#8b949e">dev</text>
+</svg>

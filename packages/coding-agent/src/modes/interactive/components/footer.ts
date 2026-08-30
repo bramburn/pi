@@ -49,6 +49,7 @@ export function formatCwdForFooter(cwd: string, home: string | undefined): strin
  */
 export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
+	private deepseekHarnessEnabled = false;
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
 
@@ -63,6 +64,10 @@ export class FooterComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
+	}
+
+	setDeepseekHarnessEnabled(enabled: boolean): void {
+		this.deepseekHarnessEnabled = enabled;
 	}
 
 	/**
@@ -147,10 +152,11 @@ export class FooterComponent implements Component {
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+		const dhIndicator = this.deepseekHarnessEnabled ? (this.autoCompactEnabled ? " DH/AC" : " DH") : "";
 		const contextPercentDisplay =
 			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+				? `?/${formatTokens(contextWindow)}${autoIndicator}${dhIndicator}`
+				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}${dhIndicator}`;
 		if (contextPercentValue > 90) {
 			contextPercentStr = theme.fg("error", contextPercentDisplay);
 		} else if (contextPercentValue > 70) {

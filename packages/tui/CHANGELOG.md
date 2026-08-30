@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ## [0.84.4] - 2026-08-28
+### Fork-local (bramburn)
+
+- Removed fullscreen TUI mode
 
 ### Added
 

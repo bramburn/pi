@@ -446,11 +446,41 @@ export class TuiMainScreen extends TuiBase implements TUI {
 		}
 
 		// Differential rendering can only touch what was actually visible.
-		// If the first changed line is above the previous viewport, we need a full redraw.
+		// If the first changed line is above the previous viewport, we need to decide
+		// whether a full redraw (with scrollback clear) is truly necessary.
+		// Without this guard, every streaming append causes a scrollback clear, which
+		// yanks the user's scroll position to the top (see issue #6050).
 		if (firstChanged < prevViewportTop) {
-			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-			fullRender(true);
-			return;
+			// Case A: ALL changes are entirely above the viewport — nothing visible to
+			// redraw. In main-screen mode those rows are already in terminal scrollback.
+			// Sync state and return without touching the terminal.
+			if (lastChanged < prevViewportTop) {
+				logRedraw(`all changes off-screen (${firstChanged}..${lastChanged} < ${prevViewportTop}); skipping draw`);
+				this.previousLines = newLines;
+				this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+				this.previousWidth = width;
+				this.previousHeight = height;
+				this.previousViewportTop = prevViewportTop;
+				return;
+			}
+
+			// Case B: The new buffer no longer reaches the previous viewport top.
+			// Stale content from the old buffer would become visible — must clear and
+			// redraw. (Only guard: buffer genuinely shrank, not just changed above.)
+			if (newLines.length < prevViewportTop) {
+				logRedraw(`buffer shrank below prev viewport top (${newLines.length} < ${prevViewportTop})`);
+				fullRender(true);
+				return;
+			}
+
+			// Case C: Mixed off-screen and on-screen changes. The differential path
+			// can't move the cursor above the viewport to rewrite off-screen lines
+			// without duplicating them, so clamp the change range to the visible
+			// viewport. The diff path will then overwrite the visible rows and
+			// any appended tail.
+			logRedraw(`clamping off-screen firstChanged (${firstChanged}) to viewportTop (${prevViewportTop})`);
+			firstChanged = prevViewportTop;
+			lastChanged = Math.min(lastChanged, prevViewportTop + height - 1);
 		}
 
 		// Render from first changed line to end

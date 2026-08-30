@@ -1,11 +1,12 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { getSupportedThinkingLevels, type Model, type Transport } from "@earendil-works/pi-ai";
+import type { Transport } from "@earendil-works/pi-ai";
 import {
 	type Component,
 	Container,
 	getCapabilities,
-	type ScrollViewScrollbar,
 	type SelectItem,
+	SelectList,
+	type SelectListLayoutOptions,
 	type SettingItem,
 	SettingsList,
 	Spacer,
@@ -14,17 +15,24 @@ import {
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type {
 	DefaultProjectTrust,
-	FullscreenExitOutput,
 	MermaidRenderingMode,
-	TuiMode,
+	NewSessionModelPreference,
 	WarningSettings,
 } from "../../../core/settings-manager.ts";
-import { getSettingsListTheme, parseAutoThemeSetting, type TerminalTheme, theme } from "../theme/theme.ts";
+import {
+	getSelectListTheme,
+	getSettingsListTheme,
+	parseAutoThemeSetting,
+	type TerminalTheme,
+	theme,
+} from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyDisplayText } from "./keybinding-hints.ts";
-import { SelectSubmenu, SteppedSubmenu, type SteppedSubmenuStep } from "./settings-submenu.ts";
 
-const MODEL_PICKER_LAYOUT = { minPrimaryColumnWidth: 12, maxPrimaryColumnWidth: 46 };
+const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
+	minPrimaryColumnWidth: 12,
+	maxPrimaryColumnWidth: 32,
+};
 
 const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
@@ -48,9 +56,7 @@ const DEFAULT_PROJECT_TRUST_BY_LABEL = new Map(
 
 export interface SettingsConfig {
 	autoCompact: boolean;
-	defaultModel: string;
-	currentModel?: Model<any>;
-	availableDefaultModels: readonly Model<any>[];
+	deepseekHarness: boolean;
 	showImages: boolean;
 	imageWidthCells: number;
 	autoResizeImages: boolean;
@@ -62,7 +68,6 @@ export interface SettingsConfig {
 	httpIdleTimeoutMs: number;
 	thinkingLevel: ThinkingLevel;
 	availableThinkingLevels: ThinkingLevel[];
-	modelThinkingLevels: Record<string, ThinkingLevel>;
 	currentTheme: string;
 	terminalTheme: TerminalTheme;
 	availableThemes: string[];
@@ -81,15 +86,34 @@ export interface SettingsConfig {
 	defaultProjectTrust: DefaultProjectTrust;
 	clearOnShrink: boolean;
 	showTerminalProgress: boolean;
-	tuiMode: TuiMode;
-	fullscreenExitOutput: FullscreenExitOutput;
-	fullscreenScrollbar: ScrollViewScrollbar;
-	fullscreenCopyOnSelect: boolean;
+	/** What to render in the scrollback after the user exits fullscreen TUI. */
+	fullscreenExitOutput: "resume-hint" | "transcript";
+	/** When to show the fullscreen-mode scrollbar. */
+	fullscreenScrollbar: "always" | "hidden" | "auto";
 	warnings: WarningSettings;
+	newSessionModel: NewSessionModelPreference;
+	/** Human label for the configured specific model (mode === "specific"). */
+	newSessionModelSpecificLabel?: string;
+	/** Human label for the last used model, when known. */
+	lastUsedModelLabel?: string;
+}
+
+export interface NewSessionModelSubmenuCallbacks {
+	/** Persist a new preference. */
+	onChange: (preference: NewSessionModelPreference) => void;
+	/**
+	 * Ask the host interactive mode to display the searchable model picker
+	 * so the user can pick the "specific" model. The callback receives the
+	 * selected model (provider + id) or undefined if the user cancelled.
+	 */
+	requestModelSelector: (onPicked: (selection: { provider: string; modelId: string } | undefined) => void) => void;
+	/** Resolve a human-readable label for a provider+modelId pair. */
+	resolveModelLabel: (provider: string, modelId: string) => string;
 }
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
+	onDeepseekHarnessChange: (enabled: boolean) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onImageWidthCellsChange: (width: number) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
@@ -99,8 +123,7 @@ export interface SettingsCallbacks {
 	onFollowUpModeChange: (mode: "all" | "one-at-a-time") => void;
 	onTransportChange: (transport: Transport) => void;
 	onHttpIdleTimeoutMsChange: (timeoutMs: number) => void;
-	onModelThinkingLevelChange: (provider: string, modelId: string, level: ThinkingLevel) => void;
-	onModelThinkingLevelRemove: (provider: string, modelId: string) => void;
+	onThinkingLevelChange: (level: ThinkingLevel) => void;
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
@@ -118,11 +141,18 @@ export interface SettingsCallbacks {
 	onDefaultProjectTrustChange: (defaultProjectTrust: DefaultProjectTrust) => void;
 	onClearOnShrinkChange: (enabled: boolean) => void;
 	onShowTerminalProgressChange: (enabled: boolean) => void;
-	onTuiModeChange: (mode: TuiMode) => void;
-	onFullscreenExitOutputChange: (output: FullscreenExitOutput) => void;
-	onFullscreenScrollbarChange: (mode: ScrollViewScrollbar) => void;
-	onFullscreenCopyOnSelectChange: (enabled: boolean) => void;
+	onFullscreenExitOutputChange: (output: "resume-hint" | "transcript") => void;
+	onFullscreenScrollbarChange: (mode: "always" | "hidden" | "auto") => void;
 	onWarningsChange: (warnings: WarningSettings) => void;
+	onNewSessionModelChange: (preference: NewSessionModelPreference) => void;
+	/**
+	 * Bridge to the host interactive mode so the "New session model →
+	 * Use specific model" submenu can open the searchable model picker
+	 * without leaving the settings list. The host is responsible for
+	 * re-opening the settings list (with the updated preference) once
+	 * the picker resolves.
+	 */
+	requestModelSelector: (onPicked: (selection: { provider: string; modelId: string } | undefined) => void) => void;
 	onCancel: () => void;
 }
 
@@ -171,24 +201,210 @@ class WarningSettingsSubmenu extends Container {
 	}
 }
 
-const CLEAR_OVERRIDE_VALUE = "__clear__";
+class SelectSubmenu extends Container {
+	private selectList: SelectList;
 
-function modelSettingKey(model: Model<any>): string {
-	return `${model.provider}/${model.id}`;
+	constructor(
+		title: string,
+		description: string,
+		options: SelectItem[],
+		currentValue: string,
+		onSelect: (value: string) => void,
+		onCancel: () => void,
+		onSelectionChange?: (value: string) => void,
+	) {
+		super();
+
+		// Title
+		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 0, 0));
+
+		// Description
+		if (description) {
+			this.addChild(new Spacer(1));
+			this.addChild(new Text(theme.fg("muted", description), 0, 0));
+		}
+
+		// Spacer
+		this.addChild(new Spacer(1));
+
+		// Select list
+		this.selectList = new SelectList(
+			options,
+			Math.min(options.length, 10),
+			getSelectListTheme(),
+			SETTINGS_SUBMENU_SELECT_LIST_LAYOUT,
+		);
+
+		// Pre-select current value
+		const currentIndex = options.findIndex((o) => o.value === currentValue);
+		if (currentIndex !== -1) {
+			this.selectList.setSelectedIndex(currentIndex);
+		}
+
+		this.selectList.onSelect = (item) => {
+			onSelect(item.value);
+		};
+
+		this.selectList.onCancel = onCancel;
+
+		if (onSelectionChange) {
+			this.selectList.onSelectionChange = (item) => {
+				onSelectionChange(item.value);
+			};
+		}
+
+		this.addChild(this.selectList);
+
+		// Hint
+		this.addChild(new Spacer(1));
+		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
+	}
+
+	handleInput(data: string): void {
+		this.selectList.handleInput(data);
+	}
 }
 
-function modelDisplayLabel(model: Model<any>): string {
-	return `${model.id} [${model.provider}]`;
+/**
+ * Settings submenu for choosing how a brand-new session picks its
+ * initial model. Mirrors the "use global default / use last used / use
+ * specific" trichotomy documented for the newSessionModel preference.
+ *
+ * "Use specific model" defers to the host interactive mode (via
+ * `requestModelSelector`) to open the same searchable model picker as
+ * /model. The host is responsible for re-opening the settings list once
+ * a model is picked.
+ */
+class NewSessionModelSubmenu extends Container {
+	private settingsList: SettingsList;
+	private state: NewSessionModelPreference;
+
+	constructor(
+		initial: NewSessionModelPreference,
+		preference: {
+			lastUsedLabel?: string;
+			specificLabel?: string;
+		},
+		callbacks: NewSessionModelSubmenuCallbacks,
+		onCancel: () => void,
+	) {
+		super();
+		this.state = cloneNewSessionModelPreference(initial);
+
+		const lastUsedDesc = preference.lastUsedLabel
+			? `Last used: ${preference.lastUsedLabel}`
+			: "No model has been selected yet; falls back to the global default";
+		const specificDesc = preference.specificLabel
+			? `Currently ${preference.specificLabel}`
+			: "Open the model picker to choose a model";
+
+		// Single-shot activation: each row's `submenu` callback fires
+		// `done` synchronously, which routes through this SettingsList's
+		// onChange (the id dispatch below) and then closes the submenu.
+		// We return a no-op Container because SettingsList assigns the
+		// return value to submenuComponent, but the outer submenu is
+		// closed via onCancel() in the dispatch, so the inner submenu
+		// is never reachable and the placeholder is orphaned.
+		const fireAndForget = (done: (value?: string) => void, value: string): Container => {
+			done(value);
+			return new Container();
+		};
+
+		const items: SettingItem[] = [
+			{
+				id: "mode-global",
+				label: "Use global default",
+				description: "Match the global default model (the same as before this setting existed)",
+				currentValue: this.state.mode === "global" ? "global" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "global"),
+			},
+			{
+				id: "mode-last-used",
+				label: "Use last used model",
+				description: lastUsedDesc,
+				currentValue: this.state.mode === "lastUsed" ? "lastUsed" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "lastUsed"),
+			},
+			{
+				id: "mode-specific",
+				label: "Use specific model",
+				description: specificDesc,
+				currentValue: this.state.mode === "specific" ? "specific" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "specific"),
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			items.length,
+			getSettingsListTheme(),
+			(id, _newValue) => {
+				if (id === "mode-global") {
+					this.state = { mode: "global" };
+					callbacks.onChange(this.state);
+					// HIGH-3: close the submenu so the user sees the
+					// updated main row instead of staring at an
+					// unchanged-looking submenu.
+					onCancel();
+					return;
+				}
+				if (id === "mode-last-used") {
+					this.state = { mode: "lastUsed" };
+					callbacks.onChange(this.state);
+					onCancel();
+					return;
+				}
+				if (id === "mode-specific") {
+					// Defer to the host to open the model picker. The
+					// `requestModelSelector` bridge in SettingsSelectorComponent
+					// closes the submenu (via `done()`) before opening the
+					// picker, so we don't call onCancel() here.
+					callbacks.requestModelSelector((selection) => {
+						if (selection) {
+							this.state = {
+								mode: "specific",
+								specific: { provider: selection.provider, modelId: selection.modelId },
+							};
+							callbacks.onChange(this.state);
+						}
+						// User cancelled: leave the preference untouched.
+					});
+				}
+			},
+			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
 }
 
-function modelThinkingOverridesSummary(overrides: Record<string, ThinkingLevel>): string {
-	const count = Object.keys(overrides).length;
-	if (count === 0) return "none";
-	return `${count} configured`;
+function cloneNewSessionModelPreference(pref: NewSessionModelPreference): NewSessionModelPreference {
+	return pref.specific
+		? { mode: pref.mode, specific: { provider: pref.specific.provider, modelId: pref.specific.modelId } }
+		: { mode: pref.mode };
 }
 
-function modelItemLabel(model: Model<any>): string {
-	return `${model.id} ${theme.fg("muted", `[${model.provider}]`)}`;
+function formatNewSessionModelValue(
+	pref: NewSessionModelPreference | undefined,
+	labels: { lastUsedModelLabel?: string; newSessionModelSpecificLabel?: string } = {},
+): string {
+	if (!pref) return "Use global default";
+	if (pref.mode === "global") return "Global default";
+	if (pref.mode === "lastUsed") {
+		return labels.lastUsedModelLabel ? `Last used: ${labels.lastUsedModelLabel}` : "Last used";
+	}
+	if (pref.mode === "specific") {
+		if (pref.specific) {
+			const label = labels.newSessionModelSpecificLabel ?? `${pref.specific.provider}/${pref.specific.modelId}`;
+			return `Specific: ${label}`;
+		}
+		return "Specific (unset)";
+	}
+	return "Use global default";
 }
 
 function themeItems(availableThemes: string[]): SelectItem[] {
@@ -445,16 +661,19 @@ export class SettingsSelectorComponent extends Container {
 
 		const supportsImages = getCapabilities().images;
 		const followUpKey = keyDisplayText("app.message.followUp");
-		const cycleThinkingKey = keyDisplayText("app.thinking.cycle");
 		let currentWarnings = { ...config.warnings };
-		const currentModelThinkingLevels = { ...config.modelThinkingLevels };
-		const defaultModelByValue = new Map(
-			config.availableDefaultModels.map((model) => [modelSettingKey(model), model]),
-		);
-		const currentDefaultModelKey = defaultModelByValue.has(config.defaultModel) ? config.defaultModel : undefined;
-		const currentModelKey = config.currentModel ? modelSettingKey(config.currentModel) : undefined;
 
 		const items: SettingItem[] = [
+			{
+				id: "deepseek-harness",
+				label: "DeepSeek Harness",
+				description:
+					"Route prompts through the deepseek-harness-style pipeline: " +
+					"overflow retry, tool result re-pruning, replay-prefix " +
+					"summarisation, byte-budgeted AGENTS.md.",
+				currentValue: config.deepseekHarness ? "true" : "false",
+				values: ["true", "false"],
+			},
 			{
 				id: "autocompact",
 				label: "Auto-compact",
@@ -509,7 +728,7 @@ export class SettingsSelectorComponent extends Container {
 			{
 				id: "cache-miss-notices",
 				label: "Cache miss notices",
-				description: "Show transcript notices for significant prompt-cache misses and compaction costs",
+				description: "Show transcript notices for significant prompt-cache misses",
 				currentValue: config.showCacheMissNotices ? "true" : "false",
 				values: ["true", "false"],
 			},
@@ -571,132 +790,58 @@ export class SettingsSelectorComponent extends Container {
 					),
 			},
 			{
-				id: "model-thinking",
-				label: "Default thinking level per model",
-				description: `Override the default thinking level for specific models. ${cycleThinkingKey} cycles in-session.`,
-				currentValue: modelThinkingOverridesSummary(currentModelThinkingLevels),
-				submenu: (_currentValue, done) => {
-					const steps: SteppedSubmenuStep[] = [
+				id: "thinking",
+				label: "Thinking level",
+				description: "Reasoning depth for thinking-capable models",
+				currentValue: config.thinkingLevel,
+				submenu: (currentValue, done) =>
+					new SelectSubmenu(
+						"Thinking Level",
+						"Select reasoning depth for thinking-capable models",
+						config.availableThinkingLevels.map((level) => ({
+							value: level,
+							label: level,
+							description: THINKING_DESCRIPTIONS[level],
+						})),
+						currentValue,
+						(value) => {
+							callbacks.onThinkingLevelChange(value as ThinkingLevel);
+							done(value);
+						},
+						() => done(),
+					),
+			},
+			{
+				id: "new-session-model",
+				label: "New session model",
+				description: "Which model brand-new sessions start with when no per-session default is set",
+				currentValue: formatNewSessionModelValue(config.newSessionModel, {
+					lastUsedModelLabel: config.lastUsedModelLabel,
+					newSessionModelSpecificLabel: config.newSessionModelSpecificLabel,
+				}),
+				submenu: (_currentValue, done) =>
+					new NewSessionModelSubmenu(
+						config.newSessionModel,
 						{
-							key: "model",
-							title: "Per-Model Thinking Level",
-							description: "Select a model to configure",
-							options: () => {
-								const sorted = [...config.availableDefaultModels].sort((a, b) => {
-									const aKey = modelSettingKey(a);
-									const bKey = modelSettingKey(b);
-									if (aKey === currentModelKey) return -1;
-									if (bKey === currentModelKey) return 1;
-									if (aKey === currentDefaultModelKey) return -1;
-									if (bKey === currentDefaultModelKey) return 1;
-									return a.provider.localeCompare(b.provider);
-								});
-								const items: SelectItem[] = sorted.map((model) => {
-									const key = modelSettingKey(model);
-									const override = currentModelThinkingLevels[key];
-									return {
-										value: key,
-										label: modelItemLabel(model),
-										description: override ?? undefined,
-									};
-								});
-								if (items.length === 0) {
-									items.push({
-										value: "__none__",
-										label: "No models available",
-										description: "Log in to a provider or configure an API key first",
-									});
-								}
-								return items;
-							},
-							preselect: () => currentModelKey ?? currentDefaultModelKey,
-							searchable: true,
-							layout: MODEL_PICKER_LAYOUT,
+							lastUsedLabel: config.lastUsedModelLabel,
+							specificLabel: config.newSessionModelSpecificLabel,
 						},
 						{
-							key: "level",
-							title: (ctx) => {
-								const m = defaultModelByValue.get(ctx.model);
-								return `Thinking Level for ${m ? modelDisplayLabel(m) : ctx.model}`;
+							onChange: (preference) => {
+								callbacks.onNewSessionModelChange(preference);
 							},
-							description: "Select default thinking level for this model",
-							options: (ctx) => {
-								const model = defaultModelByValue.get(ctx.model);
-								if (!model) return [];
-								const levels = (
-									model.reasoning ? getSupportedThinkingLevels(model) : ["off"]
-								) as ThinkingLevel[];
-								const items: SelectItem[] = levels.map((level) => ({
-									value: level,
-									label: level,
-									description: THINKING_DESCRIPTIONS[level],
-								}));
-								if (currentModelThinkingLevels[ctx.model] !== undefined) {
-									items.push({
-										value: CLEAR_OVERRIDE_VALUE,
-										label: "(clear override)",
-										description: `Revert to global default (${config.thinkingLevel})`,
-									});
-								}
-								return items;
+							requestModelSelector: (onPicked) => {
+								// Close the settings submenu, then have the
+								// host drive the model picker. The host is
+								// responsible for re-opening settings after
+								// the picker resolves.
+								done();
+								callbacks.requestModelSelector(onPicked);
 							},
-							preselect: (ctx) => currentModelThinkingLevels[ctx.model],
+							resolveModelLabel: (provider, modelId) => `${provider}/${modelId}`,
 						},
-					];
-
-					const summary = () => modelThinkingOverridesSummary(currentModelThinkingLevels);
-
-					return new SteppedSubmenu(
-						steps,
-						(selections) => {
-							const model = defaultModelByValue.get(selections.model);
-							if (!model) return;
-							if (selections.level === CLEAR_OVERRIDE_VALUE) {
-								callbacks.onModelThinkingLevelRemove(model.provider, model.id);
-								delete currentModelThinkingLevels[selections.model];
-							} else {
-								callbacks.onModelThinkingLevelChange(
-									model.provider,
-									model.id,
-									selections.level as ThinkingLevel,
-								);
-								currentModelThinkingLevels[selections.model] = selections.level as ThinkingLevel;
-							}
-						},
-						() => {
-							done(summary());
-						},
-						{ loop: true },
-					);
-				},
-			},
-			{
-				id: "tui-mode",
-				label: "TUI mode",
-				description: "Interface layout; fullscreen mode is experimental",
-				currentValue: config.tuiMode,
-				values: ["regular", "fullscreen"],
-			},
-			{
-				id: "fullscreen-exit-output",
-				label: "Fullscreen exit output",
-				description: "Print the transcript or only a session resume hint when exiting fullscreen mode",
-				currentValue: config.fullscreenExitOutput,
-				values: ["transcript", "resume-hint"],
-			},
-			{
-				id: "fullscreen-scrollbar",
-				label: "Fullscreen scrollbar",
-				description: "Scrollbar behavior in fullscreen mode; has no effect in regular mode",
-				currentValue: config.fullscreenScrollbar,
-				values: ["auto", "always", "hidden"],
-			},
-			{
-				id: "fullscreen-copy-on-select",
-				label: "Fullscreen copy on select",
-				description: "Automatically copy selected text in fullscreen mode; disable to copy selections with Ctrl+X",
-				currentValue: config.fullscreenCopyOnSelect ? "true" : "false",
-				values: ["true", "false"],
+						() => done(),
+					),
 			},
 			{
 				id: "theme",
@@ -815,6 +960,24 @@ export class SettingsSelectorComponent extends Container {
 			currentValue: config.showTerminalProgress ? "true" : "false",
 			values: ["true", "false"],
 		});
+		const terminalProgressIndex = items.findIndex((item) => item.id === "terminal-progress");
+		items.splice(terminalProgressIndex + 1, 0, {
+			id: "fullscreen-exit-output",
+			label: "Fullscreen exit output",
+			description:
+				"What to render in the scrollback after exiting fullscreen TUI. " +
+				"'transcript': keep the recent transcript visible. 'resume-hint': show a hint to resume.",
+			currentValue: config.fullscreenExitOutput,
+			values: ["resume-hint", "transcript"],
+		});
+		items.splice(terminalProgressIndex + 2, 0, {
+			id: "fullscreen-scrollbar",
+			label: "Fullscreen scrollbar",
+			description:
+				"When to show the fullscreen-mode scrollbar. 'always': always visible. 'hidden': never visible. 'auto': visible when content overflows.",
+			currentValue: config.fullscreenScrollbar,
+			values: ["auto", "always", "hidden"],
+		});
 
 		// Add borders
 		this.addChild(new DynamicBorder());
@@ -825,6 +988,9 @@ export class SettingsSelectorComponent extends Container {
 			getSettingsListTheme(),
 			(id, newValue) => {
 				switch (id) {
+					case "deepseek-harness":
+						callbacks.onDeepseekHarnessChange(newValue === "true");
+						break;
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
 						break;
@@ -910,17 +1076,11 @@ export class SettingsSelectorComponent extends Container {
 					case "terminal-progress":
 						callbacks.onShowTerminalProgressChange(newValue === "true");
 						break;
-					case "tui-mode":
-						callbacks.onTuiModeChange(newValue as TuiMode);
-						break;
 					case "fullscreen-exit-output":
-						callbacks.onFullscreenExitOutputChange(newValue as FullscreenExitOutput);
+						callbacks.onFullscreenExitOutputChange(newValue as "resume-hint" | "transcript");
 						break;
 					case "fullscreen-scrollbar":
-						callbacks.onFullscreenScrollbarChange(newValue as ScrollViewScrollbar);
-						break;
-					case "fullscreen-copy-on-select":
-						callbacks.onFullscreenCopyOnSelectChange(newValue === "true");
+						callbacks.onFullscreenScrollbarChange(newValue as "always" | "hidden" | "auto");
 						break;
 					case "theme":
 						callbacks.onThemeChange(newValue);

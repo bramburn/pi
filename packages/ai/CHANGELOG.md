@@ -7,6 +7,15 @@
 ### Added
 
 - Added the experimental vision-capable `deepseek-v4-flash-vision-exp` model to the DeepSeek catalog.
+### Fork-local (bramburn)
+
+### Fixed
+
+- Sanitized unpaired UTF-16 surrogates and the U+FFFD replacement character from message text before sending to providers that reject them with 400 "invalid params" (e.g. MiniMax sub-code 2013). Valid surrogate pairs (e.g. emoji, supplementary plane characters) are preserved.
+
+## [0.84.4] - 2026-08-28
+
+- xAI models support both openai-completions and openai-responses APIs
 
 ### Fixed
 

@@ -21,8 +21,9 @@
 - Added RPC `clear_queue` to retrieve and remove queued steering and follow-up messages ([#8432](https://github.com/earendil-works/pi/issues/8432)).
 - Added environment variables and advanced settings for overriding auto-detected terminal hyperlink, image, and truecolor capabilities ([#8665](https://github.com/earendil-works/pi/issues/8665)).
 - Added `fullscreenCopyOnSelect` to disable automatic fullscreen selection copy; when disabled, `Ctrl+X` copies the active text selection before falling back to the last assistant message, while `/tree` still copies the selected message ([#7720](https://github.com/earendil-works/pi/issues/7720)).
+- **DeepSeek Harness: Phase 0 — toggle surface** (item 1) — new opt-in `deepseekHarness` setting that routes the agent's prompt and context through a deepseek-harness-style pipeline. The toggle is off by default. Wired through every surface: TUI `/settings` row, RPC `set_deepseek_harness` command + `get_state` field, CLI `--deepseek-harness` and `--deepseek-harness-max-overflow-retries` flags, extension API `isDeepseekHarnessEnabled()`, and a built-in `MINIMAX_PROFILE` for the `minimax` / `minimax-cn` provider family. The resolver layers `DEFAULT_DEEPSEEK_HARNESS` → user → `MINIMAX_PROFILE` → exact-model override → provider-wildcard override. New `AgentSession._deepseekHarnessEnabled` mirror + `_refreshDeepseekHarnessPipeline()` placeholder for Phases 1-4.
 
-### Fixed
+- **DeepSeek Harness: Phase 1 — overflow recovery + maxTokens + per-model policy + graceful notice** (items 2, 5, 6, 11) — multi-attempt overflow recovery driven by `maxOverflowRetries` (default 2, 3 for `minimax`/`minimax-cn`); `clampMaxTokensToContext` now accepts a per-call `safetyMargin` (1024 with the bundle, 4096 without); `CompactionSettings` gains `thresholdRatio` and `retainRatio`; on `length` finish with no tool calls, a trailing "Run /compact to continue" notice is appended.
 
 - Fixed toggling thinking visibility clearing partial output from running Bash tools ([#8611](https://github.com/earendil-works/pi/issues/8611)).
 - Fixed Windows shell aborts crashing Pi when `taskkill.exe` is unavailable on `PATH` ([#6596](https://github.com/earendil-works/pi/issues/6596)).
@@ -41,48 +42,32 @@
 - Fixed inherited OpenRouter reasoning controls so reasoning-mandatory models do not receive `effort: "none"` ([#8614](https://github.com/earendil-works/pi/pull/8614) by [@davidbrai](https://github.com/davidbrai)).
 - Fixed inherited OpenAI-compatible Chat Completions ignoring an explicitly requested `toolChoice` when no tools are defined.
 - Fixed inherited fragmented Mistral tool calls splitting when continuation chunks omit the tool-call ID ([#8387](https://github.com/earendil-works/pi/issues/8387)).
+- **DeepSeek Harness: Phase 2 — tool-result re-pruner + read exemption + defaults** (items 3, 10, 15) — new `tool-result-pruner.ts` walks the agent's message array and rewrites over-budget tool results in place (head 4 KiB + marker + tail 1 KiB, default threshold 8 KiB). The `read` tool is exempt via `toolName === "read"` to break the read→truncate→read loop. The pruner cadence is every N turns (default 5, 3 for `minimax`/`minimax-cn`).
 
-## [0.84.3] - 2026-08-24
+- **DeepSeek Harness: Phase 3 — replay-prefix summarisation** (item 12) — `generateSummaryWithUsage` gains a `replayPrefix` flag. When the bundle is on, the live conversation is sent as the request prefix with the summarisation instruction as a new user message, so the provider's prompt cache (Anthropic prompt caching, OpenAI prompt cache) hits for the conversation bytes. The text-block fallback is preserved when the bundle is off.
 
-### New Features
+- **DeepSeek Harness: Phase 4 — byte-budgeted AGENTS.md** (item 7) — new `system-prompt-render.ts` wraps the AGENTS.md chain in a `<system-reminder>` envelope with a `maxBytes` budget (default 20 KiB), UTF-8-safe truncation at code-point boundaries, and per-file omission diagnostics. The legacy inline `<project_context>` path is preserved when the bundle is off.
 
-- **PowerShell tool** — Use optional native PowerShell command execution on Windows. See [PowerShell Tool](docs/windows.md#powershell-tool).
-- **Safer managed updates** — Stage, verify, and atomically activate updates for installer-managed installations. See [Install and Manage](docs/packages.md#install-and-manage).
-- **Model and thinking controls** — Select thinking levels with `/thinking`, search defaults, keep selections session-scoped, and persist them explicitly with Ctrl+S. See [Models and Thinking](docs/keybindings.md#models-and-thinking).
+### Notes
 
-### Breaking Changes
+- The 5 Defer items (4 abstract SpillStore, 8 token meter, 9 wire harness subsystem, 13 desync invariant, 14 plan mode) are explicitly out of scope; each is documented as a deferred item in `research/roadmap-adaptive-context.md`.
+- The `compaction.enabled` setting continues to be a per-feature kill switch. Setting it to `false` still disables auto-compaction even when the bundle is on. The recovery loop is independent.
+- Per-phase rollback: every phase's behaviour is gated on `deepseekHarness.enabled`. A user with the bundle off sees no change. A user with the bundle on can opt out at any time.
+- The per-tool truncation defaults (`DEFAULT_MAX_LINES = 2000`, `DEFAULT_MAX_BYTES = 50 KiB` in `packages/agent/src/harness/utils/truncate.ts`) are unchanged for non-bundle users. The bundle's effect on tool result size is applied by the downstream re-pruner (Phase 2), not by changing the per-tool default — this keeps the default-off path byte-identical to the pre-plan state.
 
-- Renamed the inherited `GoogleThinkingLevel` type to `GoogleApiThinkingLevel` and added `ResolvedGoogleThinkingLevel` for normalized adapter levels.
+### Fork-local (bramburn)
+
+- Synced upstream v0.84.2 onto fork main (which already carried v0.84.1 from `sync/upstream-main-2026-08`). Version bumped to `0.84.2-b1`.
+- Kept `FORK_NAME="bramburn"` marker in `pi --version` output (already in fork main, preserved through the merge).
+- Kept per-sibling `toolResult` emission in parallel tool batches (already in fork main as commit `d9a5a3c6d`, preserved through the upstream rewrite of `executeToolCallsParallel`).
+- Kept the scrollback-jump-on-streaming fix (already in fork main as commit `9176d0044`; upstream v0.84.2 rewrote the TUI in a functional architecture that gates `fullRender(true)` on `firstChanged < prevViewportTop`, which already prevents the same scrollback-jump class — fork fix retained for compatibility with the historical class-based TUI fallback paths that still load the legacy module).
+- Re-applied the `validateLlmMessages()` extension-transform check in `packages/agent/src/agent-loop.ts`; the regression test `validate-llm-messages.test.ts` is restored. (The original `db6d3f17e` commit lived on a feature branch that was never merged to fork main, so the fix is being added here, not preserved.)
 
 ### Added
 
-- Added an optional `powershell` tool for Windows, configurable through `defaultTools` and the SDK. See [PowerShell Tool](docs/windows.md#powershell-tool).
-- Added a `/thinking` selector and searchable default choices to the model and thinking selectors; Ctrl+S saves the selected model as the global default. See [Models and Thinking](docs/keybindings.md#models-and-thinking).
-- Added optional routing session IDs to exported compaction summary helpers so callers can preserve provider routing without enabling prompt cache writes.
-- Added 
-
-
-
-usage notices for compaction and branch summaries when cache miss notices are enabled.
-- Added `session_compact_failed` extension events so compaction failures and aborts expose their reason, retry state, source, and error message to handlers ([#8175](https://github.com/earendil-works/pi/issues/8175)).
-- Added inherited provider-neutral `toolChoice` support to simple stream requests.
-- Added inherited automatic Anthropic server-side refusal fallback for supported first-party models, including returned-model usage pricing ([#8017](https://github.com/earendil-works/pi/issues/8017)).
-- Added inherited configurable OpenAI-compatible thinking-token budget fields for vLLM, Qwen/SGLang, and llama.cpp servers. See [OpenAI Compatibility](docs/models.md#openai-compatibility) ([#8275](https://github.com/earendil-works/pi/pull/8275) by [@bnsd55](https://github.com/bnsd55)).
-- Added inherited China-specific ZAI Coding Plan models, including GLM-4.6V vision support and API-equivalent usage cost estimates ([#8220](https://github.com/earendil-works/pi/issues/8220)).
-- Added inherited `deepseek-v4-pro-0813` support to the Qwen Token Plan Individual catalog ([#8194](https://github.com/earendil-works/pi/issues/8194)).
-
-### Changed
-
-- Changed experimental installer-managed installations so `pi update` stages, verifies, and atomically activates the selected release in place. See [Install and Manage](docs/packages.md#install-and-manage).
-- Changed inherited built-in xAI models to use the Responses API with encrypted reasoning replay and made Grok 4.6 the default xAI model ([#8124](https://github.com/earendil-works/pi/pull/8124) by [@Jaaneek](https://github.com/Jaaneek)).
-- Changed inherited Anthropic, Azure OpenAI, Google, Mistral, and OpenAI adapters to send Pi's default `User-Agent` unless overridden ([#8305](https://github.com/earendil-works/pi/issues/8305)).
-- Changed Windows and WSL keybinding defaults to avoid terminal-reserved shortcuts for image paste, model cycling, editor undo, fullscreen transcript navigation and search, and message queueing ([#8372](https://github.com/earendil-works/pi/issues/8372)).
-- Changed Bun release archives to ship the native clipboard binary only inside the wrapper package, removing a duplicate platform package from each archive.
-- Changed package resource glob expansion to use Node.js's built-in implementation with deterministic visible-path matching, reducing the installed runtime dependency tree.
-- Changed the bundled Node.js runtime to load jiti only when importing an extension and Babel only when uncached source needs transformation, reducing CLI startup time and bundle size.
-- Changed syntax highlighting to initialize only twenty common languages eagerly and defer the remaining grammars until after the initial TUI render, reducing CLI startup time.
-- Changed the Node.js CLI and RPC entrypoints to load a bundled runtime, reducing startup filesystem reads while keeping the public library and legacy module paths on the modular runtime for normal dependency identity.
-- Changed session sharing to render clickable terminal links, display only the canonical Radius artifact URL, and include the current system prompt and active tool definitions in Radius session shares.
+- New sessions now default to the most recently used model instead of the global `defaultModel`. Added a "New session model" entry to `/settings` with three modes: "Use global default", "Use last used model", and "Use specific model" (opens the same searchable picker as `/model`).
+- New `--cwd <dir>` CLI flag: change the project working directory before any settings or resources are loaded. Resolves relative paths against the original cwd, errors out clearly when the path is missing or not a directory. Use case: `pi --cwd path/to/project` from a shell that is not already in the project root, or from a launcher that has its own cwd.
+- New `--no-deepseek-harness` CLI flag: disable the deepseek-harness context pipeline for a single run, overriding a `true` global setting. Pairs with the existing `--deepseek-harness` opt-in.
 
 ### Fixed
 
@@ -115,17 +100,20 @@ usage notices for compaction and branch summaries when cache miss notices are en
 - Fixed npm package update checks treating older registry versions as available updates, preventing `pi update` from downgrading already-newer installed packages ([#8226](https://github.com/earendil-works/pi/issues/8226)).
 - Fixed built-in llama.cpp models disappearing from `/model` when `/llama` refreshed a configured server under `PI_OFFLINE`, and included idle-slept `sleeping` router models plus autoloadable unloaded presets in the selectable catalog ([#8558](https://github.com/earendil-works/pi/pull/8558) by [@cristinaponcela](https://github.com/cristinaponcela)).
 - Fixed `pi.registerFlag()` accepting default values that do not match the declared flag type ([#8064](https://github.com/earendil-works/pi/issues/8064)).
+- The "New session model → Use specific model" picker no longer rewrites the current session's header. `ModelSelectorComponent` accepts a new `skipHeaderWrite?: boolean` option; the settings-driven picker passes `true`. The `/model` flow keeps current behaviour.
+- New-session-model fallback warnings (e.g. "Last used model X/Y unavailable") are now surfaced in the TUI instead of only stderr, so users see the warning in-product when the resolved preference points at a model the runtime can no longer find.
+- "New session model" submenu rebuilt as a proper 3-way radio. Enter on any row applies the choice and closes the submenu (previously the active row was impossible to re-open). The right column now shows the resolved model for the "last used" and "specific" modes (e.g. `Last used: anthropic/claude-sonnet-4-5`).
+- `setSessionDefault` for the new-session header now lives inside `buildSessionOptions` (was previously in `main()`), so the function's contract matches the plan and is testable in isolation.
+- When the configured `newSessionModel` preference resolves to an unavailable model, `options.model` is left `undefined` so `findInitialModel`'s first-available-with-auth chain runs (was previously silently falling back to `globalPreferred`, masking the unavailability).
+- `setLastUsedModel` is now wrapped in a best-effort `try`/`catch` after `setDefaultModelAndProvider` in `setModel` and both cycle paths, so a transient save() failure on the global default no longer silently drops the last-used tracking.
 - Fixed Z.AI Coding Plan defaults referencing the removed GLM-5.1 model ([#8096](https://github.com/earendil-works/pi/issues/8096)).
-- Fixed repeated ambiguous truncated-response recovery being mislabeled as context overflow ([#8130](https://github.com/earendil-works/pi/issues/8130)).
-- Fixed duplicate fullscreen right-click paste in VS Code-based terminals on Windows ([#8186](https://github.com/earendil-works/pi/issues/8186)).
-- Fixed inherited padded text exceeding narrow terminal widths ([#8252](https://github.com/earendil-works/pi/issues/8252)).
-- Fixed inherited wrapped Markdown table links leaking color into borders and neighboring cells, including tables inside blockquotes ([#8335](https://github.com/earendil-works/pi/issues/8335)).
-- Fixed llama.cpp login guidance to direct users to `/llama` before `/model` when no local models are loaded ([#8203](https://github.com/earendil-works/pi/issues/8203)).
-- Fixed hung pi.dev model catalog requests consuming the entire refresh deadline without retrying ([#8198](https://github.com/earendil-works/pi/issues/8198)).
-- Fixed inherited Xiaomi model catalogs listing shut-down MiMo V2 models in `/model` and `--list-models` ([#8187](https://github.com/earendil-works/pi/issues/8187)).
-- Fixed branch summary entries recording the navigation destination in `fromId` instead of the pre-navigation source leaf.
-- Fixed threshold auto-compaction being skipped when providers omit streaming usage data ([#8328](https://github.com/earendil-works/pi/issues/8328)).
-- Fixed dash-prefixed prompts being parsed as options by supporting `--` as an end-of-options delimiter ([#7269](https://github.com/earendil-works/pi/issues/7269)).
+- Restored the `setCapabilityOverrides(settingsManager.getTerminalCapabilityOverrides())` call in `createStartupTui` that was dropped in the v0.84.3 cherry-pick merge (`0037e08e4`). User-set `terminal.images` / `terminal.trueColor` / `terminal.hyperlinks` overrides in `settings.json` are now applied to the TUI again.
+- Replaced the `require("./deepseek-harness-profile.ts")` lazy-load in `SettingsManager.getDeepseekHarnessSettings` with a direct `import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts"`. The previous `require` worked under tsgo (the source loader) but broke esbuild bundling, which is what `bun build:binary` uses, so the binary could not be built until this was fixed. The profile module only imports a TypeScript type from `settings-manager.ts`, which is erased at compile time, so the runtime import is cycle-free.
+- Interactive mode now prints a clear `Error: stdout is not a TTY. The interactive TUI needs a real terminal ...` and exits with code 1 when launched without a TTY and no `--print` / piped stdin / message. Previously it silently dropped into print mode and exited 0 with no output, which looked like a broken TUI.
+
+### Removed
+
+- Removed TUI fullscreen mode: the `--tui-mode fullscreen` CLI flag, `tuiMode`, `fullscreenExitOutput`, and `fullscreenScrollbar` settings, fullscreen layout and renderer, and all related documentation.
 
 ## [0.84.2] - 2026-08-14
 
@@ -157,8 +145,6 @@ usage notices for compaction and branch summaries when cache miss notices are en
 
 ### Fixed
 
-- Fixed root Markdown files such as `README.md` and `AGENTS.md` in skill directories being reported as broken skills unless they declare valid skill frontmatter ([#7805](https://github.com/earendil-works/pi/issues/7805)).
-- Fixed single-object `edit` tool inputs failing validation by accepting them as one-edit arrays in both coding-agent and harness edit tools ([#7835](https://github.com/earendil-works/pi/issues/7835)).
 - Fixed managed-tool downloads delaying TUI startup and hiding diagnostics in fullscreen mode by mounting the TUI first and showing download progress and warnings inside it.
 - Fixed opening a model selector immediately after startup cancelling and restarting the in-progress model catalog refresh.
 - Fixed inherited GitHub Copilot login triggering API rate limits while enabling model policies by limiting concurrent policy updates ([#6187](https://github.com/earendil-works/pi/issues/6187)).

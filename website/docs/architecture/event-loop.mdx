@@ -1,0 +1,61 @@
+---
+id: event-loop
+title: Agent Event Loop
+---
+
+# Agent Event Loop
+
+This page describes how a single turn flows through the agent runtime.
+
+## Turn lifecycle
+
+```
+User prompt
+    │
+    ▼
+agent_loop.ts::runTurn()
+    │
+    ├─► buildMessages()      ──► system prompt + history + user prompt
+    │
+    ├─► llm.call(messages)   ──► provider API ──► LlmResponse
+    │
+    ├─► handleLlmResponse()  ──► tool calls? ──► executeToolCallsParallel/Serial
+    │                                                         │
+    │                           ◄─────────────────────────────┘
+    │                                 (tool results)
+    │
+    └─► assistant message → state.messages
+        turn_end event
+```
+
+## Message construction
+
+`buildMessages()` assembles the prompt:
+
+1. **System prompt** — loaded from settings + active extensions
+2. **History** — all prior `user` and `assistant` messages from `state.messages`
+3. **User prompt** — the current turn's input
+
+Extensions can inject messages via the `message_start` / `message_end` hooks.
+
+## Tool execution
+
+Tools are declared in the system prompt and called by the LLM. pi handles two modes:
+
+- **Parallel** (`toolExecutionMode: 'parallel'`) — all tool calls fire simultaneously. Results are emitted individually as they complete. If one stalls, the batch can be abandoned on user abort.
+- **Serial** (`toolExecutionMode: 'serial'`) — tool calls run one at a time. Each result feeds back into the LLM before the next fires.
+
+The parallel mode is the default. It is faster but requires careful handling of the `Promise.all` barrier to avoid losing results when one call stalls.
+
+## Abort handling
+
+When the user presses `Esc` or `Ctrl+C`:
+
+1. The `AbortController` signal fires
+2. In-flight LLM calls and tool executions check the signal
+3. Settled results are emitted; un-settled results are synthesized as `"Operation aborted"`
+4. The turn ends with `turn_end` + all known tool results
+
+## State persistence
+
+Every `user`, `assistant`, and `tool_result` message is appended to the session file (`.pi-session`). On resume, the session manager reads the file and feeds the full history back into `buildMessages()`.

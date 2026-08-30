@@ -1,0 +1,31 @@
+[session]
+name        = "2026-08-28-pi-cwd-loading"
+date        = "2026-08-28"
+topic       = "pi.exe does not change cwd from CLI positional arg"
+status      = "scaffolded"
+owner       = "mavis"
+binary      = "C:/dev/pi/packages/coding-agent/dist/pi.exe"
+binary_sha  = "107471360 bytes, LastWriteTime 28/08/2026 13:08:18 (Bun build)"
+fixture_dir = "C:/dev/audio-lessons"
+source_root = "C:/dev/pi/packages/coding-agent/src"
+
+[question]
+# Does any CLI surface of pi.exe (flag, positional, env) change the project cwd
+# away from process.cwd() at startup?
+
+[fixtures]
+# The project directory the user wanted to load.
+audio_lessons = "C:/dev/audio-lessons"
+# Sandbox cwd used to confirm pi tracks process.cwd().
+sandbox_cwd   = "C:/temp/pi-cwd-sandbox"
+
+[metrics]
+# 1. pi.exe startup line + AGENTS.md path actually opened.
+# 2. Whether the positional path was treated as a prompt or as a cwd change.
+# 3. Process cwd as observed from inside a tool call.
+
+[promotion_gates]
+# To "selected":
+# - a feature or workaround is documented and reproducible.
+# - the user's exact command behaviour is explained (was the bug a missing flag,
+#   a typo, a redirect, or all three?).

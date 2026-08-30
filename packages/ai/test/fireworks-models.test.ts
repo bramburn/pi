@@ -37,6 +37,19 @@ describe("Fireworks models", () => {
 		});
 	});
 
+	it("does not register a deprecated 'turbo' router model", () => {
+		// The original "Fire Pass turbo" router was retired from the
+		// built-in catalog when Fireworks consolidated routing around
+		// glm-5p2-fast / kimi-k3-fast. Verify it stays retired so we
+		// notice if the deprecated ID returns unexpectedly.
+		const model = getModels("fireworks").find(
+			(candidate) => candidate.id.startsWith("accounts/fireworks/routers/") && candidate.id.endsWith("-turbo"),
+		);
+
+		expect(model).toBeUndefined();
+	});
+
+
 	it("aligns GLM 5.2 Fast with GLM 5.2's OpenAI-compatible config", () => {
 		const base = getModel("fireworks", "accounts/fireworks/models/glm-5p2");
 		const fast = getModel("fireworks", "accounts/fireworks/routers/glm-5p2-fast");

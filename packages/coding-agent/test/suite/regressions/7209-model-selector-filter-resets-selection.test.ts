@@ -51,6 +51,7 @@ describe("model selector filter resets selection to top", () => {
 		const selector = new ModelSelectorComponent(
 			createFakeTui(),
 			current,
+			harness.sessionManager,
 			harness.session.modelRuntime,
 			[],
 			() => {},
@@ -101,6 +102,7 @@ describe("model selector filter resets selection to top", () => {
 		const selector = new ModelSelectorComponent(
 			createFakeTui(),
 			alpha1,
+			harness.sessionManager,
 			harness.session.modelRuntime,
 			[{ model: alpha2 }, { model: alpha3 }, { model: alpha1 }],
 			() => {},

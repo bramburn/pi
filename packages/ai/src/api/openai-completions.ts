@@ -73,6 +73,16 @@ function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean 
 	return false;
 }
 
+function urlHostMatchesDomain(rawUrl: string, domain: string): boolean {
+	try {
+		const hostname = new URL(rawUrl).hostname.toLowerCase();
+		const normalizedDomain = domain.toLowerCase();
+		return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
+	} catch {
+		return false;
+	}
+}
+
 function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
 	if (apiKey) return apiKey;
 	if (hasHeader(headers, "authorization") || hasHeader(headers, "cf-aig-authorization")) return "unused";
@@ -1586,7 +1596,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 	const isCloudflareAiGateway = provider === "cloudflare-ai-gateway" || baseUrl.includes("gateway.ai.cloudflare.com");
 	const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
 	const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
-	const isDeepSeek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
+	const isDeepSeek = provider === "deepseek" || urlHostMatchesDomain(baseUrl, "deepseek.com");
 
 	const isNonStandard =
 		isNvidia ||

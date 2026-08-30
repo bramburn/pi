@@ -29,7 +29,6 @@ type AuthFileReload = {
 	promise: Promise<AuthStorageData>;
 	readers: number;
 };
-
 type AuthFileReadState = {
 	data: AuthStorageData;
 	revision?: string;

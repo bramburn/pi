@@ -9,12 +9,36 @@ import type {
 } from "../types.ts";
 import { estimateContextTokens } from "../utils/estimate.ts";
 
-const CONTEXT_SAFETY_TOKENS = 4096;
+/**
+ * Default safety margin between the input estimate and the context
+ * window's hard cap. Lowered from 4096 to 1024 because the agent-level
+ * recovery loop (item 2) is the new backstop, and a tighter margin
+ * lets longer answers land without hitting the cap. The DeepSeek Harness
+ * bundle additionally clamps via the live input size; see
+ * `clampMaxTokensToContext` callers.
+ */
+export const CONTEXT_SAFETY_TOKENS = 1024;
 const MIN_MAX_TOKENS = 1;
 
-export function clampMaxTokensToContext(model: Model<Api>, context: Context, maxTokens: number): number {
+export function clampMaxTokensToContext(
+	model: Model<Api>,
+	context: Context,
+	maxTokens: number,
+	options?: { safetyMargin?: number },
+): number {
 	if (model.contextWindow <= 0) return Math.max(MIN_MAX_TOKENS, maxTokens);
-	const available = model.contextWindow - estimateContextTokens(context).tokens - CONTEXT_SAFETY_TOKENS;
+	// Use `??` (not `||`) so an explicit `safetyMargin: 0` is honored
+	// — callers use 0 to disable the safety buffer entirely.
+	const safety = options?.safetyMargin ?? CONTEXT_SAFETY_TOKENS;
+	// Honor a caller-supplied token estimate when present. This lets the
+	// agent loop short-circuit the per-message token walk with a known
+	// budget — useful for the DeepSeek Harness overflow recovery path
+	// (item 2) which already has an up-to-date estimate in hand.
+	const contextTokens =
+		typeof (context as unknown as { estimatedTokens?: unknown }).estimatedTokens === "number"
+			? (context as unknown as { estimatedTokens: number }).estimatedTokens
+			: estimateContextTokens(context).tokens;
+	const available = model.contextWindow - contextTokens - safety;
 	return Math.min(maxTokens, Math.max(MIN_MAX_TOKENS, available));
 }
 
@@ -23,7 +47,7 @@ export function buildBaseOptions(
 	context: Context,
 	options?: SimpleStreamOptions,
 	apiKey?: string,
-): StreamOptions {
+): SimpleStreamOptions & StreamOptions {
 	const samplingParams =
 		model.samplingParams || options?.samplingParams
 			? { ...model.samplingParams, ...options?.samplingParams }
@@ -31,8 +55,19 @@ export function buildBaseOptions(
 	return {
 		temperature: options?.temperature,
 		samplingParams,
-		maxTokens: clampMaxTokensToContext(model, context, options?.maxTokens ?? model.maxTokens),
+		maxTokens: clampMaxTokensToContext(model, context, options?.maxTokens ?? model.maxTokens, {
+			safetyMargin: options?.safetyMargin,
+		}),
 		signal: options?.signal,
+		// DeepSeek Harness Phase 3 (item 12): propagate the
+		// `purpose` field so providers can namespace the prompt
+		// cache (Anthropic `cacheSessionId = undefined`,
+		// OpenAI `prompt_cache_key = "compaction"`).
+		purpose: options?.purpose,
+		// DeepSeek Harness Phase 1 (item 5): preserve the
+		// `safetyMargin` for downstream consumers (the runtime
+		// already passes it; the provider reads it again here).
+		safetyMargin: options?.safetyMargin,
 		telemetryContext: options?.telemetryContext,
 		apiKey: apiKey || options?.apiKey,
 		fetch: options?.fetch,

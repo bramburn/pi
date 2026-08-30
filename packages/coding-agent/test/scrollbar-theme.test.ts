@@ -27,7 +27,7 @@ afterEach(() => {
 	}
 });
 
-describe("optional fullscreen theme colors", () => {
+describe("optional theme color fallbacks", () => {
 	it("falls back to selectedBg when scrollbarThumb is omitted", () => {
 		const themeJson = loadDarkTheme();
 		themeJson.name = "legacy-scrollbar-theme";

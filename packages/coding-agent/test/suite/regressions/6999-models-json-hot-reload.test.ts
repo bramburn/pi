@@ -5,6 +5,7 @@ import { setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../../src/core/auth-storage.ts";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
+import { SessionManager } from "../../../src/core/session-manager.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../../src/utils/ansi.ts";
@@ -68,6 +69,7 @@ describe("issue #6999 models.json hot reload", () => {
 		const selector = new ModelSelectorComponent(
 			tui,
 			undefined,
+			SessionManager.inMemory(),
 			modelRuntime,
 			[],
 			() => {},
