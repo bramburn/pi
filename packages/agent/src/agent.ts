@@ -614,7 +614,15 @@ export class Agent {
 
 		const signal = this.activeRun?.abortController.signal;
 		if (!signal) {
-			throw new Error("Agent listener invoked outside active run");
+			// Listeners can be invoked after the active run has ended when a tool's
+			// throttled update timer fires after the parent run completes (or a
+			// background task posts a result to an idle session). Drop the event
+			// instead of throwing — nothing should be able to crash the host
+			// process from a benign post-run notification.
+			if (process.env.PI_DEBUG_AGENT_LISTENER === "1") {
+				console.warn(`[agent] dropping ${event.type} after run ended`);
+			}
+			return;
 		}
 		for (const listener of this.listeners) {
 			await listener(event, signal);

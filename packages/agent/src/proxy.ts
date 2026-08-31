@@ -11,6 +11,7 @@ import {
 	EventStream,
 	type Model,
 	parseStreamingJson,
+	sanitizeContext,
 	type SimpleStreamOptions,
 	type StopReason,
 	type ToolCall,
@@ -151,6 +152,15 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 		}
 
 		try {
+			// Sanitise the system prompt and message list before shipping to
+			// the proxy. The proxy forwards the wire format to whatever provider
+			// it fronts, so any unpaired UTF-16 surrogate or U+FFFD in the
+			// input would reach providers (e.g. MiniMax) that reject them with
+			// 400 invalid params (sub-code 2013). The built-in providers get
+			// this for free via `transformMessages`; the proxy path does not,
+			// because the proxy is provider-agnostic and does not know which
+			// built-in shaping pass to apply.
+			const safeContext = sanitizeContext(context);
 			const response = await fetch(`${options.proxyUrl}/api/stream`, {
 				method: "POST",
 				headers: {
@@ -159,7 +169,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 				},
 				body: JSON.stringify({
 					model,
-					context,
+					context: safeContext,
 					options: buildProxyRequestOptions(options),
 				}),
 				signal: options.signal,

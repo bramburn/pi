@@ -806,17 +806,27 @@ async function executePreparedToolCall(
 			signal,
 			(partialResult) => {
 				if (!acceptingUpdates) return;
-				updateEvents.push(
-					Promise.resolve(
-						emit({
-							type: "tool_execution_update",
-							toolCallId: prepared.toolCall.id,
-							toolName: prepared.toolCall.name,
-							args: prepared.toolCall.arguments,
-							partialResult,
-						}),
-					),
-				);
+				// The throttled bash/read tools can fire `onUpdate` from a setTimeout
+				// after their execute() has resolved but before the active run has
+				// settled in rare cases (e.g. a tool yielded, the parent turn ended,
+				// then the timer drained). processEvents already drops late events
+				// without throwing, so it's safe to fire-and-forget here — but we
+				// still swallow unexpected rejections so one bad update can't take
+				// down the host process.
+				const updatePromise = Promise.resolve(
+					emit({
+						type: "tool_execution_update",
+						toolCallId: prepared.toolCall.id,
+						toolName: prepared.toolCall.name,
+						args: prepared.toolCall.arguments,
+						partialResult,
+					}),
+				).catch((err) => {
+					if (process.env.PI_DEBUG_AGENT_LISTENER === "1") {
+						console.warn(`[agent] tool_execution_update failed:`, err);
+					}
+				});
+				updateEvents.push(updatePromise);
 			},
 		);
 		acceptingUpdates = false;
