@@ -3,9 +3,14 @@
 ## [Unreleased]
 
 ### Fork-local (bramburn)
+### Added
+
+- Exposed `sanitizeMessages` and `sanitizeContext` from `@earendil-works/pi-ai` so provider adapters that don't run the per-provider `transformMessages` shape pass (e.g. the `pi-messages` adapter and the agent's `streamProxy`) can still apply the same text sanitisation that prevents provider 400 "invalid params" errors (e.g. MiniMax sub-code 2013).
+
 ### Fixed
 
 - Sanitized unpaired UTF-16 surrogates and the U+FFFD replacement character from message text before sending to providers that reject them with 400 "invalid params" (e.g. MiniMax sub-code 2013). Valid surrogate pairs (e.g. emoji, supplementary plane characters) are preserved.
+- Sanitized the system prompt and the message list at every `pi-messages` (`stream` and `streamSimple`) request boundary, so the pi-messages protocol adapter is no longer a full BYPASS for the sanitiser. Previously a stray U+FFFD in `AGENTS.md` / `CLAUDE.md` / a `before_agent_start` system-prompt override could ride through to a MiniMax-class provider and trigger sub-code 2013.
 ## [0.84.4] - 2026-08-28
 
 ### Added
