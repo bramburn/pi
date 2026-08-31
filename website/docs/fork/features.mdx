@@ -8,6 +8,25 @@ sidebar_label: Fork Features
 
 Differences between `bramburn/pi` (this fork) and `earendil-works/pi` (upstream).
 
+## Runtime support
+
+| Runtime | Upstream | Fork |
+|---------|----------|------|
+| Bun | Not used | **Primary** (install, build, check, CI) |
+| Node.js | Primary | Legacy (test wrapper, `npm publish`) |
+| Test runner | vitest + `node --test` | Same (vitest + `node --test` still run; migration to `bun test` is post-merge) |
+
+The fork has migrated its CI workflows (`ci.yml`, `publish-model-catalog.yml`, `docs.yml`) to use `oven-sh/setup-bun@1.3.14` and `bun install` / `bun run`. The `publish.yml` workflow keeps `setup-node` because `npm publish` needs the npm CLI for OIDC trusted publishing; once that workflow is migrated to npm trusted publishing, it can also switch to Bun. See [Runtime support in the README](https://github.com/bramburn/pi/blob/main/README.md#runtime-support) for the full picture.
+
+Local development accepts either runtime:
+
+```bash
+bun install --ignore-scripts   # primary
+npm install --ignore-scripts   # legacy
+bun run build                  # primary
+npm run build                  # legacy
+```
+
 ## Build and release
 
 | Feature | Upstream | Fork |
