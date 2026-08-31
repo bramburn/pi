@@ -111,4 +111,31 @@ export function clearDashboard(ctx: ExtensionContext): void {
 	ctx.ui.setWidget(DASHBOARD_KEY, undefined);
 }
 
+/**
+ * Background-task footer pill. Shown when at least one background subagent
+ * task is in flight. Distinct from the experiment pill so the two never
+ * overwrite each other in the footer.
+ *
+ * Signature is minimal ({ ui }) because the caller passes a stub with just
+ * the ui reference — keeps the dispatch site free of full ExtensionContext
+ * typing where it isn't needed.
+ */
+export function refreshBackgroundPill(
+	ctx: { ui: { setStatus: (key: string, text: string | undefined) => void; theme: ExtensionContext["ui"]["theme"] } },
+	runningCount: number,
+	totalCount: number,
+): void {
+	const BG_STATUS_KEY = "subagent-bg";
+	if (totalCount === 0) {
+		ctx.ui.setStatus(BG_STATUS_KEY, undefined);
+		return;
+	}
+	const theme = ctx.ui.theme;
+	const text =
+		runningCount > 0
+			? theme.fg("accent", `▶ ${runningCount} bg`) + theme.fg("dim", ` · ${totalCount} total · Ctrl+T for dashboard`)
+			: theme.fg("muted", `▶ 0 bg`) + theme.fg("dim", ` · ${totalCount} total · Ctrl+T for dashboard`);
+	ctx.ui.setStatus(BG_STATUS_KEY, text);
+}
+
 export const UI_KEYS = { STATUS_KEY, DASHBOARD_KEY } as const;

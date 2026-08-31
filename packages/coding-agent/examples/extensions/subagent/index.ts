@@ -33,13 +33,16 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
+	type ExtensionContext,
 	getAgentDir,
 	getMarkdownTheme,
+	type ThemeColor,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Key, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { getRegistry as getBackgroundRegistry } from "./background.ts";
 import {
 	addExperiment as addExperimentRow,
 	type ExperimentRow,
@@ -55,6 +58,7 @@ import {
 	ensureLogFile as ensureExperimentLog,
 	runCommand as runShellCommand,
 } from "./runner.ts";
+import { buildStatusInjection } from "./status-injector.ts";
 import {
 	CompareParams,
 	DiffParams,
@@ -65,7 +69,7 @@ import {
 	StartParams,
 	TestParams,
 } from "./tools.ts";
-import { clearDashboard, refreshStatusPill, showDashboard } from "./ui.ts";
+import { clearDashboard, refreshBackgroundPill, refreshStatusPill, showDashboard } from "./ui.ts";
 import {
 	cherryPickFromBranch,
 	createWorktree,
@@ -486,6 +490,195 @@ async function runSingleAgent(
 	}
 }
 
+// ============================================================================
+// Background-mode machinery
+// ============================================================================
+//
+// Fire-and-forget variant of runSingleAgent. The LLM tool call returns
+// immediately with a task ID; the child pi process runs detached; when it
+// finishes, a custom message is sent to the parent session so the result
+// appears in the next turn.
+//
+// On Windows the child is in the parent's Job Object and dies with the
+// parent. This is acceptable for the planned "background while the user
+// works" use case; see lab/sessions/2026-08-30-bun-subprocess-mgmt/.
+
+const SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE = "subagent-background-result";
+
+interface BackgroundSpec {
+	agentName: string;
+	mode: "single" | "parallel" | "chain" | "script";
+	scriptOrTask: string;
+	cwd: string;
+	dispatchDefaults: DispatchDefaults;
+	pi: ExtensionAPI;
+	registry: ReturnType<typeof getBackgroundRegistry>;
+}
+
+function fireBackground(spec: BackgroundSpec): { taskId: string } {
+	const taskId = spec.registry.makeTaskId();
+	const initialTask = {
+		id: taskId,
+		kind: "pi-subprocess" as const,
+		mode: spec.mode,
+		agent: spec.agentName,
+		agentScope: "user" as const,
+		label: `${spec.agentName} (${spec.mode})`,
+		scriptOrTask: spec.scriptOrTask,
+		model: spec.dispatchDefaults.model,
+		status: "running" as const,
+		startedAt: new Date().toISOString(),
+		lastEventAt: new Date().toISOString(),
+		lastOutput: "",
+		cwd: spec.cwd,
+	};
+	void spec.registry.add(initialTask);
+	spec.registry.appendLog(taskId, { type: "SPAWN", agent: spec.agentName, mode: spec.mode });
+	queueMicrotask(() => {
+		void runBackgroundSubagent(spec, taskId);
+	});
+	return { taskId };
+}
+
+async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Promise<void> {
+	const registry = spec.registry;
+	const args: string[] = ["--mode", "json", "-p", "--no-session"];
+	const model = spec.dispatchDefaults.model;
+	if (model) args.push("--model", model);
+	if (spec.dispatchDefaults.thinkingLevel) {
+		args.push("--thinking", spec.dispatchDefaults.thinkingLevel);
+	}
+	args.push(`Task: ${spec.scriptOrTask}`);
+	const invocation = getPiInvocation(args);
+	let proc: ReturnType<typeof spawn> | null = null;
+	try {
+		proc = spawn(invocation.command, invocation.args, {
+			cwd: spec.cwd,
+			shell: false,
+			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
+		});
+	} catch (err) {
+		await registry.update(taskId, {
+			status: "failed",
+			errorMessage: `spawn failed: ${(err as Error).message}`,
+			finishedAt: new Date().toISOString(),
+		});
+		registry.appendLog(taskId, { type: "SPAWN_ERROR", error: (err as Error).message });
+		spec.pi.sendMessage(
+			{
+				customType: SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE,
+				content: `Background task ${taskId} (${spec.agentName}) failed to start: ${(err as Error).message}`,
+				display: true,
+				details: { taskId, status: "failed", errorMessage: (err as Error).message },
+			},
+			{ triggerTurn: true, deliverAs: "nextTurn" },
+		);
+		return;
+	}
+	await registry.update(taskId, { pid: proc.pid, lastOutput: "spawned" });
+	registry.appendLog(taskId, { type: "PID", pid: proc.pid });
+	let buffer = "";
+	let lastAssistantText = "";
+	const totalUsage = { input: 0, output: 0, cost: 0, turns: 0 };
+	proc.stdout?.on("data", (data: Buffer) => {
+		buffer += data.toString();
+		const lines = buffer.split("\n");
+		buffer = lines.pop() ?? "";
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			let event: any;
+			try {
+				event = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			registry.appendLog(taskId, { type: "EVENT", event: { t: event.type } });
+			if (event.type === "message_end" && event.message) {
+				const msg = event.message as Message;
+				if (msg.role === "assistant") {
+					const usage = msg.usage;
+					if (usage) {
+						totalUsage.input += usage.input || 0;
+						totalUsage.output += usage.output || 0;
+						totalUsage.cost += usage.cost?.total || 0;
+						totalUsage.turns += 1;
+					}
+					for (const part of msg.content ?? []) {
+						if (part.type === "text") lastAssistantText = part.text;
+					}
+					void registry.update(taskId, {
+						lastOutput: lastAssistantText.slice(-200),
+						usage: totalUsage,
+					});
+				}
+			}
+			if (event.type === "tool_result_end" && event.message) {
+				const msg = event.message as Message;
+				const toolName = (msg as { toolName?: string }).toolName ?? "tool";
+				const output = (msg as { output?: string }).output ?? "";
+				void registry.update(taskId, {
+					lastOutput: `[${toolName}] ${String(output).slice(-160)}`,
+				});
+			}
+		}
+	});
+	proc.stderr?.on("data", (data: Buffer) => {
+		const text = data.toString();
+		registry.appendLog(taskId, { type: "STDERR", chunk: text.slice(-500) });
+		void registry.update(taskId, { lastOutput: `[stderr] ${text.slice(-160)}` });
+	});
+	proc.on("close", (code) => {
+		if (buffer.trim()) {
+			try {
+				const event = JSON.parse(buffer);
+				registry.appendLog(taskId, { type: "EVENT_TRAILING", event: { t: event.type } });
+			} catch {
+				/* drop */
+			}
+		}
+		const exitCode = code ?? 0;
+		const status: "completed" | "failed" = exitCode === 0 ? "completed" : "failed";
+		const finalText = lastAssistantText || "(no output)";
+		void registry.update(taskId, {
+			status,
+			exitCode,
+			finishedAt: new Date().toISOString(),
+			lastOutput: finalText.slice(-200),
+		});
+		registry.appendLog(taskId, { type: "EXIT", exitCode, status });
+		const isError = exitCode !== 0;
+		const content = isError
+			? `Background task ${taskId} (${spec.agentName}) failed with exit code ${exitCode}.\n\n${finalText}`
+			: `Background task ${taskId} (${spec.agentName}) completed.\n\n${finalText}`;
+		try {
+			spec.pi.sendMessage(
+				{
+					customType: SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE,
+					content,
+					display: true,
+					details: { taskId, status, agent: spec.agentName, exitCode, finalOutput: finalText, usage: totalUsage },
+				},
+				{ triggerTurn: true, deliverAs: "nextTurn" },
+			);
+		} catch (err) {
+			registry.appendLog(taskId, { type: "POST_RESULT_FAILED", error: (err as Error).message });
+		}
+	});
+	proc.on("error", (err) => {
+		void registry.update(taskId, {
+			status: "failed",
+			errorMessage: `child error: ${err.message}`,
+			finishedAt: new Date().toISOString(),
+		});
+		registry.appendLog(taskId, { type: "CHILD_ERROR", error: err.message });
+	});
+}
+
+function backgroundStartSummary(taskId: string, agent: string, mode: string): string {
+	return `Background task ${taskId} started (${agent}, ${mode}). Use \`/tasks\` or \`Ctrl+T\` to see live status; the result will be injected as a custom message on the next turn.`;
+}
+
 const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
@@ -513,6 +706,19 @@ const SubagentParams = Type.Object({
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	background: Type.Optional(
+		Type.Boolean({
+			description:
+				"Fire-and-forget mode. The tool returns immediately with a task ID; the child subagent runs in the background. Results are injected as a custom message on the next turn. Default: false (synchronous, blocks the LLM until done).",
+			default: false,
+		}),
+	),
+	script: Type.Optional(
+		Type.String({
+			description:
+				"Arbitrary shell script body to pass to the subagent as the task. The subagent LLM reads it and executes via its bash tool. Use this for builds, multi-step commands, or any work you would normally paste into a terminal. Mutually exclusive with task; if both are provided, script wins.",
+		}),
+	),
 });
 
 // ============================================================================
@@ -1101,7 +1307,7 @@ function registerExperimentalMode(pi: ExtensionAPI): void {
 }
 
 async function finalizeExperimentMerge(
-	ctx: { cwd: string; ui: { setStatus(key: string, text: string | undefined): void } },
+	ctx: ExtensionContext,
 	row: ExperimentRow,
 	strategy: "cherry-pick" | "squash" | "merge",
 	newCommit: string | undefined,
@@ -1125,6 +1331,72 @@ async function finalizeExperimentMerge(
 
 export default function (pi: ExtensionAPI) {
 	registerExperimentalMode(pi);
+
+	const backgroundRegistry = getBackgroundRegistry();
+
+	pi.on("session_start", async () => {
+		const crashedCount = await backgroundRegistry.markAllRunningAsCrashed();
+		const pruned = await backgroundRegistry.prune();
+		if (crashedCount > 0) {
+			backgroundRegistry.appendLog("__system__", {
+				type: "RECOVERED",
+				count: crashedCount,
+				at: new Date().toISOString(),
+			});
+		}
+		if (pruned > 0) {
+			backgroundRegistry.appendLog("__system__", { type: "PRUNED", count: pruned });
+		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		const runningTasks = backgroundRegistry.listRunning();
+		for (const t of runningTasks) {
+			await backgroundRegistry.cancel(t.id, "Parent session ended");
+		}
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		const tasks = backgroundRegistry.snapshot().tasks;
+		const runningCount = tasks.filter((t) => t.status === "running" || t.status === "pending").length;
+		const totalCount = tasks.length;
+		refreshBackgroundPill(ctx, runningCount, totalCount);
+		const injection = buildStatusInjection(tasks);
+		if (!injection) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n${injection}` };
+	});
+
+	pi.registerCommand("tasks", {
+		description: "Show the background-task dashboard (subagent background mode).",
+		handler: async (_args, ctx) => {
+			const tasks = backgroundRegistry.snapshot().tasks;
+			if (tasks.length === 0) {
+				ctx.ui.notify("No background tasks. Use `subagent({ background: true, ... })` to start one.", "info");
+				return;
+			}
+			const lines = renderTasksDashboardLines(ctx, tasks);
+			if (ctx.mode === "tui") {
+				ctx.ui.setWidget("subagent-bg-tasks", lines, { placement: "belowEditor" });
+				ctx.ui.notify(`${tasks.length} task(s) shown. Press Esc to close.`, "info");
+			} else {
+				ctx.ui.notify(lines.join("\n"), "info");
+			}
+		},
+	});
+
+	pi.registerShortcut(Key.ctrl("t"), {
+		description: "Toggle the background-task dashboard.",
+		handler: async (ctx) => {
+			const tasks = backgroundRegistry.snapshot().tasks;
+			if (tasks.length === 0) {
+				ctx.ui.notify("No background tasks. Use `subagent({ background: true, ... })` to start one.", "info");
+				return;
+			}
+			const lines = renderTasksDashboardLines(ctx, tasks);
+			ctx.ui.setWidget("subagent-bg-tasks", lines, { placement: "belowEditor" });
+		},
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -1145,6 +1417,76 @@ export default function (pi: ExtensionAPI) {
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+
+			// ----------------------------------------------------------------
+			// Background-mode dispatch (fire-and-forget) — placed early so the
+			// parent can return immediately with a task ID, regardless of
+			// modeCount validity.
+			// ----------------------------------------------------------------
+			const isBackground = params.background === true;
+			const scriptOrTask = params.script?.trim() || params.task?.trim() || "";
+			if (isBackground && scriptOrTask) {
+				const registry = getBackgroundRegistry();
+				const taskIds: string[] = [];
+
+				if (params.agent) {
+					const { taskId } = fireBackground({
+						agentName: params.agent,
+						mode: "single",
+						scriptOrTask,
+						cwd: params.cwd ?? ctx.cwd,
+						dispatchDefaults,
+						pi,
+						registry,
+					});
+					taskIds.push(taskId);
+				} else if (params.tasks) {
+					for (const t of params.tasks) {
+						const td = t.task?.trim() ? t.task : scriptOrTask;
+						const { taskId } = fireBackground({
+							agentName: t.agent,
+							mode: "parallel",
+							scriptOrTask: td,
+							cwd: t.cwd ?? ctx.cwd,
+							dispatchDefaults,
+							pi,
+							registry,
+						});
+						taskIds.push(taskId);
+					}
+				} else if (params.chain) {
+					for (let i = 0; i < params.chain.length; i++) {
+						const step = params.chain[i];
+						const { taskId } = fireBackground({
+							agentName: step.agent,
+							mode: "chain",
+							scriptOrTask: step.task,
+							cwd: step.cwd ?? ctx.cwd,
+							dispatchDefaults,
+							pi,
+							registry,
+						});
+						taskIds.push(taskId);
+					}
+				}
+
+				const summary =
+					taskIds.length === 1
+						? backgroundStartSummary(taskIds[0]!, params.agent ?? "agent", "single")
+						: `Started ${taskIds.length} background tasks: ${taskIds.join(", ")}. Use \`/tasks\` or \`Ctrl+T\` to monitor. Results will be injected on the next turn.`;
+
+				return {
+					content: [{ type: "text", text: summary }],
+					details: {
+						mode: params.chain ? "chain" : params.tasks ? "parallel" : "single",
+						agentScope,
+						projectAgentsDir: discovery.projectAgentsDir,
+						results: [],
+						background: true,
+						taskIds,
+					},
+				};
+			}
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -1691,4 +2033,44 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 		},
 	});
+	function renderTasksDashboardLines(
+		ctx: { ui: { theme: { fg: (color: ThemeColor, text: string) => string } } },
+		tasks: Array<{ id: string; agent: string; status: string; startedAt: string; lastOutput: string }>,
+	): string[] {
+		const theme = ctx.ui.theme;
+		const lines: string[] = [theme.fg("accent", `Background tasks (${tasks.length})`), ""];
+		const sorted = [...tasks].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+		for (const t of sorted.slice(0, 30)) {
+			const statusColor: ThemeColor =
+				t.status === "running"
+					? "warning"
+					: t.status === "completed"
+						? "success"
+						: t.status === "failed" || t.status === "crashed"
+							? "error"
+							: "muted";
+			const elapsed = formatElapsedSince(t.startedAt);
+			lines.push(
+				`${theme.fg(statusColor, `[${t.status}]`)} ${theme.fg("accent", t.agent)} ${theme.fg("muted", `${t.id} · ${elapsed}`)}`,
+			);
+			const last = (t.lastOutput || "").replace(/[\r\n]+/g, " ").trim();
+			if (last) lines.push(`  ${theme.fg("dim", last.slice(0, 100))}`);
+		}
+		if (tasks.length > 30) {
+			lines.push("");
+			lines.push(theme.fg("muted", `… and ${tasks.length - 30} more older tasks.`));
+		}
+		lines.push("");
+		lines.push(theme.fg("muted", "[Esc to close]"));
+		return lines;
+	}
+
+	function formatElapsedSince(iso: string, now: number = Date.now()): string {
+		const start = new Date(iso).getTime();
+		if (Number.isNaN(start)) return "?";
+		const ms = now - start;
+		if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
+		if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+		return `${Math.round(ms / 3_600_000)}h ago`;
+	}
 }
