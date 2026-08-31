@@ -7,8 +7,9 @@ sidebar_label: Background Tasks
 # Background-Task Architecture
 
 How `subagent({ background: true, ... })` is implemented in the bramburn/pi
-fork. This page covers the registry, the message-injection pipeline, the
-lifecycle hooks, the Windows crash-recovery path, and the security guard.
+fork. This page covers the file-locked registry, the message-injection
+pipeline, the lifecycle hooks, the Windows crash-recovery path, and the
+security guard.
 
 ## Component diagram
 
@@ -18,18 +19,25 @@ lifecycle hooks, the Windows crash-recovery path, and the security guard.
                   │                                             │
    LLM turn N  ─► │  subagent tool (background: true)           │
                   │   │                                         │
-                  │   ├─► isBackground check (top of execute()) │
+                  │   ├─► modeCount validation (1 of:           │
+                  │   │   agent, tasks, chain)                  │
                   │   │                                         │
                   │   ├─► fireBackground(spec)                  │
                   │   │     │                                   │
-                  │   │     ├─► registry.add(task)  ◄───────────┼── writeChain (in-process)
-                  │   │     │     └─► writeToDisk()             │
+                  │   │     ├─► registry.add(initialTask)       │
+                  │   │     │     ↳ file-locked write to        │
+                  │   │     │       registry.json               │
                   │   │     │                                   │
-                  │   │     └─► Bun.spawn(pi -p ...) detached   │
-                  │   │           │                             │
-                  │   │           └─► writes to                │
-                  │   │               ~/.pi/agent/subagent-logs/│
-                  │   │               /<taskId>.log.jsonl      │
+                  │   │     └─► queueMicrotask:                 │
+                  │   │           runBackgroundSubagent(        │
+                  │   │             spec, taskId)               │
+                  │   │             │                           │
+                  │   │             ├─► spawn(pi -p ...)        │
+                  │   │             │   (no detached, no unref) │
+                  │   │             │                           │
+                  │   │             └─► writes JSONL events to  │
+                  │   │                 <agentDir>/subagent-bg/  │
+                  │   │                 <taskId>/log.jsonl      │
                   │   │                                         │
                   │   └─► returns { taskId, summary }  ──► LLM  │
                   │                                             │
@@ -37,95 +45,176 @@ lifecycle hooks, the Windows crash-recovery path, and the security guard.
                   │   │                                         │
                   │   └─► buildStatusInjection(snapshot)        │
                   │         │                                   │
-                  │         └─► CustomMessage(                  │
-                  │              customType:                   │
-                  │                "subagent-runtime-status",   │
-                  │              content: <markdown block>,     │
-                  │              display: false)                │
+                  │         └─► systemPrompt:                  │
+                  │              `${event.systemPrompt}        │
+                  │               \n\n${injection}`            │
+                  │              (NOT a custom message —       │
+                  │              the block is part of the      │
+                  │              system prompt that the LLM    │
+                  │              sees every turn)              │
                   │                                             │
-                  │         pi.sendMessage(                     │
-                  │           resultBuffer.toString())         │
-                  │           (best-effort, when child done)   │
+   Child exit   ─► proc.on("close")                            │
+                  │   │                                         │
+                  │   ├─► safeUpdate(taskId, {                 │
+                  │   │     status: "completed"|"failed"|      │
+                  │   │     "crashed",                         │
+                  │   │     exitCode?, errorMessage?,          │
+                  │   │     finishedAt, lastOutput })          │
+                  │   │                                         │
+                  │   └─► pi.sendMessage(                      │
+                  │         { customType:                      │
+                  │             "subagent-background-result",  │
+                  │           content, display: true,          │
+                  │           details },                       │
+                  │         { triggerTurn: true,               │
+                  │           deliverAs: "nextTurn" })          │
+                  │           (best-effort — may fail if the  │
+                  │            parent has already exited)      │
                   │                                             │
                   │   /tasks command  /  Ctrl+T shortcut        │
-                  │   └─► renderTasksDashboardLines()           │
+                  │   └─► renderDashboardLines()               │
                   └─────────────────────────────────────────────┘
                               │
                               ▼
                   ┌─────────────────────────────────────────────┐
-                  │  Child pi (detached subprocess)            │
-                  │   -p "<task text>"                          │
-                  │   --model <x>  --agent <x>                  │
+                  │  Child pi (subprocess)                      │
+                  │   --mode json -p --no-session               │
+                  │   Task: <scriptOrTask>                      │
                   │                                             │
-                  │   writes JSONL events to its log path       │
-                  │   exits 0 on completion                    │
+                  │   emits JSON events on stdout:              │
+                  │   message_end, tool_result_end, etc.        │
+                  │   exits 0 on success, non-zero on failure,  │
+                  │   no exit code on signal kill               │
                   └─────────────────────────────────────────────┘
 ```
 
 ## BackgroundTaskRegistry
 
-`background.ts` exports a single class, `BackgroundTaskRegistry`, plus a
-module-level singleton accessed via `getRegistry()`. The registry is the
-source of truth for "what background tasks exist".
+`background.ts` exports the `BackgroundRegistry` interface and a
+`getRegistry()` accessor that returns a process-wide singleton. The registry
+is the source of truth for "what background tasks exist".
 
 ### State
 
 | Field           | Type                              | Notes |
 | --------------- | --------------------------------- | ----- |
-| `tasks`         | `Map<string, BackgroundTask>`     | in-memory index |
-| `writeChain`    | `Promise<void>`                   | serialises disk writes |
-| `registryPath`  | `~/.pi/agent/subagent-registry.json` | atomic file |
-| `logsDir`       | `~/.pi/agent/subagent-logs/`      | per-task JSONL files |
+| `tasks`         | `BackgroundTask[]`                | in-memory index, persisted to `registry.json` |
+| `registryPath`  | `getAgentDir() + "/subagent-bg/registry.json"` | atomic-rename file |
+| `lockPath`      | `getAgentDir() + "/subagent-bg/registry.lock"` | `wx` open creates it |
+| `logsDir`       | `getAgentDir() + "/subagent-bg/<taskId>/log.jsonl"` | per-task directory |
 
-### Concurrency
+`<agentDir>` is whatever `getAgentDir()` returns — on a default install this
+is `~/.pi/agent`. The `subagent-bg` segment is hard-coded as `BG_DIR_NAME`
+in `background.ts`.
 
-- **In-process**: a single `writeChain` Promise serialises every
-  read-modify-write via `withWriteLock()`. Concurrent tool calls cannot
-  interleave their writes.
-- **Cross-process**: the registry is read by both the parent and the
-  child (via `snapshot()`). Cross-process safety is **not** required
-  because the child only writes to its own log file, never to the
-  registry. The parent is the only writer of the registry.
+### Concurrency: file lockfile
+
+The registry uses a lockfile for cross-process and cross-mutation safety:
+
+```ts
+function withLock<T>(lockPath: string, fn: () => T): T {
+  for (let attempt = 0; attempt < BG_LOCK_MAX_RETRIES; attempt++) {
+    try {
+      const fd = openSync(lockPath, "wx");  // fails with EEXIST if held
+      closeSync(fd);
+      try {
+        return fn();
+      } finally {
+        unlinkSync(lockPath);
+      }
+    } catch (err) {
+      if (err.code === "EEXIST") {
+        // wait BG_LOCK_RETRY_MS while the file still exists
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new RegistryLockError(lockPath);  // 5s total budget
+}
+```
+
+The lockfile is `wx`-opened (exclusive create) and unlinked when the
+critical section returns. Retry budget is 50 × 100 ms = 5 s. Under
+contention, the operation rejects with `RegistryLockError`.
+
+The wait loop uses `Atomics.wait` on a `SharedArrayBuffer` to give other
+processes a fair chance to acquire the lock. `SharedArrayBuffer` requires
+the page to be cross-origin isolated; if your runtime disables it, the
+fallback is busy-waiting for the existence check.
 
 ### Persistence
 
 Each write goes to a `.tmp` file first, then `renameSync` swaps it into
-place. This is the standard atomic-rename pattern; a crash mid-write
-leaves the previous version intact, never a partial JSON blob.
+place. This is the standard atomic-rename pattern; a crash mid-write leaves
+the previous version intact, never a partial JSON blob.
 
 ```ts
-private writeToDisk(): void {
-  const tmp = `${this.registryPath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(...), "utf-8");
-  renameSync(tmp, this.registryPath);
+function writeRegistry(file: RegistryFile): void {
+  const p = registryPath();
+  const tmp = `${p}.tmp`;
+  writeFileSync(tmp, JSON.stringify(file, null, 2), "utf8");
+  renameSync(tmp, p);
 }
 ```
+
+### Per-task logs
+
+Each task has its own log file at `<agentDir>/subagent-bg/<taskId>/log.jsonl`.
+The directory is created on the first `appendLog` call. The log is
+append-only:
+
+```ts
+function appendToTaskLog(taskId, event) {
+  const dir = join(backgroundDir(), taskId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const stamped = { at: new Date().toISOString(), ...event };
+  appendFileSync(taskLogPath(taskId), `${JSON.stringify(stamped)}\n`, "utf8");
+}
+```
+
+`appendFileSync` is best-effort: if it throws, the failure is recorded with
+`console.error` but does not break the parent extension. Per-task logs are
+not pruned by `prune()` — they are kept for archaeology.
 
 ### Pruning
 
 On `session_start`, `prune()` removes any task in a terminal state
-(`completed` / `failed` / `cancelled` / `crashed`) older than
-**24 hours**. `running` and `pending` tasks are never pruned. The
-per-task JSONL log files are not pruned — they are kept for archaeology.
+(`completed` / `failed` / `cancelled` / `crashed`) older than **24 hours**.
+`running` and `pending` tasks are never pruned.
 
 ## Status-injector
 
 `status-injector.ts` exports a single function, `buildStatusInjection(tasks)`,
-that returns a `CustomMessage` payload. The `before_agent_start` hook
-returns this payload verbatim; the runtime injects it into the parent's
-context as a custom message.
+that returns a markdown block. The `before_agent_start` hook concatenates
+this block to the parent's system prompt on every turn.
 
 ```ts
 {
-  customType: "subagent-runtime-status",
-  content: <markdown block>,
-  display: false,  // never shown to the user
+  systemPrompt: `${event.systemPrompt}\n\n${buildStatusInjection(tasks)}`,
 }
 ```
 
-The block is **read-only from the LLM's perspective**: the explicit
-"READ-ONLY" tag and the "Do not acknowledge this section" footer prevent
-the model from acting on it unless the user asks.
+The block is **not** a custom message — it is plain text appended to the
+existing system prompt. The LLM sees it on every turn, but it never appears
+in the user's terminal.
+
+The block carries an explicit `READ-ONLY` marker and the footer
+`_System message. Do not respond to this directly; it will be replaced on
+the next turn._` to prevent the model from acting on it unless the user
+asks.
+
+### Layout
+
+When the registry is non-empty, the block contains two tables:
+
+1. **Running (N)** — at most 8 rows of `pending` / `running` tasks
+2. **Recent (last N of M terminal)** — at most 5 rows of completed / failed
+   / cancelled / crashed, sorted newest-first
+
+When no tasks exist, the block is **empty** (empty string) — the hook
+checks `if (!injection) return;` and skips the concatenation. The
+parent's system prompt is unchanged in the common case.
 
 ### Token budget
 
@@ -135,10 +224,11 @@ the model from acting on it unless the user asks.
 | Per row         | 30             |
 | **Total cap**   | **600** (~2,400 chars) |
 
-When more than 10 tasks are active, the table shows the first 10 and a
-"… N more running" hint directs the LLM to `/tasks` for the rest. The
-block is hard-truncated at 2,400 chars with a footer note if it
-overflows anyway.
+The block is hard-truncated at `STATUS_BLOCK_MAX_CHARS = 2400`. If the
+tables alone would push the block past that, the output is sliced and a
+footer `_[status block truncated to fit token budget]_` is appended. With
+the 8+5 row caps in place, the typical block fits comfortably under the
+cap.
 
 ## Message-injection pipeline
 
@@ -146,54 +236,119 @@ Three lifecycle hooks work together:
 
 | Hook                  | Role |
 | --------------------- | ---- |
-| `before_agent_start`  | Inject the runtime status block into the next parent turn |
-| `session_start`       | Mark previously-`running` tasks as `crashed`, prune old entries |
-| `session_shutdown`    | Mark all still-`running` tasks as `cancelled` (interactive TUI) |
+| `before_agent_start`  | Concatenate the runtime status block to the parent's system prompt |
+| `session_start`       | Mark previously-`running`/`pending` tasks as `crashed`, prune old entries |
+| `session_shutdown`    | Mark all still-`running`/`pending` tasks as `cancelled` (interactive TUI) |
 
 ### `before_agent_start`
 
-Reads the registry snapshot, builds the status block, returns the
-`CustomMessage`. The runtime appends this to the parent context
-**before** the next LLM call. The LLM sees the status block on every
-turn, but the `display: false` flag hides it from the user's terminal.
+Reads the registry snapshot, builds the status block, returns the modified
+system prompt. The LLM sees the status block on every turn, but the
+text is part of the system prompt (not a separate message) and never
+reaches the user.
 
 ### Result push-back
 
-When the child finishes, the parent calls
-`pi.sendMessage(resultBuffer.toString())` to push the child's final
-output as a custom message. This is **best-effort**: it may fail silently
-if the parent has already exited (the D8 Windows case; see below) or if
-the parent is in the middle of a turn. Failures are logged to the
-child's JSONL log with a `POST_RESULT_FAILED` event but do not fail
-the run.
+When a child finishes, the parent calls `pi.sendMessage(...)` with
+`customType: "subagent-background-result"`. This is **best-effort**: it may
+fail silently if the parent has already exited (the D8 Windows case) or if
+the parent is in the middle of a turn. Failures are logged to the task's
+`log.jsonl` as `POST_RESULT_FAILED` events but do not change the task's
+terminal status.
+
+The custom type is `subagent-background-result` (a single string, not
+parameterised). The `display: true` flag means the result appears in the
+TUI; `details` carries the structured fields for programmatic consumers.
 
 ## Lifecycle hooks
 
 The extension registers all three hooks at load time:
 
 ```ts
-pi.on("before_agent_start", async () => {
-  const tasks = backgroundRegistry.snapshot().tasks;
-  const injection = buildStatusInjection(tasks);
-  return { message: injection };
-});
-
 pi.on("session_start", async () => {
-  await backgroundRegistry.markAllRunningAsCrashed();
-  await backgroundRegistry.prune();
+  const crashedCount = await backgroundRegistry.markAllRunningAsCrashed();
+  const pruned = await backgroundRegistry.prune();
+  if (crashedCount > 0) {
+    backgroundRegistry.appendLog("__system__", {
+      type: "RECOVERED",
+      count: crashedCount,
+      at: new Date().toISOString(),
+    });
+  }
+  if (pruned > 0) {
+    backgroundRegistry.appendLog("__system__", { type: "PRUNED", count: pruned });
+  }
 });
 
 pi.on("session_shutdown", async () => {
-  for (const t of backgroundRegistry.listRunning()) {
-    await backgroundRegistry.cancel(t.id);
+  const runningTasks = backgroundRegistry.listRunning();
+  for (const t of runningTasks) {
+    await backgroundRegistry.cancel(t.id, "Parent session ended");
   }
+});
+
+pi.on("before_agent_start", async (event, ctx) => {
+  const tasks = backgroundRegistry.snapshot().tasks;
+  const runningCount = tasks.filter((t) => t.status === "running" || t.status === "pending").length;
+  const totalCount = tasks.length;
+  refreshBackgroundPill(ctx, runningCount, totalCount);
+  const injection = buildStatusInjection(tasks);
+  if (!injection) return;
+  return { systemPrompt: `${event.systemPrompt}\n\n${injection}` };
 });
 ```
 
+## Run-background-subagent body
+
+The full `runBackgroundSubagent` function is wrapped in a top-level
+`try/catch` (`runBackgroundSubagentInner` plus the outer wrapper). Any
+synchronous throw from the file-locked registry or the spawn call is
+captured and recorded as a `crashed` status with the error message.
+
+```ts
+async function runBackgroundSubagent(spec, taskId) {
+  try {
+    await runBackgroundSubagentInner(spec, taskId);
+  } catch (err) {
+    safeUpdate(registry, taskId, {
+      status: "crashed",
+      errorMessage: `runner crashed: ${err.message ?? err}`,
+      finishedAt: new Date().toISOString(),
+    });
+    registry.appendLog(taskId, { type: "RUNNER_CRASHED", error: err.message });
+  }
+}
+```
+
+`safeUpdate` is a thin wrapper around `registry.update` that catches any
+synchronous throw (a `RegistryLockError` after the 5 s budget, for
+example) and records it to the per-task log instead of letting it become
+an unhandled exception. Every `void registry.update(...)` call site in
+the stream handlers (`proc.stdout.on("data")`, `proc.stderr.on("data")`,
+`proc.on("close")`, `proc.on("error")`) goes through `safeUpdate`.
+
+## Status determination on close
+
+`proc.on("close", (code, signal) => ...)` decides the final status from
+the Node `code` / `signal` pair:
+
+| `code`         | `signal`         | Final status |
+| -------------- | ---------------- | ------------ |
+| `0`            | (any)            | `completed`  |
+| non-zero int   | (any)            | `failed`     |
+| `null`         | any signal       | `crashed`    |
+
+Node reports `code: null, signal: <name>` whenever a child is killed by
+a signal — Windows Job Object termination, OOM kill, explicit
+`proc.kill()`, etc. Reporting that as `completed` (the old behaviour)
+contradicted the D8 Windows crash-recovery path; the new behaviour is
+`crashed` with `exitCode: undefined` and a `Killed by signal <name>`
+error message.
+
 ## Dashboard
 
-`/tasks` (slash command) and `Ctrl+T` (keyboard shortcut) both call
-the same handler. The handler:
+`/tasks` (slash command) and `Ctrl+T` (keyboard shortcut) both call the
+same handler. The handler:
 
 1. Reads the registry snapshot.
 2. If empty, shows a notification: "No background tasks. Use
@@ -212,49 +367,58 @@ includes a "[Esc to close]" footer in TUI mode.
 
 The parent stays alive between turns. Background tasks keep running.
 When the user exits the TUI (`session_shutdown`), all running tasks are
-cancelled and the JSONL logs are preserved.
+marked `cancelled` in the registry. The actual child processes are killed
+by the OS (Windows Job Object; on Linux/macOS, the child inherits the
+parent's process group and is killed via SIGINT propagation).
 
 ### `pi -p "..."` foreground mode
 
 The parent exits as soon as the LLM's final response is delivered. Any
-background tasks spawned during that turn inherit the parent's Job
-Object and are killed at the same instant. The next time `session_start`
-fires (typically the next `pi` invocation), `markAllRunningAsCrashed()`
-flips their status to `crashed`. The on-disk log is preserved for
-archaeology.
+background tasks spawned during that turn inherit the parent's Job Object
+on Windows or the parent's process group on Linux/macOS, and are killed
+at the same instant. The next time `session_start` fires (typically the
+next `pi` invocation), `markAllRunningAsCrashed()` flips their status to
+`crashed`. The on-disk log is preserved for archaeology.
 
 ### Why not "kill -0" orphan recovery?
 
 Lab session 2026-08-30-bun-subprocess-mgmt tested the obvious "use
-`process.kill(pid, 0)` to find orphaned children" approach. It does
-not work on Windows. Child processes spawned by `Bun.spawn` (or
-`node:child_process.spawn`) inherit the parent's Job Object, and a
-Job Object child is terminated when the parent dies, regardless of
+`process.kill(pid, 0)` to find orphaned children" approach. It does not
+work on Windows. Child processes spawned by `Bun.spawn` (or
+`node:child_process.spawn`) inherit the parent's Job Object, and a Job
+Object child is terminated when the parent dies, regardless of
 `detached: true` or `unref()`. There is nothing to recover. The
 `markAllRunningAsCrashed()` approach is the correct Windows-friendly
 behaviour.
 
 ### Logging
 
-Every state change appends a JSONL line to the task's log file. The
-log is the authoritative record of what happened, in case the in-memory
-state is lost. Log lines include:
+Every state change appends a JSONL line to the task's log file. The log
+is the authoritative record of what happened, in case the in-memory state
+is lost. Log lines include:
 
-- `SPAWN` — process spawned
+- `SPAWN` — process spawn requested
+- `SPAWN_ERROR` — spawn failed (caught in the inner try/catch)
 - `PID` — recorded child PID
-- `agent_start` / `agent_end` — child LLM session bounds
-- `turn_end` — every LLM turn
-- `EXIT` — child exited, with `exitCode`
+- `EVENT` — every JSON event from the child's stdout (with the event's
+  `type` field copied as `event.t`)
+- `EVENT_TRAILING` — last partial line in the buffer after the child
+  exits
+- `STDERR` — child stderr chunks, capped to 500 chars
+- `EXIT` — child exited; includes `exitCode`, `status`, `signal`
 - `POST_RESULT_FAILED` — push-back to parent failed (best-effort)
+- `CHILD_ERROR` — child `error` event fired
+- `RUNNER_CRASHED` — outer try/catch caught a synchronous throw
+- `UPDATE_FAILED` — `safeUpdate` could not write the registry
+- `RECOVERED` / `PRUNED` — system events recorded on `session_start`
 
 ## Security: recursive-spawn guard
 
 A naive implementation would let a background subagent spawn its own
 background subagent, leading to unbounded process trees. The
-`background.ts` module-singleton is shared across the parent and the
-child, and the child is a separate `pi` process with its own
-extension instance. Cross-process state sharing is limited to the
-on-disk registry, which is read-only from the child's perspective.
+`background.ts` module-singleton is per-`pi`-process. Cross-process
+state sharing is limited to the on-disk registry, which the child cannot
+write to (it only writes to its own `<taskId>/log.jsonl`).
 
 The parent enforces the recursion limit by the standard "task
 completion is async, the child cannot request another spawn from the
@@ -267,9 +431,9 @@ This is **not** a hard sandbox — a determined child can still spawn
 arbitrary processes via its bash tool. The fork does not change the
 upstream security model: only user-level agents from
 `~/.pi/agent/agents` are loaded by default; project-local agents from
-`.pi/agents` require `agentScope: "both"` and the trust prompt.
-See the Subagent Extension `README.md` (in the installed extension
-directory) for the full security model.
+`.pi/agents` require `agentScope: "both"` (or `"project"`) and the
+project-agent trust prompt. Background mode respects `agentScope` the
+same way foreground mode does.
 
 ## Testing strategy
 
@@ -278,22 +442,24 @@ Two test files cover the implementation:
 | File                       | Tests | What it covers |
 | -------------------------- | ----- | -------------- |
 | `background.test.ts`       | 12    | registry, persistence, crash-recovery, pruning, lock serialisation |
-| `status-injector.test.ts`  | 8     | status block builder, markdown escaping, token-budget cap |
+| `status-injector.test.ts`  | 8     | status block builder, markdown escaping, row caps, token cap |
 
 Both run under `bun test` in the installed extension directory. The
 fork-specific additions are tested in isolation; the original subagent
 tool (single, parallel, chain) is covered by the upstream test suite.
 
 End-to-end verification (full `pi -p "..."` with a background
-subagent) was performed in lab session
-**2026-08-31-bg-e2e**: a single-agent background task ran to completion,
-the registry captured `exitCode: 0`, and the 44 KB JSONL log contains
-the full event stream. The `pi.sendMessage` push-back fired
-`POST_RESULT_FAILED` at the end because the parent had already exited
-in `-p` mode (D8 case).
+subagent) was performed in lab session **2026-08-31-bg-e2e**: a
+single-agent background task ran to completion, the registry captured
+`exitCode: 0`, and the 44 KB JSONL log contains the full event stream.
+The `pi.sendMessage` push-back fired `POST_RESULT_FAILED` at the end
+because the parent had already exited in `-p` mode (D8 case).
 
 ## Cross-references
 
-- [Background Subagent Mode](/docs/fork/background-subagent) — user-facing guide
-- [Experimental Mode](/docs/fork/experimental-mode) — sibling feature for worktree-based exploration
-- [Agent Event Loop](/docs/architecture/event-loop) — the parent loop that hosts the status injection
+- [Background Subagent Mode](/docs/fork/background-subagent) —
+  user-facing guide
+- [Experimental Mode](/docs/fork/experimental-mode) — sibling feature
+  for worktree-based exploration
+- [Agent Event Loop](/docs/architecture/event-loop) — the parent loop
+  that hosts the status injection

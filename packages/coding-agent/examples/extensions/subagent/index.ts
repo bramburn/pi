@@ -505,6 +505,8 @@ async function runSingleAgent(
 
 const SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE = "subagent-background-result";
 
+type BackgroundRegistry = ReturnType<typeof getBackgroundRegistry>;
+
 interface BackgroundSpec {
 	agentName: string;
 	mode: "single" | "parallel" | "chain" | "script";
@@ -512,7 +514,28 @@ interface BackgroundSpec {
 	cwd: string;
 	dispatchDefaults: DispatchDefaults;
 	pi: ExtensionAPI;
-	registry: ReturnType<typeof getBackgroundRegistry>;
+	registry: BackgroundRegistry;
+	agentScope: AgentScope;
+}
+
+// `registry.update` and `registry.appendLog` are synchronous in the current
+// implementation but they take a file lock that can reject after 5 s. A bare
+// `void` discards a synchronous throw into an uncaughtException. Wrap each
+// call so the failure is captured in the per-task log instead.
+function safeUpdate(
+	reg: BackgroundRegistry,
+	taskId: string,
+	patch: Partial<Parameters<BackgroundRegistry["update"]>[1]>,
+): void {
+	try {
+		reg.update(taskId, patch);
+	} catch (err) {
+		try {
+			reg.appendLog(taskId, { type: "UPDATE_FAILED", error: String((err as Error).message ?? err) });
+		} catch {
+			/* log is best-effort */
+		}
+	}
 }
 
 function fireBackground(spec: BackgroundSpec): { taskId: string } {
@@ -522,7 +545,7 @@ function fireBackground(spec: BackgroundSpec): { taskId: string } {
 		kind: "pi-subprocess" as const,
 		mode: spec.mode,
 		agent: spec.agentName,
-		agentScope: "user" as const,
+		agentScope: spec.agentScope,
 		label: `${spec.agentName} (${spec.mode})`,
 		scriptOrTask: spec.scriptOrTask,
 		model: spec.dispatchDefaults.model,
@@ -542,6 +565,27 @@ function fireBackground(spec: BackgroundSpec): { taskId: string } {
 
 async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Promise<void> {
 	const registry = spec.registry;
+	// runBackgroundSubagent is fire-and-forget from the parent's perspective
+	// (`void` in fireBackground). Any uncaught rejection here becomes an
+	// unhandledRejection and can crash the parent. Wrap the body in a top-level
+	// try/catch that marks the task as crashed and records the error.
+	try {
+		await runBackgroundSubagentInner(spec, taskId);
+	} catch (err) {
+		safeUpdate(registry, taskId, {
+			status: "crashed",
+			errorMessage: `runner crashed: ${(err as Error).message ?? err}`,
+			finishedAt: new Date().toISOString(),
+		});
+		registry.appendLog(taskId, {
+			type: "RUNNER_CRASHED",
+			error: (err as Error).message ?? String(err),
+		});
+	}
+}
+
+async function runBackgroundSubagentInner(spec: BackgroundSpec, taskId: string): Promise<void> {
+	const registry = spec.registry;
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	const model = spec.dispatchDefaults.model;
 	if (model) args.push("--model", model);
@@ -559,24 +603,28 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 			windowsHide: true,
 		});
 	} catch (err) {
-		await registry.update(taskId, {
+		safeUpdate(registry, taskId, {
 			status: "failed",
 			errorMessage: `spawn failed: ${(err as Error).message}`,
 			finishedAt: new Date().toISOString(),
 		});
 		registry.appendLog(taskId, { type: "SPAWN_ERROR", error: (err as Error).message });
-		spec.pi.sendMessage(
-			{
-				customType: SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE,
-				content: `Background task ${taskId} (${spec.agentName}) failed to start: ${(err as Error).message}`,
-				display: true,
-				details: { taskId, status: "failed", errorMessage: (err as Error).message },
-			},
-			{ triggerTurn: true, deliverAs: "nextTurn" },
-		);
+		try {
+			spec.pi.sendMessage(
+				{
+					customType: SUBAGENT_BACKGROUND_RESULT_CUSTOM_TYPE,
+					content: `Background task ${taskId} (${spec.agentName}) failed to start: ${(err as Error).message}`,
+					display: true,
+					details: { taskId, status: "failed", errorMessage: (err as Error).message },
+				},
+				{ triggerTurn: true, deliverAs: "nextTurn" },
+			);
+		} catch (sendErr) {
+			registry.appendLog(taskId, { type: "POST_RESULT_FAILED", error: (sendErr as Error).message });
+		}
 		return;
 	}
-	await registry.update(taskId, { pid: proc.pid, lastOutput: "spawned" });
+	safeUpdate(registry, taskId, { pid: proc.pid, lastOutput: "spawned" });
 	registry.appendLog(taskId, { type: "PID", pid: proc.pid });
 	let buffer = "";
 	let lastAssistantText = "";
@@ -607,7 +655,7 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 					for (const part of msg.content ?? []) {
 						if (part.type === "text") lastAssistantText = part.text;
 					}
-					void registry.update(taskId, {
+					safeUpdate(registry, taskId, {
 						lastOutput: lastAssistantText.slice(-200),
 						usage: totalUsage,
 					});
@@ -617,7 +665,7 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 				const msg = event.message as Message;
 				const toolName = (msg as { toolName?: string }).toolName ?? "tool";
 				const output = (msg as { output?: string }).output ?? "";
-				void registry.update(taskId, {
+				safeUpdate(registry, taskId, {
 					lastOutput: `[${toolName}] ${String(output).slice(-160)}`,
 				});
 			}
@@ -626,9 +674,9 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 	proc.stderr?.on("data", (data: Buffer) => {
 		const text = data.toString();
 		registry.appendLog(taskId, { type: "STDERR", chunk: text.slice(-500) });
-		void registry.update(taskId, { lastOutput: `[stderr] ${text.slice(-160)}` });
+		safeUpdate(registry, taskId, { lastOutput: `[stderr] ${text.slice(-160)}` });
 	});
-	proc.on("close", (code) => {
+	proc.on("close", (code, signal) => {
 		if (buffer.trim()) {
 			try {
 				const event = JSON.parse(buffer);
@@ -637,19 +685,26 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 				/* drop */
 			}
 		}
-		const exitCode = code ?? 0;
-		const status: "completed" | "failed" = exitCode === 0 ? "completed" : "failed";
+		// Node reports `code: null` when the child is killed by a signal (Windows
+		// Job Object termination, OOM, explicit proc.kill). Treat that as crashed,
+		// not as exit-code 0. Leave exitCode undefined so the on-disk record
+		// distinguishes "exited normally with 0" from "was killed".
+		const killed = code === null;
+		const status: "completed" | "failed" | "crashed" = killed ? "crashed" : code === 0 ? "completed" : "failed";
+		const exitCode = killed ? undefined : (code ?? 1);
+		const errorMessage = killed ? `Killed by signal ${signal ?? "unknown"}` : undefined;
 		const finalText = lastAssistantText || "(no output)";
-		void registry.update(taskId, {
+		safeUpdate(registry, taskId, {
 			status,
 			exitCode,
 			finishedAt: new Date().toISOString(),
 			lastOutput: finalText.slice(-200),
+			...(errorMessage ? { errorMessage } : {}),
 		});
-		registry.appendLog(taskId, { type: "EXIT", exitCode, status });
-		const isError = exitCode !== 0;
+		registry.appendLog(taskId, { type: "EXIT", exitCode: exitCode ?? null, status, signal: signal ?? null });
+		const isError = status !== "completed";
 		const content = isError
-			? `Background task ${taskId} (${spec.agentName}) failed with exit code ${exitCode}.\n\n${finalText}`
+			? `Background task ${taskId} (${spec.agentName}) ${status}${errorMessage ? `: ${errorMessage}` : exitCode !== undefined ? ` with exit code ${exitCode}` : ""}.\n\n${finalText}`
 			: `Background task ${taskId} (${spec.agentName}) completed.\n\n${finalText}`;
 		try {
 			spec.pi.sendMessage(
@@ -666,7 +721,7 @@ async function runBackgroundSubagent(spec: BackgroundSpec, taskId: string): Prom
 		}
 	});
 	proc.on("error", (err) => {
-		void registry.update(taskId, {
+		safeUpdate(registry, taskId, {
 			status: "failed",
 			errorMessage: `child error: ${err.message}`,
 			finishedAt: new Date().toISOString(),
@@ -1425,6 +1480,48 @@ export default function (pi: ExtensionAPI) {
 			// ----------------------------------------------------------------
 			const isBackground = params.background === true;
 			const scriptOrTask = params.script?.trim() || params.task?.trim() || "";
+			if (isBackground) {
+				if (!scriptOrTask) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Background mode requires a non-empty `task` or `script` parameter.",
+							},
+						],
+						details: {
+							mode: "single",
+							agentScope,
+							projectAgentsDir: discovery.projectAgentsDir,
+							results: [],
+							background: true,
+							taskIds: [],
+						},
+					};
+				}
+				const hasBgChain = (params.chain?.length ?? 0) > 0;
+				const hasBgTasks = (params.tasks?.length ?? 0) > 0;
+				const hasBgSingle = Boolean(params.agent);
+				const bgModeCount = Number(hasBgChain) + Number(hasBgTasks) + Number(hasBgSingle);
+				if (bgModeCount !== 1) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: "Background mode: provide exactly one of `{ agent }`, `{ tasks }`, or `{ chain }`. Use `/tasks` to monitor after starting.",
+							},
+						],
+						details: {
+							mode: "single",
+							agentScope,
+							projectAgentsDir: discovery.projectAgentsDir,
+							results: [],
+							background: true,
+							taskIds: [],
+						},
+					};
+				}
+			}
 			if (isBackground && scriptOrTask) {
 				const registry = getBackgroundRegistry();
 				const taskIds: string[] = [];
@@ -1438,6 +1535,7 @@ export default function (pi: ExtensionAPI) {
 						dispatchDefaults,
 						pi,
 						registry,
+						agentScope,
 					});
 					taskIds.push(taskId);
 				} else if (params.tasks) {
@@ -1451,6 +1549,7 @@ export default function (pi: ExtensionAPI) {
 							dispatchDefaults,
 							pi,
 							registry,
+							agentScope,
 						});
 						taskIds.push(taskId);
 					}
@@ -1465,6 +1564,7 @@ export default function (pi: ExtensionAPI) {
 							dispatchDefaults,
 							pi,
 							registry,
+							agentScope,
 						});
 						taskIds.push(taskId);
 					}

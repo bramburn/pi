@@ -80,7 +80,7 @@ The fork's `AGENTS.md` includes rules that do not apply to upstream:
 
 Features currently in the fork that are not in upstream:
 
-- **Background subagent mode** — `subagent({ background: true, ... })` runs detached; the result is injected as a custom message on the next turn. See [Background Subagent Mode](./background-subagent) for the user guide and [Background-Task Architecture](/docs/architecture/background-tasks) for the internals.
+- **Background subagent mode** — `subagent({ background: true, ... })` spawns a detached child `pi`, returns a task ID immediately, and injects the result as a `subagent-background-result` custom message on the next turn. Respects `agentScope` and the project-agent trust prompt the same way foreground mode does. File-locked registry at `<agentDir>/subagent-bg/` survives parent restarts. See [Background Subagent Mode](./background-subagent) for the user guide and [Background-Task Architecture](/docs/architecture/background-tasks) for the internals.
 - **`validateLlmMessages` guard** — explicit validation of `user` and `assistant` messages before sending to the LLM (see above).
 - **`build-both` orchestrator** — `scripts/build-both.mjs` runs the Node and Bun build targets independently and reports per-target status (see above).
 - **`FORK_NAME` constant** — `packages/coding-agent/src/config.ts` exports `FORK_NAME = "bramburn"` so the fork is identifiable in `pi --version` output (see above).

@@ -7,9 +7,9 @@ sidebar_label: Background Subagent
 # Background Subagent Mode
 
 Run a subagent without blocking the LLM. The child `pi` process starts detached,
-writes its result to disk, and the parent injects the result as a custom message
-on the **next** turn. Useful for long-running work, fire-and-forget sweeps, and
-parallel experiments where the parent should keep making progress.
+the parent returns a task ID immediately, and the result is pushed back as a
+custom message on the **next** turn. Useful for long-running work, fire-and-forget
+sweeps, and parallel experiments where the parent should keep making progress.
 
 ## Quick start
 
@@ -20,33 +20,28 @@ Use the subagent tool with background: true, agent="scout", and
 task="scan all files under packages/ for TODOs and report a count".
 ```
 
-The tool call returns immediately with a task ID. The child runs detached. On
-the parent's next turn, the result is injected as a custom message:
-
-```
-## [RUNTIME STATUS — subagent subprocesses | READ-ONLY]
-…
-| ID         | Type                 | Status     | Started | Elapsed | Last Output |
-| ---------- | -------------------- | ---------- | ------- | ------- | ----------- |
-| bg-3fa1b2c | pi-subprocess (scout) | **RUNNING** | 14:22 UTC | 1m     | 32 of 84 files scanned… |
-```
-
-The same status block is injected on every subsequent turn until the task
-finishes. When it finishes, the final assistant message receives the child's
-output as a custom message and the LLM can act on it.
+The tool call returns immediately with a task ID (e.g. `bg_lz8x4y_5a2c`). The
+child runs detached. On the parent's next turn, the result is injected as a
+custom message via `subagent-background-result` and the runtime status block
+concatenated to the system prompt shows live state for all background tasks.
 
 ## Parameters
 
 The `subagent` tool gains two new parameters:
 
-| Parameter     | Type    | Default | Description |
-| ------------- | ------- | ------- | ----------- |
-| `background`  | boolean | `false` | Fire-and-forget mode. The tool returns immediately with a task ID; the child runs in the background. Results are injected as a custom message on the next turn. |
-| `script`      | string  | (none)  | Arbitrary shell script body to pass to the subagent as the task. The subagent LLM reads it and executes via its bash tool. Mutually exclusive with `task`; if both are provided, `script` wins. |
+| Parameter    | Type    | Default | Description |
+| ------------ | ------- | ------- | ----------- |
+| `background` | boolean | `false` | Fire-and-forget mode. The tool returns immediately with a task ID; the child runs in the background. Result is injected as a custom message on the next turn. |
+| `script`     | string  | (none)  | Arbitrary shell-script body to pass to the subagent as the task. The subagent LLM reads it and executes via its bash tool. Mutually exclusive with `task`; if both are provided, `script` wins. |
 
 All other parameters (`agent`, `task`, `tasks`, `chain`, `agentScope`,
 `confirmProjectAgents`, `cwd`) keep their existing semantics. `background: true`
-works with single, parallel (`tasks`), and chain (`chain`) modes.
+works with single, parallel (`tasks`), and chain (`chain`) modes — but exactly
+one of those three must be set. Passing more than one is an error.
+
+Background mode **respects `agentScope`**: passing `agentScope: "project"` (or
+`"both"`) loads project-local agents just as it does in the foreground path, and
+the project-agent trust prompt still fires.
 
 ## Single mode (one task, one agent)
 
@@ -61,7 +56,7 @@ subagent({
 Returns immediately:
 
 ```
-Background task bg-3fa1b2c started (scout, single). Use `/tasks` or `Ctrl+T`
+Background task bg_lz8x4y_5a2c started (scout, single). Use `/tasks` or `Ctrl+T`
 to see live status; the result will be injected as a custom message on the next turn.
 ```
 
@@ -81,8 +76,8 @@ subagent({
 Returns:
 
 ```
-Started 3 background tasks: bg-aaa, bg-bbb, bg-ccc. Use `/tasks` or `Ctrl+T`
-to monitor. Results will be injected on the next turn.
+Started 3 background tasks: bg_lz8x4y_5a2c, bg_lz8x4y_8f1b, bg_lz8x4y_c03a. Use
+`/tasks` or `Ctrl+T` to monitor. Results will be injected on the next turn.
 ```
 
 Each task runs in its own `pi` subprocess. They run concurrently. The parent
@@ -101,37 +96,64 @@ subagent({
 })
 ```
 
-The chain's first step starts immediately. Subsequent steps queue as
-`pending` tasks. When step N finishes, step N+1 unblocks automatically and
-runs as a fresh `pi` subprocess. The same task ID prefix is reused for each
-step, suffixed with the step index (e.g. `bg-chain-0001`, `bg-chain-0002`,
-`bg-chain-0003`).
+Each step in the chain is launched as its own background task. Steps run in
+order, but each step's `pi` subprocess is independent — the parent does not
+block waiting for one step to finish before spawning the next. The result of
+step N is injected as a custom message before the parent's next turn, so the
+parent LLM can decide whether to start step N+1.
 
 ## Runtime status block
 
-The `before_agent_start` hook injects a read-only status block into every
-parent turn. The block lists the currently active background tasks, with
-their ID, type, status, start time, elapsed time, and last output preview.
+The `before_agent_start` hook concatenates a read-only status block to the
+parent's system prompt on every turn. The block lists the currently running
+background tasks (capped at 8 rows) and the most recent terminal tasks (capped
+at 5 rows).
 
-When the registry is empty:
+Example with both running and recent tasks:
 
 ```
-## [RUNTIME STATUS — subagent subprocesses | READ-ONLY]
-No background subagent tasks are running.
-Use `subagent({ background: true, ... })` to start a fire-and-forget task.
-Use `/tasks` or `Ctrl+T` to view historical task logs.
-Do not acknowledge this section unless you need to act on it.
+## [RUNTIME STATUS — background subagent tasks | READ-ONLY]
+
+### Running (2)
+
+| ID | Agent | Mode | Elapsed | Last Output |
+| --- | --- | --- | --- | --- |
+| `bg_lz8x4y_5a2c` | scout | single | 1m | 32 of 84 files scanned… |
+| `bg_lz8x4y_8f1b` | reviewer | parallel | 42s | [bash] `rg -l Auth.verify` → 12 files |
+
+### Recent (last 3 of 5 terminal)
+
+| ID | Agent | Status | Exit | Last Output |
+| --- | --- | --- | --- | --- |
+| `bg_lz8x4y_c03a` | planner | completed | 0 | Wrote 3 migration design docs |
+| `bg_lz8x4y_7d2e` | worker | failed | 1 | bash: tsc: command not found |
+| `bg_lz8x4y_1a8c` | scout | crashed | — | Killed by signal SIGTERM |
+
+_System message. Do not respond to this directly; it will be replaced on the next turn._
 ```
 
-When tasks are active, the block contains a markdown table plus an
-"Available Actions" footer. The block is capped at 600 tokens
-(~2,400 characters). If more than 10 tasks are active, the table shows
-the first 10 and a "… N more running" hint directs you to `/tasks`.
+### Token budget
 
-The block is marked **READ-ONLY** explicitly. The LLM is instructed to
-leave running processes untouched unless the user explicitly asks to
-manage them. This prevents the model from "fixing" background tasks it
-should not be touching.
+The block is hard-capped at **2,400 characters** (~600 tokens). If the running
+table alone would push the block past that, the output is truncated and a
+footer note is appended. With 8 running rows + 5 recent rows + headers, the
+typical block fits comfortably under the cap.
+
+When the running count exceeds 8, a single `…and N more running` row replaces
+the overflow (the missing rows are visible in `/tasks`).
+
+## Status values
+
+A background task moves through these states:
+
+| Status      | Meaning |
+| ----------- | ------- |
+| `pending`   | Registered but the child process has not been spawned yet (chain mode only). |
+| `running`   | Child process spawned, still executing. |
+| `completed` | Child exited with code 0. |
+| `failed`    | Child exited with a non-zero code. |
+| `crashed`   | Child was killed by a signal (Windows Job Object termination, OOM, explicit kill). `exitCode` is `undefined` for crashed tasks. |
+| `cancelled` | Parent called `cancel` (typically `session_shutdown`). |
 
 ## Dashboard (`/tasks` and `Ctrl+T`)
 
@@ -148,75 +170,110 @@ preview of the most recent output. The dashboard caps the visible list at
 
 Press `Esc` to close the dashboard.
 
+## Footer pill
+
+The TUI shows a small pill in the footer whenever any background task exists:
+
+```
+▶ 2 bg · 5 total · Ctrl+T for dashboard
+```
+
+The pill is cleared automatically when the registry becomes empty.
+
 ## On-disk state
 
-Background tasks persist across process restarts. Two files live under
-`~/.pi/agent/`:
+Background tasks persist across process restarts. The state lives under the
+agent directory (`getAgentDir()` — typically `~/.pi/agent`):
 
 ```
-~/.pi/agent/
-├── subagent-registry.json          # task index (one JSON object)
-└── subagent-logs/
-    └── bg-<id>.log.jsonl           # per-task event log (one JSON per line)
+<agentDir>/
+└── subagent-bg/
+    ├── registry.json              # array of BackgroundTask entries
+    └── <taskId>/
+        └── log.jsonl              # per-task append-only event log
 ```
 
-The registry contains every task in any status. It is the single source of
-truth for "what background tasks exist". The per-task log records every
-event (spawn, model call, tool call, turn end, exit) as a JSONL stream.
-Use it for archaeology when a task crashes or hangs.
+`<agentDir>` comes from `getAgentDir()` in `@earendil-works/pi-coding-agent`.
+On a default install this is `~/.pi/agent`.
 
-The registry is pruned on `session_start`: any task that was `running`
-when the previous session ended is marked `crashed` (see the next
-section). After 24 hours, completed/failed/cancelled/crashed tasks are
-removed from the registry on `session_start` (the per-task JSONL log
-files are not pruned — they are kept for archaeology).
+`registry.json` is the single source of truth for "what background tasks
+exist". Each `<taskId>/log.jsonl` records the per-task event stream (spawn,
+PID, every `message_end`, `tool_result_end`, stderr chunks, exit, post-result
+status) for archaeology.
+
+The registry is pruned on `session_start`: any task that was `running` or
+`pending` when the previous session ended is marked `crashed`. After 24 hours,
+completed/failed/cancelled/crashed tasks are removed from the registry
+(per-task log files are not pruned — they are kept for archaeology).
 
 ## Windows caveat
 
-On Windows, child processes spawned by `Bun.spawn` (or
-`node:child_process.spawn`) inherit the parent's Job Object and are
-**terminated when the parent dies** — regardless of `detached: true` or
-`unref()`. This is a Windows-specific kernel behaviour, not a bug in
-the subagent code.
+On Windows, child processes spawned by `node:child_process.spawn` inherit the
+parent's Job Object and are **terminated when the parent dies** — regardless
+of `detached: true` or `unref()`. This is a Windows kernel behaviour, not a
+bug in the subagent code.
 
 Practical consequences:
 
-- **`pi -p "..."` foreground mode**: the parent exits as soon as the
-  LLM's final response is delivered. Any background tasks spawned during
-  that turn are killed at the same instant. The task record will show
-  `crashed` (not `completed`) the next time `session_start` runs.
-- **Interactive TUI (`pi` with no `-p`)**: the parent stays alive,
-  so background tasks keep running normally. They are killed only when
-  the TUI session itself ends (`session_shutdown` hook).
-- **Recovery**: on `session_start`, every previously-`running` task is
-  marked `crashed` with the message "Parent session ended (Windows
-  terminates child processes with parent)". The on-disk log is preserved
-  for post-mortem.
+- **`pi -p "..."` foreground mode**: the parent exits as soon as the LLM's
+  final response is delivered. Any background tasks spawned during that turn
+  are killed at the same instant. The task record will show `crashed` (not
+  `completed`) the next time `session_start` runs.
+- **Interactive TUI (`pi` with no `-p`)**: the parent stays alive, so
+  background tasks keep running normally. They are killed only when the TUI
+  session itself ends (`session_shutdown` hook).
+- **Recovery**: on `session_start`, every previously-`running` or `pending`
+  task is marked `crashed` with the message "Parent session ended before
+  task completed". The on-disk log is preserved for post-mortem.
 
 If you need long-running background work, use the interactive TUI, not
 `pi -p`.
 
+## Result injection
+
+When a child task finishes (success, failure, or crash), the parent calls:
+
+```ts
+pi.sendMessage(
+  {
+    customType: "subagent-background-result",
+    content: "Background task bg_xyz (scout) completed.\n\n<final assistant text>",
+    display: true,
+    details: { taskId, status, agent, exitCode, finalOutput, usage },
+  },
+  { triggerTurn: true, deliverAs: "nextTurn" },
+);
+```
+
+The custom type is `subagent-background-result`. The `display: true` flag
+shows the message in the TUI. `details` carries the structured fields for
+consumers that want to parse the result without scraping the text.
+
+If the parent has already exited (the Windows D8 case, or any `pi -p` run
+that ends before the child), `sendMessage` may fail silently. The failure is
+logged to the task's `log.jsonl` as a `POST_RESULT_FAILED` event but does
+not change the task's terminal status.
+
 ## Installation
 
-The background-mode source lives in the fork-local extension
-`packages/coding-agent/examples/extensions/subagent/`. The installed
-location is `~/.pi/agent/extensions/subagent/`. The fork deploys the new
+The background-mode source lives in the fork-local extension at
+`packages/coding-agent/examples/extensions/subagent/`. The installed location
+is `~/.pi/agent/extensions/subagent/`. The fork deploys the new
 `background.ts` and `status-injector.ts` modules alongside the existing
-`index.ts`, `agents.ts`, `ui.ts`, and the `agents/` + `prompts/`
-directories.
+`index.ts`, `agents.ts`, `ui.ts`, and the `agents/` + `prompts/` directories.
 
 After deploying, restart the `pi` TUI to pick up the new code. The
-`/tasks` command and `Ctrl+T` shortcut are registered at extension
-load time.
+`/tasks` command and `Ctrl+T` shortcut are registered at extension load
+time.
 
 ## Unit tests
 
 The implementation ships with two unit test files:
 
-- `background.test.ts` — 12 tests covering the registry, persistence,
-  and crash-recovery behaviour
-- `status-injector.test.ts` — 8 tests covering the status-block builder,
-  the markdown escaping, and the token-budget cap
+- `background.test.ts` — covers the registry, persistence, crash-recovery,
+  pruning, and lock serialisation
+- `status-injector.test.ts` — covers the status-block builder, markdown
+  escaping, the 8+5 row caps, and the 2,400-char token cap
 
 Run from the extension directory:
 
@@ -228,8 +285,9 @@ bun test
 ## Cross-references
 
 - [Background-Task Architecture](/docs/architecture/background-tasks) —
-  internals: `BackgroundTaskRegistry`, the message-injection pipeline, the
-  Windows crash-recovery path, and the recursive-spawn guard.
+  internals: file-locked registry, message-injection pipeline, lifecycle
+  hooks, Windows crash-recovery path, the recursive-spawn guard, and the
+  per-task log format.
 - [Experimental Mode](/docs/fork/experimental-mode) — sibling feature for
   hypothesis-driven worktree exploration.
 - [Fork Features](/docs/fork/features) — entry point in the Fork Features index.

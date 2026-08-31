@@ -14,6 +14,14 @@ import type { BackgroundTask } from "./background.ts";
 
 const MAX_PREVIEW = 120;
 
+// Hard cap on the injected block. The block is concatenated to every parent's
+// system prompt, so a runaway registry (50+ active tasks, long lastOutput
+// strings) must not blow the LLM's context window. ~2,400 chars ≈ 600 tokens,
+// which keeps the block as a small footer rather than a primary prompt.
+const STATUS_BLOCK_MAX_CHARS = 2400;
+const MAX_RUNNING_ROWS = 8;
+const MAX_RECENT_ROWS = 5;
+
 function fmtElapsed(iso: string, now: number = Date.now()): string {
 	const start = new Date(iso).getTime();
 	if (Number.isNaN(start)) return "?";
@@ -53,19 +61,19 @@ export function buildStatusInjection(tasks: BackgroundTask[]): string {
 		lines.push("");
 		lines.push("| ID | Agent | Mode | Elapsed | Last Output |");
 		lines.push("| --- | --- | --- | --- | --- |");
-		for (const t of running.slice(0, 8)) {
+		for (const t of running.slice(0, MAX_RUNNING_ROWS)) {
 			lines.push(
 				`| \`${t.id}\` | ${t.agent} | ${t.mode} | ${fmtElapsed(t.startedAt)} | ${clipPreview(t.lastOutput || "(no output yet)")} |`,
 			);
 		}
-		if (running.length > 8) {
-			lines.push(`| _…and ${running.length - 8} more running_ | | | | |`);
+		if (running.length > MAX_RUNNING_ROWS) {
+			lines.push(`| _…and ${running.length - MAX_RUNNING_ROWS} more running_ | | | | |`);
 		}
 		lines.push("");
 	}
 
 	if (terminal.length > 0) {
-		const recent = [...terminal].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, 5);
+		const recent = [...terminal].sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).slice(0, MAX_RECENT_ROWS);
 		lines.push(`### Recent (last ${recent.length} of ${terminal.length} terminal)`);
 		lines.push("");
 		lines.push("| ID | Agent | Status | Exit | Last Output |");
@@ -80,5 +88,9 @@ export function buildStatusInjection(tasks: BackgroundTask[]): string {
 
 	lines.push("_System message. Do not respond to this directly; it will be replaced on the next turn._");
 
-	return lines.join("\n");
+	const joined = lines.join("\n");
+	if (joined.length > STATUS_BLOCK_MAX_CHARS) {
+		return `${joined.slice(0, STATUS_BLOCK_MAX_CHARS)}\n\n_[status block truncated to fit token budget]_`;
+	}
+	return joined;
 }
