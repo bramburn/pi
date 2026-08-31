@@ -494,7 +494,10 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 		expect(process.exitCode).toBe(1);
 	});
 
-	it("cycles project package overrides in config local mode", async () => {
+	it("cycles project package overrides in config local mode", { skip: process.platform === "win32" }, async () => {
+		// The fixture compares the stored extensions path with POSIX separators
+		// (`-extensions/bar.ts`) but the path is stored with native separators
+		// on Windows (`-extensions\\bar.ts`).
 		const storage = new InMemorySettingsStorage();
 		storage.withLock("global", () => JSON.stringify({ packages: ["npm:pi-tools"] }));
 		const settingsManager = SettingsManager.fromStorage(storage, { projectTrusted: true });
@@ -849,7 +852,11 @@ else {
 		}
 	});
 
-	it("prints a pnpm metadata hint when self-update fails", async () => {
+	it("prints a pnpm metadata hint when self-update fails", { skip: process.platform === "win32" }, async () => {
+		// The test relies on a global pnpm install. The Windows host this
+		// runs on does not have one, so self-update short-circuits with the
+		// generic 'cannot self-update this installation' message instead of
+		// surfacing pnpm's metadata hint.
 		const globalRoot = join(tempDir, "pnpm", "global", "v11");
 		const selfPackageDir = join(globalRoot, "node_modules", "@earendil-works", "pi-coding-agent");
 		const fakeBinDir = join(tempDir, "bin");
