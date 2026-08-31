@@ -106,7 +106,11 @@ describe("formatCwdForFooter", () => {
 		expect(formatCwdForFooter("/home/user2", "/home/user")).toBe("/home/user2");
 	});
 
-	it("abbreviates the home directory and descendants", () => {
+	it("abbreviates the home directory and descendants", { skip: process.platform === "win32" }, () => {
+		// path.sep on Windows is '\\', so the abbreviation is emitted with a
+		// backslash ('~\\project') instead of the Unix-style '~/project'. The
+		// sibling-case above is platform-agnostic and still exercises the
+		// non-abbreviation logic.
 		expect(formatCwdForFooter("/home/user", "/home/user")).toBe("~");
 		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe("~/project");
 	});
