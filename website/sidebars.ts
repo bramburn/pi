@@ -35,6 +35,11 @@ const sidebars: SidebarsConfig = {
       label: 'Agent Event Loop',
     },
     {
+      type: 'doc',
+      id: 'architecture/background-tasks',
+      label: 'Background Tasks',
+    },
+    {
       type: 'link',
       label: 'Upstream docs',
       href: 'https://pi.dev/docs/latest',
@@ -54,14 +59,16 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'doc',
-<<<<<<< HEAD
-=======
       id: 'fork/experimental-mode',
       label: 'Experimental Mode',
     },
     {
       type: 'doc',
->>>>>>> f919dc217 (docs: experimental-mode page in docusaurus site)
+      id: 'fork/background-subagent',
+      label: 'Background Subagent',
+    },
+    {
+      type: 'doc',
       id: 'fork/sync',
       label: 'Sync Process',
     },

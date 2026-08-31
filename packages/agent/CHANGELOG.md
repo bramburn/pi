@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+## [0.84.5] - 2026-08-30
 ### Fork-local (bramburn)
 ### Fixed
 

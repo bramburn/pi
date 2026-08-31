@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.84.5] - 2026-08-30
+
 ### Added
 
 - Added `SentryTelemetryContext`, a Sentry-backed adapter that implements the existing `TelemetryContext` contract, captures exceptions and messages, and emits Sentry `event` and `transaction` envelopes through a caller-supplied transport. The adapter has no runtime dependencies; the transport is injected so packages without HTTP client dependencies can wire their own.
