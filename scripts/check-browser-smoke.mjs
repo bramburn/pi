@@ -41,6 +41,14 @@ function includesNodePackage(inputs, packageName) {
 }
 
 try {
+	// Stub Node.js builtins used by telemetry/sentry.ts — the sentry adapter
+	// is not in the browser bundle (tree-shaken out), but esbuild still needs to
+	// resolve the import at bundle time.
+	const browserStubs = {
+		"node:crypto": "{}",
+		"node:perf_hooks": "{}",
+	};
+
 	await build({
 		entryPoints: ["scripts/browser-smoke-entry.ts"],
 		bundle: true,
@@ -49,6 +57,7 @@ try {
 		logLevel: "silent",
 		outfile: outputPath,
 		plugins: [generatedCatalogDataPlugin],
+		define: browserStubs,
 	});
 
 	const agentTreeshakeBuild = await build({
@@ -61,6 +70,7 @@ try {
 		outfile: agentTreeshakeOutputPath,
 		plugins: [generatedCatalogDataPlugin],
 		write: false,
+		define: browserStubs,
 	});
 	const inputs = agentTreeshakeBuild.metafile.inputs;
 	for (const forbiddenInput of [
