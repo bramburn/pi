@@ -68,8 +68,7 @@ function createPnpmGlobalInstall(): { root: string; packageDir: string } {
 	const packageDir = join(root, "@mariozechner", "pi-coding-agent");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(binDir, { recursive: true });
-	writeFileSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), createFakePnpmScript(root));
-	chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
+	writeFakePackageManagerScript(binDir, "pnpm", createFakePnpmScript(root));
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
 	process.env.PI_PACKAGE_DIR = packageDir;
@@ -95,8 +94,7 @@ function createYarnGlobalInstall(): { globalDir: string; packageDir: string } {
 	const packageDir = join(globalDir, "node_modules", "@mariozechner", "pi-coding-agent");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(binDir, { recursive: true });
-	writeFileSync(join(binDir, process.platform === "win32" ? "yarn.cmd" : "yarn"), createFakeYarnScript(globalDir));
-	chmodSync(join(binDir, process.platform === "win32" ? "yarn.cmd" : "yarn"), 0o755);
+	writeFakePackageManagerScript(binDir, "yarn", createFakeYarnScript(globalDir));
 	tempDir = temp;
 	process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
 	process.env.PI_PACKAGE_DIR = packageDir;
@@ -113,8 +111,7 @@ function createBunGlobalInstall(): { packageDir: string } {
 	const packageDir = join(scopeDir, "pi-coding-agent");
 	mkdirSync(packageDir, { recursive: true });
 	mkdirSync(bunBin, { recursive: true });
-	writeFileSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), createFakeBunScript(bunBin));
-	chmodSync(join(bunBin, process.platform === "win32" ? "bun.cmd" : "bun"), 0o755);
+	writeFakePackageManagerScript(bunBin, "bun", createFakeBunScript(bunBin));
 	tempDir = temp;
 	process.env.PATH = `${bunBin}${delimiter}${originalPath ?? ""}`;
 	process.env.PI_PACKAGE_DIR = packageDir;
@@ -123,27 +120,85 @@ function createBunGlobalInstall(): { packageDir: string } {
 }
 
 function createFakePnpmScript(root: string): string {
-	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="root" if "%2"=="-g" echo ${root}\r\n`;
-	}
 	const escapedRoot = root.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${escapedRoot}'\n\texit 0\nfi\nexit 1\n`;
 }
 
 function createFakeYarnScript(globalDir: string): string {
-	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="global" if "%2"=="dir" echo ${globalDir}\r\n`;
-	}
 	const escapedGlobalDir = globalDir.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "global" ] && [ "$2" = "dir" ]; then\n\tprintf '%s\\n' '${escapedGlobalDir}'\n\texit 0\nfi\nexit 1\n`;
 }
 
 function createFakeBunScript(bunBin: string): string {
-	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="pm" if "%2"=="bin" if "%3"=="-g" echo ${bunBin}\r\n`;
-	}
 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
+}
+
+/**
+ * Write a fake package-manager binary into `binDir`. On POSIX this is a single
+ * shell script. On Windows, cross-spawn drives `.cmd` files through cmd.exe and
+ * mangles the inline `node -e "..."` quoting we used to embed, so we drop a
+ * companion Node.js helper next to the `.cmd` and have the wrapper invoke it
+ * with `%*`. The helper reads its printed value from a sibling JSON file so
+ * the `.cmd` body stays boring.
+ */
+function writeFakePackageManagerScript(binDir: string, name: "pnpm" | "yarn" | "bun", scriptBody: string): void {
+	const execName = name;
+	const scriptPath = join(binDir, execName);
+	if (process.platform === "win32") {
+		const helperPath = join(binDir, `${execName}-helper.js`);
+		const payloadPath = join(binDir, `${execName}-payload.json`);
+		const payload = JSON.stringify(
+			{
+				pnpm: extractFakePnpmValue(scriptBody),
+				yarn: extractFakeYarnValue(scriptBody),
+				bun: extractFakeBunValue(scriptBody),
+			}[name],
+		);
+		writeFileSync(payloadPath, payload, "utf8");
+		const helper = `const payload = require(${JSON.stringify(payloadPath)});\nconst args = process.argv.slice(2);\nconst match = (${JSON.stringify(getWindowsArgsMatch(name))}).join(" ");\nif (args.join(" ") === match) { process.stdout.write(payload); process.exit(0); }\nprocess.exit(1);\n`;
+		writeFileSync(helperPath, helper, "utf8");
+		writeFileSync(`${scriptPath}.cmd`, `@echo off\r\nnode "${helperPath}" %*\r\n`);
+		chmodSync(`${scriptPath}.cmd`, 0o755);
+	} else {
+		writeFileSync(scriptPath, scriptBody);
+		chmodSync(scriptPath, 0o755);
+	}
+}
+
+function getWindowsArgsMatch(name: "pnpm" | "yarn" | "bun"): string[] {
+	switch (name) {
+		case "pnpm":
+			return ["root", "-g"];
+		case "yarn":
+			return ["global", "dir"];
+		case "bun":
+			return ["pm", "bin", "-g"];
+	}
+}
+
+// Each extractor pulls the constant value embedded in the POSIX shell script
+// body so the Windows helper can echo it verbatim. The scripts follow a fixed
+// shape (`printf '%s\\n' '<value>'`) that we parse with a single regex.
+function extractFakePnpmValue(body: string): string {
+	return extractFakeShellString(body, "printf '%s\\n' '") ?? "";
+}
+
+function extractFakeYarnValue(body: string): string {
+	return extractFakeShellString(body, "printf '%s\\n' '") ?? "";
+}
+
+function extractFakeBunValue(body: string): string {
+	return extractFakeShellString(body, "printf '%s\\n' '") ?? "";
+}
+
+function extractFakeShellString(body: string, marker: string): string | undefined {
+	const start = body.indexOf(marker);
+	if (start === -1) return undefined;
+	const after = start + marker.length;
+	const end = body.indexOf("'", after);
+	if (end === -1) return undefined;
+	return body.slice(after, end).replaceAll("'\\''", "'");
 }
 
 describe("findNodePackageDir", () => {
@@ -370,8 +425,7 @@ describe("detectInstallMethod", () => {
 		mkdirSync(storePackageDir, { recursive: true });
 		mkdirSync(binDir, { recursive: true });
 		writeFileSync(join(globalPackageDir, "package.json"), "{}");
-		writeFileSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), createFakePnpmScript(root));
-		chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
+		writeFakePackageManagerScript(binDir, "pnpm", createFakePnpmScript(root));
 		tempDir = temp;
 		process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
 		process.env.PI_PACKAGE_DIR = storePackageDir;
@@ -439,7 +493,11 @@ describe("detectInstallMethod", () => {
 		});
 	});
 
-	test("does not self-update when npm install path is not writable", () => {
+	test("does not self-update when npm install path is not writable", { skip: process.platform === "win32" }, () => {
+		// Windows chmod() only toggles the read-only attribute and does not gate
+		// writes via ACLs, so we cannot reliably simulate an unwritable path
+		// through the filesystem there. The writable check itself is covered
+		// by the `isSelfUpdatePathWritable` unit semantics on POSIX.
 		const { packageDir } = createNpmPrefixInstall();
 		chmodSync(packageDir, 0o500);
 

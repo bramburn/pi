@@ -222,8 +222,21 @@ function getGlobalPackageRoots(method: InstallMethod, _packageName: string, npmC
 			const root = readCommandOutput(command, [...npmArgs, "root", "-g"], {
 				requireSuccess: configured,
 			});
+			// When the caller supplies `--prefix <path>` they have explicitly told
+			// us which prefix they manage. Trust that the prefix is the install
+			// root and look under both the npm-reported root (`<prefix>/node_modules`
+			// on Windows, returned by `npm root -g`) and the POSIX global layout
+			// (`<prefix>/lib/node_modules`, used on Linux/macOS). Without this,
+			// Windows `npm root -g --prefix <prefix>` only matches the local layout
+			// and an explicit custom prefix install fails the management check.
+			const prefixIndex = configured ? npmArgs.indexOf("--prefix") : -1;
+			const configuredPrefix =
+				prefixIndex >= 0 && prefixIndex + 1 < npmArgs.length ? npmArgs[prefixIndex + 1] : undefined;
+			const configuredPrefixRoots = configuredPrefix
+				? [join(configuredPrefix, "lib", "node_modules"), join(configuredPrefix, "node_modules")]
+				: [];
 			const inferred = configured ? undefined : getInferredNpmInstall();
-			return [root, inferred?.root].filter((x): x is string => !!x);
+			return [root, ...configuredPrefixRoots, inferred?.root].filter((x): x is string => !!x);
 		}
 		case "pnpm": {
 			const root = readCommandOutput("pnpm", ["root", "-g"]);
