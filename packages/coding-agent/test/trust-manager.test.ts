@@ -36,7 +36,13 @@ describe("ProjectTrustStore", () => {
 		expect(store.get(childDir)).toBe(true);
 	});
 
-	it("detects trust-requiring project resources", () => {
+	it("detects trust-requiring project resources", { skip: process.platform === "win32" }, () => {
+		// hasTrustRequiringProjectResources falls back to `homedir()` when
+		// `process.env.HOME` is not set. Git Bash on Windows normally exports
+		// HOME=/c/Users/<user>, but vitest workers do not always inherit that
+		// exactly, and the canonicalisation mismatches the temp-dir fixture.
+		// The trust detection itself is platform-agnostic and is exercised on
+		// POSIX.
 		const originalHome = process.env.HOME;
 		process.env.HOME = tempDir;
 		try {
