@@ -33,6 +33,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
+	type ExtensionContext,
 	getAgentDir,
 	getMarkdownTheme,
 	withFileMutationQueue,
@@ -1101,7 +1102,7 @@ function registerExperimentalMode(pi: ExtensionAPI): void {
 }
 
 async function finalizeExperimentMerge(
-	ctx: { cwd: string; ui: { setStatus(key: string, text: string | undefined): void } },
+	ctx: ExtensionContext,
 	row: ExperimentRow,
 	strategy: "cherry-pick" | "squash" | "merge",
 	newCommit: string | undefined,
