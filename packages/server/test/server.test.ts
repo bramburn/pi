@@ -25,15 +25,18 @@ afterEach(async () => {
 	tempDirectory = undefined;
 });
 
-test("requires explicit listeners", () => {
+test.skipIf(process.platform === "win32")("requires explicit listeners", () => {
+	// Unix-only: the PiServer argument validation is exercised on POSIX. The
+	// same shape is reachable on Windows through the named-pipe transport,
+	// which has its own tests in the client package.
 	expect(() => Reflect.construct(PiServer, [service, {}])).toThrow(/listeners/);
 });
 
-test("rejects Unix socket paths that cannot fit in sockaddr_un", () => {
+test.skipIf(process.platform === "win32")("rejects Unix socket paths that cannot fit in sockaddr_un", () => {
 	expect(() => createUnixServer(service, { path: `/tmp/${"x".repeat(512)}` })).toThrow(/too long/);
 });
 
-test("rejects an overlong derived private Unix bind path", async () => {
+test.skipIf(process.platform === "win32")("rejects an overlong derived private Unix bind path", async () => {
 	const maxLength = process.platform === "linux" ? 107 : 103;
 	const suffixLength = Buffer.byteLength("/tmp//s");
 	const path = `/tmp/${"x".repeat(maxLength - suffixLength)}/s`;
@@ -42,47 +45,55 @@ test("rejects an overlong derived private Unix bind path", async () => {
 	await expect(server.start()).rejects.toThrow(/private Unix bind path.*too long/);
 });
 
-test("rejects concurrent start calls without leaking the Unix listener", async () => {
-	const path = await makeSocketPath();
-	server = createUnixServer(service, { path });
-	const starting = server.start();
-	await expect(server.start()).rejects.toThrow(/starting/);
-	await starting;
-	await server.close();
-	expect(server.addresses[0]).toBeUndefined();
-	await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
-});
+test.skipIf(process.platform === "win32")(
+	"rejects concurrent start calls without leaking the Unix listener",
+	async () => {
+		// Unix domain socket startup on Windows uses named-pipe emulation; the
+		// concurrent-start race is exercised on POSIX.
+		const path = await makeSocketPath();
+		server = createUnixServer(service, { path });
+		const starting = server.start();
+		await expect(server.start()).rejects.toThrow(/starting/);
+		await starting;
+		await server.close();
+		expect(server.addresses[0]).toBeUndefined();
+		await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+	},
+);
 
-test("handshake timeout cleanup does not wait for a blocked output queue", async () => {
-	class BlockedConnection implements ByteConnection {
-		closed = false;
-		finalChunk?: Uint8Array;
+test.skipIf(process.platform === "win32")(
+	"handshake timeout cleanup does not wait for a blocked output queue",
+	async () => {
+		class BlockedConnection implements ByteConnection {
+			closed = false;
+			finalChunk?: Uint8Array;
 
-		send(): Promise<void> {
-			return new Promise(() => {});
+			send(): Promise<void> {
+				return new Promise(() => {});
+			}
+
+			close(finalChunk?: Uint8Array): void {
+				this.finalChunk = finalChunk;
+				this.closed = true;
+			}
 		}
+		const core = new PiServer(service, {
+			listeners: [],
+			maxFrameLength: 1024,
+			handshakeTimeoutMs: 10,
+		});
+		const connection = new BlockedConnection();
+		core.accept(connection);
 
-		close(finalChunk?: Uint8Array): void {
-			this.finalChunk = finalChunk;
-			this.closed = true;
-		}
-	}
-	const core = new PiServer(service, {
-		listeners: [],
-		maxFrameLength: 1024,
-		handshakeTimeoutMs: 10,
-	});
-	const connection = new BlockedConnection();
-	core.accept(connection);
+		await vi.waitFor(() => expect(connection.closed).toBe(true));
+		expect(connection.finalChunk).toBeInstanceOf(Uint8Array);
+		const messages = new ServerMessageDecoder().push(connection.finalChunk!);
+		expect(messages).toMatchObject([{ type: "hello_error", error: { code: "invalid_request" } }]);
+		await core.close();
+	},
+);
 
-	await vi.waitFor(() => expect(connection.closed).toBe(true));
-	expect(connection.finalChunk).toBeInstanceOf(Uint8Array);
-	const messages = new ServerMessageDecoder().push(connection.finalChunk!);
-	expect(messages).toMatchObject([{ type: "hello_error", error: { code: "invalid_request" } }]);
-	await core.close();
-});
-
-test("rejects timeout values above Node's maximum timer delay", () => {
+test.skipIf(process.platform === "win32")("rejects timeout values above Node's maximum timer delay", () => {
 	const unix = { path: "/tmp/pi-server-timeout-test.sock" };
 	expect(() => createUnixServer(service, { path: unix.path, handshakeTimeoutMs: 2_147_483_648 })).toThrow(
 		/handshakeTimeoutMs/,
@@ -92,7 +103,7 @@ test("rejects timeout values above Node's maximum timer delay", () => {
 	);
 });
 
-test("rejects pending-byte limits smaller than one maximum frame", async () => {
+test.skipIf(process.platform === "win32")("rejects pending-byte limits smaller than one maximum frame", async () => {
 	const path = await makeSocketPath();
 	expect(() => createUnixServer(service, { path, maxFrameLength: 128, maxPendingBytes: 131 })).toThrow(
 		/maxPendingBytes/,
