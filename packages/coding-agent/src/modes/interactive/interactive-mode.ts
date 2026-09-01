@@ -95,6 +95,7 @@ import {
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
+import { captureUncaughtException, flushSentry, reportProviderError } from "../../core/sentry.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
@@ -3210,6 +3211,23 @@ export class InteractiveMode {
 								: "Operation aborted";
 						this.streamingMessage.errorMessage = errorMessage;
 					}
+					// Forward provider errors to Sentry. The agent's stream contract
+					// requires adapters to encode failures as AssistantMessage events
+					// with stopReason: "error" or "aborted", so this never reaches
+					// the uncaughtException listener. Skip the retry-attempted abort
+					// path — those are user-initiated and noise on the dashboard.
+					if (
+						this.streamingMessage.stopReason === "error" &&
+						this.streamingMessage.errorMessage &&
+						this.session.retryAttempt === 0
+					) {
+						reportProviderError({
+							message: this.streamingMessage.errorMessage,
+							stopReason: this.streamingMessage.stopReason,
+							provider: this.streamingMessage.provider,
+							model: this.streamingMessage.model,
+						});
+					}
 					this.streamingComponent.updateContent(this.streamingMessage, false);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
@@ -3356,6 +3374,12 @@ export class InteractiveMode {
 					}
 					this.footer.invalidate();
 				} else if (event.errorMessage) {
+					// Compaction failure is itself a model call; surface to Sentry so
+					// recurring 4xx/5xx during summarisation is visible in the dashboard.
+					reportProviderError({
+						message: event.errorMessage,
+						stopReason: "compaction_error",
+					});
 					if (event.reason === "manual") {
 						this.showError(event.errorMessage);
 					} else {
@@ -3390,7 +3414,12 @@ export class InteractiveMode {
 				this.clearStatusIndicator("retry");
 				// Show error only on final failure (success shows normal response)
 				if (!event.success) {
-					this.showError(`Retry failed after ${event.attempt} attempts: ${event.finalError || "Unknown error"}`);
+					const finalErrorMessage = `Retry failed after ${event.attempt} attempts: ${event.finalError || "Unknown error"}`;
+					reportProviderError({
+						message: finalErrorMessage,
+						stopReason: "auto_retry_exhausted",
+					});
+					this.showError(finalErrorMessage);
 				}
 				this.ui.requestRender();
 				break;
@@ -3966,7 +3995,15 @@ export class InteractiveMode {
 		// Restore the terminal before the process dies on any uncaught throw.
 		// Without this, an unhandled exception from extension code (or anywhere
 		// in pi) leaves the terminal in raw mode with no cursor.
-		const uncaughtExceptionHandler = (error: Error) => this.uncaughtCrash(error);
+		const uncaughtExceptionHandler = (error: Error): void => {
+			// Capture to Sentry before exiting. The prepended handler runs before
+			// the SDK's own uncaughtException listener installed in
+			// `core/sentry.ts:84-96`, so we capture here AND await a flush so
+			// process.exit(1) below doesn't race the transport. Sentry's server
+			// dedupes near-duplicate events by stack trace.
+			captureUncaughtException(error, { source_detail: "tui_uncaught_crash" });
+			void flushSentry(2_000).finally(() => this.uncaughtCrash(error));
+		};
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
 	}
