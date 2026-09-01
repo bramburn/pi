@@ -389,7 +389,7 @@ describe("Agent", () => {
 				// handle in a place executePreparedToolCall can clear it, so the
 				// timer will outlive execute()'s return.
 				pendingTimer = setTimeout(() => {
-					onUpdate({
+					onUpdate?.({
 						content: [{ type: "text", text: "leaked" }],
 						details: { status: "leaked" },
 					});
