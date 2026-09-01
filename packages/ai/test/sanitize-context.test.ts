@@ -14,7 +14,7 @@ const FFFD = "\uFFFD";
 const UNPAIRED_HIGH = "\uD834";
 const UNPAIRED_LOW = "\uDD1E";
 
-function makeModel(): Model<"anthropic-messages"> {
+function _makeModel(): Model<"anthropic-messages"> {
 	return {
 		id: "claude-sonnet-4.6",
 		name: "Claude Sonnet 4.6",
@@ -142,10 +142,7 @@ describe("sanitizeContext", () => {
 	});
 
 	it("strips U+FFFD from both the system prompt and the messages", () => {
-		const ctx = makeContext(
-			[makeUser(`user ${FFFD} text`)],
-			`system ${FFFD} prompt`,
-		);
+		const ctx = makeContext([makeUser(`user ${FFFD} text`)], `system ${FFFD} prompt`);
 		const out = sanitizeContext(ctx);
 		expect(out.systemPrompt).toBe("system prompt");
 		if (out.messages[0]!.role !== "user" || typeof out.messages[0]!.content !== "string") {
@@ -178,10 +175,7 @@ describe("sanitizeContext", () => {
 		// when sent through sanitizeContext (which is what pi-messages and
 		// streamProxy now do, in lieu of running the per-provider
 		// `transformMessages` shape transforms).
-		const ctx = makeContext(
-			[makeUser([{ type: "text", text: `top ${FFFD} text` }])],
-			`sys ${FFFD} prompt`,
-		);
+		const ctx = makeContext([makeUser([{ type: "text", text: `top ${FFFD} text` }])], `sys ${FFFD} prompt`);
 		const out = sanitizeContext(ctx);
 		expect(out.systemPrompt).not.toContain(FFFD);
 		const block = (out.messages[0] as { content: TextContent[] }).content[0]!;

@@ -10,10 +10,11 @@
  * exercised by the regression test that runs against a real
  * `~/.pi/settings.json`.
  */
-import { describe, expect, it } from "vitest";
+
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { getAgentDir } from "../../src/config.ts";
 import { InMemorySettingsStorage, SettingsManager } from "../../src/core/settings-manager.ts";
 

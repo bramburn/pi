@@ -10,8 +10,9 @@
  * Reference: https://develop.sentry.dev/sdk/envelopes/
  */
 
-import { randomUUID } from "node:crypto";
-import { performance } from "node:perf_hooks";
+// Browser-safe: use globalThis.crypto.randomUUID() (Node >=19, modern browsers)
+// and globalThis.performance instead of node:crypto / node:perf_hooks so that
+// this module bundles cleanly for the browser via esbuild.
 import type {
 	AttributeValue,
 	SpanAttributes,
@@ -21,6 +22,9 @@ import type {
 	TelemetrySpan,
 } from "./index.ts";
 import { NOOP_TELEMETRY_CONTEXT } from "./noop.ts";
+
+const randomUUID = (): string => globalThis.crypto.randomUUID();
+const performance = globalThis.performance;
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /* DSN parsing                                                                */

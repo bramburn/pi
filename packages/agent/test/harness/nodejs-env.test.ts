@@ -298,10 +298,9 @@ describe("NodeExecutionEnv", () => {
 		// MSYS POSIX path (e.g. /tmp/...) while realpath() returns
 		// C:/Users/.../Temp/... for the same directory.
 		const result = getOrThrow(
-			await env.exec(
-				'pwd_str=$(pwd -W 2>/dev/null || pwd); printf \'%s:%s\' "$pwd_str" "$NODE_ENV_TEST"',
-				{ env: { NODE_ENV_TEST: "ok" } },
-			),
+			await env.exec('pwd_str=$(pwd -W 2>/dev/null || pwd); printf \'%s:%s\' "$pwd_str" "$NODE_ENV_TEST"', {
+				env: { NODE_ENV_TEST: "ok" },
+			}),
 		);
 		expect(result).toEqual({ stdout: `${toPosix(await realpath(root))}:ok`, stderr: "", exitCode: 0 });
 	});
