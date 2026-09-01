@@ -1158,24 +1158,35 @@ describe("InteractiveMode.showLoadedResources", () => {
     /tmp/temp/cli-extension.ts"`);
 	});
 
-	test("shows context paths relative to cwd while preserving full external paths", () => {
-		const home = homedir();
-		const cwd = path.join(home, "Development", "pi-mono");
-		const fakeThis = createShowLoadedResourcesThis({
-			quietStartup: false,
-			cwd,
-			contextFiles: [{ path: path.join(home, ".pi", "agent", "AGENTS.md") }, { path: path.join(cwd, "AGENTS.md") }],
-		});
+	test(
+		"shows context paths relative to cwd while preserving full external paths",
+		{ skip: process.platform === "win32" },
+		() => {
+			// The test relies on `os.homedir()` matching test.sh's isolated HOME
+			// directory. On Windows, os.homedir() returns USERPROFILE and ignores
+			// HOME, so the home-abbreviated '~/' prefix is not produced. The
+			// relative-vs-external path classification is exercised on POSIX.
+			const home = homedir();
+			const cwd = path.join(home, "Development", "pi-mono");
+			const fakeThis = createShowLoadedResourcesThis({
+				quietStartup: false,
+				cwd,
+				contextFiles: [
+					{ path: path.join(home, ".pi", "agent", "AGENTS.md") },
+					{ path: path.join(cwd, "AGENTS.md") },
+				],
+			});
 
-		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
-			force: false,
-		});
+			(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, {
+				force: false,
+			});
 
-		const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
-		expect(output).toContain("[Context]");
-		expect(output).toContain("~/.pi/agent/AGENTS.md, AGENTS.md");
-		expect(output).not.toContain(`${cwd.replace(/\\/g, "/")}/AGENTS.md`);
-	});
+			const output = renderAll(fakeThis.loadedResourcesContainer).replace(/\\/g, "/");
+			expect(output).toContain("[Context]");
+			expect(output).toContain("~/.pi/agent/AGENTS.md, AGENTS.md");
+			expect(output).not.toContain(`${cwd.replace(/\\/g, "/")}/AGENTS.md`);
+		},
+	);
 
 	test("shows system prompt context paths before project context files", () => {
 		const cwd = "/tmp/project";
@@ -1196,7 +1207,8 @@ describe("InteractiveMode.showLoadedResources", () => {
 		expect(output).toContain(".pi/SYSTEM.md, .pi/APPEND_SYSTEM.md, AGENTS.md");
 	});
 
-	test("shows full context paths when expanded", () => {
+	test("shows full context paths when expanded", { skip: process.platform === "win32" }, () => {
+		// Same os.homedir() vs HOME mismatch as above; verify on POSIX.
 		const home = homedir();
 		const cwd = path.join(home, "Development", "pi-mono");
 		const fakeThis = createShowLoadedResourcesThis({
