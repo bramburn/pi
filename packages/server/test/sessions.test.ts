@@ -76,7 +76,9 @@ afterEach(async () => {
 	tempDirectories.clear();
 });
 
-describe("PiServer Unix integration", () => {
+describe.skipIf(process.platform === "win32")("PiServer Unix integration", () => {
+	// Unix domain socket end-to-end session flows; the named-pipe transport
+	// for Windows is exercised in the client package.
 	test("serializes server snapshot revisions", async () => {
 		const service = new OrderedSnapshotService();
 		const { server } = await startServer(service);

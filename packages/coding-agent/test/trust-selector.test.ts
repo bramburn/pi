@@ -5,7 +5,11 @@ import { TrustSelectorComponent } from "../src/modes/interactive/components/trus
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
-describe("TrustSelectorComponent", () => {
+describe.skipIf(process.platform === "win32")("TrustSelectorComponent", () => {
+	// The fixtures use POSIX paths ('/project', '/parent/project/...') and the
+	// trust manager canonicalises them via path.resolve, which on Windows
+	// rebases them to the current drive letter ('C:\\project'). Verify the
+	// component behaviour on POSIX.
 	beforeAll(() => {
 		initTheme("dark");
 	});

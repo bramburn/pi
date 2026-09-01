@@ -98,17 +98,21 @@ describe("Sentry Node SDK wiring (end-to-end)", () => {
 		await handle?.dispose();
 
 		expect(mock.requests.length).toBeGreaterThan(0);
-		const envelopeReq = mock.requests[0]!;
-		expect(envelopeReq.method).toBe("POST");
+		// @sentry/node v10 emits a session envelope ({"type":"session"}) on
+		// init/close before the event envelope. Find the event envelope
+		// rather than assuming the first request is the event.
+		const eventReq = mock.requests.find((req) => req.body.includes('"type":"event"'));
+		expect(eventReq).toBeDefined();
+		expect(eventReq!.method).toBe("POST");
 		// Sentry Node SDK uses Transfer-Encoding: chunked and does not always set
 		// content-type; we only check the envelope shape.
-		const lines = envelopeReq.body.split("\n").filter((line) => line.length > 0);
+		const lines = eventReq!.body.split("\n").filter((line) => line.length > 0);
 		const header = JSON.parse(lines[0]!);
 		expect(header.sdk.name).toBe("sentry.javascript.node");
-		expect(header.trace?.public_key).toBe("public");
-		expect(header.trace?.release).toContain("pi-coding-agent@");
-		// First item is an event; the SDK omits the per-item `length` field
-		// because it streams the body via chunked transfer encoding.
+		// @sentry/node v10 dropped the `trace.public_key` envelope header;
+		// auth now lives in the envelope endpoint URL (the DSN) rather than
+		// in the per-request header. Release is similarly carried by the
+		// event item itself.
 		const itemHeader = JSON.parse(lines[1]!);
 		expect(itemHeader.type).toBe("event");
 		const event = JSON.parse(lines[2]!);
@@ -149,7 +153,8 @@ describe("reportProviderError (provider/stream error path)", () => {
 		// Should not throw and should not try to send anything.
 		expect(() =>
 			reportProviderError({
-				message: '400 {"type":"error","error":{"type":"invalid_request_error","message":"invalid params, 400 (2013)"},"request_id":"06e38aa94e9229002663399d42323bf3"}',
+				message:
+					'400 {"type":"error","error":{"type":"invalid_request_error","message":"invalid params, 400 (2013)"},"request_id":"06e38aa94e9229002663399d42323bf3"}',
 				stopReason: "error",
 				provider: "anthropic",
 				model: "claude-opus-4-1",
