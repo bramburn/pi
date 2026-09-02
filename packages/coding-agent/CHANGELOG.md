@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Analytics instrumentation** (Phase 1): local SQLite logging of run outcomes, tool usage, compaction events, and sub-agent task spans. When `enableAnalytics` is on, `~/.pi/analytics/YYYY-MM.db` is created with four tables (`pi_runs`, `pi_tool_invocations`, `pi_compaction_events`, `pi_subagent_tasks`). Writes are immediate and flushed on `agent_settled`. Guarded by the existing `enableAnalytics` / `trackingId` settings.
+- New `analytics-store.ts` with `getAnalyticsStore()`, `newTaskSpanId()`, `startSubagentTask()`, `endSubagentTask()` public helpers.
+- New `analytics-ext.ts` InlineExtension that wires `agent_start`, `turn_start`, `tool_execution_start/end`, `session_compact`, and `agent_settled` events to the store.
+- The `subagent` extension now emits `pi.agent.task` spans for every spawned subprocess (both synchronous `runSingleAgent` and background `runBackgroundSubagentInner`).
+
 ## [0.84.5] - 2026-08-30
 
 ### Added

@@ -586,6 +586,11 @@ export function getSessionsDir(): string {
 	return join(getAgentDir(), "sessions");
 }
 
+/** Get path to analytics directory (sibling of agent dir, e.g. ~/.pi/analytics/) */
+export function getAnalyticsDir(): string {
+	return join(dirname(getAgentDir()), "analytics");
+}
+
 /** Get path to debug log file */
 export function getDebugLogPath(): string {
 	return join(getAgentDir(), `${APP_NAME}-debug.log`);

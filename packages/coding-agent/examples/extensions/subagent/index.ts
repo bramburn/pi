@@ -34,8 +34,11 @@ import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	type ExtensionContext,
+	endSubagentTask,
 	getAgentDir,
 	getMarkdownTheme,
+	newTaskSpanId,
+	startSubagentTask,
 	type ThemeColor,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
@@ -85,6 +88,10 @@ const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
+
+// Guard for pi.agent.task span instrumentation.
+// Set to true when the analytics InlineExtension is loaded (it registers pi:analytics flag).
+let _analyticsEnabled = false;
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -392,6 +399,10 @@ async function runSingleAgent(
 		args.push(`Task: ${task}`);
 		let wasAborted = false;
 
+		const taskSpanId = newTaskSpanId();
+		if (_analyticsEnabled)
+			startSubagentTask({ spanId: taskSpanId, agentName: agent.name, taskLabel: task.slice(0, 200) });
+
 		const exitCode = await new Promise<number>((resolve) => {
 			const invocation = getPiInvocation(args);
 			const proc = spawn(invocation.command, invocation.args, {
@@ -472,6 +483,8 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		const success = !wasAborted && exitCode === 0;
+		if (_analyticsEnabled) endSubagentTask(taskSpanId, success);
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
@@ -594,6 +607,9 @@ async function runBackgroundSubagentInner(spec: BackgroundSpec, taskId: string):
 	}
 	args.push(`Task: ${spec.scriptOrTask}`);
 	const invocation = getPiInvocation(args);
+	const taskSpanId = newTaskSpanId();
+	if (_analyticsEnabled)
+		startSubagentTask({ spanId: taskSpanId, agentName: spec.agentName, taskLabel: spec.scriptOrTask.slice(0, 200) });
 	let proc: ReturnType<typeof spawn> | null = null;
 	try {
 		proc = spawn(invocation.command, invocation.args, {
@@ -603,6 +619,7 @@ async function runBackgroundSubagentInner(spec: BackgroundSpec, taskId: string):
 			windowsHide: true,
 		});
 	} catch (err) {
+		if (_analyticsEnabled) endSubagentTask(taskSpanId, false, `spawn failed: ${(err as Error).message}`);
 		safeUpdate(registry, taskId, {
 			status: "failed",
 			errorMessage: `spawn failed: ${(err as Error).message}`,
@@ -703,6 +720,8 @@ async function runBackgroundSubagentInner(spec: BackgroundSpec, taskId: string):
 		});
 		registry.appendLog(taskId, { type: "EXIT", exitCode: exitCode ?? null, status, signal: signal ?? null });
 		const isError = status !== "completed";
+		if (_analyticsEnabled)
+			endSubagentTask(taskSpanId, !isError, isError ? `exit code ${exitCode ?? signal ?? "unknown"}` : undefined);
 		const content = isError
 			? `Background task ${taskId} (${spec.agentName}) ${status}${errorMessage ? `: ${errorMessage}` : exitCode !== undefined ? ` with exit code ${exitCode}` : ""}.\n\n${finalText}`
 			: `Background task ${taskId} (${spec.agentName}) completed.\n\n${finalText}`;
@@ -721,6 +740,7 @@ async function runBackgroundSubagentInner(spec: BackgroundSpec, taskId: string):
 		}
 	});
 	proc.on("error", (err) => {
+		if (_analyticsEnabled) endSubagentTask(taskSpanId, false, `child error: ${err.message}`);
 		safeUpdate(registry, taskId, {
 			status: "failed",
 			errorMessage: `child error: ${err.message}`,
@@ -1385,6 +1405,9 @@ async function finalizeExperimentMerge(
 }
 
 export default function (pi: ExtensionAPI) {
+	// Check if the analytics InlineExtension registered its internal flag.
+	_analyticsEnabled = pi.getFlag("pi:analytics") === true;
+
 	registerExperimentalMode(pi);
 
 	const backgroundRegistry = getBackgroundRegistry();

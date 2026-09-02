@@ -23,6 +23,12 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
+// Analytics instrumentation
+export {
+	endSubagentTask,
+	newTaskSpanId,
+	startSubagentTask,
+} from "./core/analytics-store.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {

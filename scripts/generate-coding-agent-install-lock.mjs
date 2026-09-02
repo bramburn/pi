@@ -16,6 +16,7 @@ const installPackageName = "@earendil-works/pi-coding-agent-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
+	["better-sqlite3@11.9.1", "native build of the SQLite C bindings for the local analytics store"],
 ]);
 
 const args = new Set(process.argv.slice(2));
