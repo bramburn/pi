@@ -2,8 +2,9 @@
 //
 // Mirrors the four-method contract of @mariozechner/clipboard so the
 // loader at packages/coding-agent/src/utils/clipboard-native.ts can
-// `require("@bramburn/clipboard-rs")` without code changes beyond the
-// import path.
+// import the same shape. The actual .node load is lazy (only happens
+// on the first function call), so importing this module on a
+// platform without a prebuild never throws.
 
 export declare function getText(): Promise<string | null>;
 export declare function setText(text: string): Promise<void>;
