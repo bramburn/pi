@@ -64,7 +64,10 @@ jobs:
         # optional) on the linux-x64 runner with EBADPLATFORM. Bun is lenient
         # about optional deps and does not fail the install. Same rationale as
         # the equivalent switch in `ci.yml` and `publish.yml` (PR #874).
-        run: bun install --ignore-scripts
+        # `--linker=hoisted` matches the ci.yml install so transitive deps
+        # resolve at the conventional `node_modules/<scope>/<name>` paths
+        # (e.g. for downstream scripts that read from the tree directly).
+        run: bun install --ignore-scripts --linker=hoisted
 
       - name: Generate model catalog JSON
         run: npm run generate:model-catalog
