@@ -23,6 +23,10 @@ const allowedExternalPackages = new Set([
 	"utf-8-validate",
 	// Optional debug output coloring.
 	"supports-color",
+	// CJS-only package loaded via dynamic import in the bedrock lazy chunk;
+	// resolved by Node's runtime loader from node_modules/ at module-load
+	// time, so esbuild does not bundle it.
+	"https-proxy-agent",
 ]);
 
 const lazyJitiPlugin = {
@@ -79,7 +83,7 @@ function commonBuildOptions() {
 		banner,
 		bundle: true,
 		define: { PI_BUNDLED_NODE: "true" },
-		external: ["@silvia-odwyer/photon-node"],
+		external: ["@silvia-odwyer/photon-node", "https-proxy-agent"],
 		format: "esm",
 		legalComments: "none",
 		logLevel: "warning",
