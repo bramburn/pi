@@ -1,0 +1,147 @@
+name: Build @bramburn/clipboard-rs native prebuilds
+
+on:
+  # Build on pushes to main and on the experiment branch so the matrix
+  # always has fresh artifacts to verify.
+  push:
+    branches:
+      - main
+      - feat/rust-clipboard
+  pull_request:
+    branches:
+      - main
+  # Manual trigger for ad-hoc builds and dry-runs.
+  workflow_dispatch:
+
+# `build-binaries.yml` already runs on a 30-minute cancel-in-progress
+# pattern; we use a more relaxed concurrency here so PR pushes that
+# race a follow-up push don't cancel a half-built matrix.
+concurrency:
+  group: clipboard-rs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build on ${{ matrix.target.os }} / ${{ matrix.target.arch }}
+    runs-on: ${{ matrix.target.runs-on }}
+    strategy:
+      # Don't fail the whole matrix if one platform breaks; the
+      # experiment is to learn what works. fail-fast=false keeps the
+      # other 5 results visible for triage.
+      fail-fast: false
+      matrix:
+        include:
+          # Linux glibc — ubuntu-latest is x86_64. Cross-compile to
+          # arm64 with the standard Rust target.
+          - { os: linux-x64-gnu,    runs-on: ubuntu-latest,    rust: x86_64-unknown-linux-gnu,    cross: false }
+          - { os: linux-arm64-gnu,  runs-on: ubuntu-24.04-arm, rust: aarch64-unknown-linux-gnu,  cross: false }
+          # macOS — the standard GitHub Actions runners cover x64
+          # (macos-13) and arm64 (macos-latest, M1).
+          - { os: darwin-x64,       runs-on: macos-13,         rust: x86_64-apple-darwin,         cross: false }
+          - { os: darwin-arm64,     runs-on: macos-latest,     rust: aarch64-apple-darwin,       cross: false }
+          # Windows — windows-latest is x86_64; windows-11-arm is
+          # the arm64 host. Both have MSVC build tools preinstalled.
+          - { os: win32-x64-msvc,   runs-on: windows-latest,   rust: x86_64-pc-windows-msvc,     cross: false }
+          - { os: win32-arm64-msvc, runs-on: windows-11-arm,   rust: aarch64-pc-windows-msvc,   cross: false }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Setup Rust (${{ matrix.target.rust }})
+        uses: dtolnay/rust-toolchain@1.86.0
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target.rust }}
+
+      # Linux arm64 only: add aarch64 cross-compile libs.
+      - name: Install Linux arm64 cross deps
+        if: matrix.target.os == 'linux-arm64-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Install napi-rs CLI
+        run: npm install -g @napi-rs/cli@^3.5.0
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          rustc --version --verbose
+          node --version
+          npm --version
+
+      - name: Build native addon
+        working-directory: packages/clipboard-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          napi build \
+            --platform \
+            --target ${{ matrix.target.rust }} \
+            --release \
+            --strip \
+            --js index.js \
+            --dts index.d.ts \
+            --output-dir ../clipboard-rs-dist
+          ls -la ../clipboard-rs-dist
+          mkdir -p prebuilds/${{ matrix.target.os }}
+          cp ../clipboard-rs-dist/${{ matrix.target.os }}/clipboard-rs.node \
+             prebuilds/${{ matrix.target.os }}/clipboard-rs.node
+          ls -la prebuilds/${{ matrix.target.os }}
+
+      - name: Run round-trip test
+        working-directory: packages/clipboard-rs
+        shell: bash
+        run: |
+          # The build emits dist/ with index.js + index.d.ts; copy them
+          # alongside the prebuild so the test loader can find them.
+          cp ../clipboard-rs-dist/index.js ../clipboard-rs-dist/index.d.ts .
+          node --test test/round-trip.test.mjs
+
+      - name: Upload prebuild artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: clipboard-rs-${{ matrix.target.os }}
+          path: packages/clipboard-rs/prebuilds/${{ matrix.target.os }}/clipboard-rs.node
+          if-no-files-found: error
+          retention-days: 14
+
+  # Separate job: after all 6 platform builds succeed, commit the
+  # prebuilds back to the branch so a downstream PR gets the artifacts
+  # without re-running the matrix. Triggered on push to main only.
+  commit-prebuilds:
+    name: commit prebuilds
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all prebuilds
+        uses: actions/download-artifact@1e69f9b1bf81c5b48ad6cb35a4b3f2e9ce6b3a8a # v4.1.10
+        with:
+          path: packages/clipboard-rs/prebuilds
+
+      - name: Commit prebuilds
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add packages/clipboard-rs/prebuilds
+          if git diff --cached --quiet; then
+            echo "no prebuild changes"
+            exit 0
+          fi
+          git commit -m "ci(clipboard-rs): update prebuilds for ${{ github.sha }}"
+          git push

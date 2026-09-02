@@ -1,0 +1,61 @@
+{
+	"name": "@earendil-works/pi-clipboard-rs",
+	"version": "0.84.5",
+	"description": "Fork-local cross-platform clipboard native addon (Rust + napi-rs) for pi-coding-agent. Replaces @mariozechner/clipboard. Built on all 6 target platforms by .github/workflows/clipboard-rs-build.yml.",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"prebuilds",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"os": [
+		"linux",
+		"darwin",
+		"win32"
+	],
+	"cpu": [
+		"x64",
+		"arm64"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist prebuilds *.node",
+		"build:napi": "napi build --platform --release --strip --js index.js --dts index.d.ts --prebuild",
+		"build:local": "npm run build:napi",
+		"build:all": "echo 'multi-platform build is run in CI; locally use build:local'",
+		"check": "tsgo --noEmit",
+		"test": "node --test test/*.test.mjs"
+	},
+	"devDependencies": {
+		"@napi-rs/cli": "3.5.0",
+		"shx": "0.4.0",
+		"typescript": "5.9.3"
+	},
+	"keywords": [
+		"clipboard",
+		"native",
+		"rust",
+		"napi",
+		"napi-rs",
+		"addon",
+		"pi"
+	],
+	"author": "bramburn",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/bramburn/pi.git",
+		"directory": "packages/clipboard-rs"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

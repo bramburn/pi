@@ -1,0 +1,34 @@
+[package]
+name        = "@bramburn/clipboard-rs"
+version     = "0.0.1"
+edition     = "2021"
+rust-version = "1.75"
+description = "Fork-local cross-platform clipboard native addon for pi-coding-agent. Replaces @mariozechner/clipboard."
+license     = "MIT"
+repository  = "https://github.com/bramburn/pi"
+publish     = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Pure-Rust cross-platform clipboard. arboard talks to X11/Wayland on Linux,
+# NSPasteboard on macOS, and the Win32 clipboard on Windows. We pin to a
+# specific major version; the API surface is small (get/set text, optional
+# image) and a major bump will require touching src/lib.rs.
+arboard = "3.4"
+
+# napi-rs turns Rust functions into Node addon exports. The version pin
+# matches @napi-rs/cli in package.json devDependencies.
+napi        = { version = "3.0", default-features = false, features = ["napi6"] }
+napi-derive = "3.0"
+
+[build-dependencies]
+# napi build script generates the C headers napi-rs needs.
+napi-build = "3.0"
+
+[features]
+# Default build: link the dynamic libstd so the .node is small and uses the
+# system std. Set `RUSTFLAGS="-C prefer-dynamic"` if your platform needs
+# static libstd (Windows MSVC by default).
+default = []
