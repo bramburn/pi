@@ -10,6 +10,14 @@ on:
   pull_request:
     branches:
       - main
+    # Only run the matrix on changes that actually affect the
+    # clipboard-rs package or its workflow. Without this filter, every
+    # PR to main would burn 6 platform runners, which is wasteful for
+    # PRs that only touch unrelated code (lockfile regen, typing
+    # fixes, etc.).
+    paths:
+      - "packages/clipboard-rs/**"
+      - ".github/workflows/clipboard-rs-build.yml"
   # Manual trigger for ad-hoc builds and dry-runs.
   workflow_dispatch:
 

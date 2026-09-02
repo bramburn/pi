@@ -24,6 +24,32 @@ const generatedCatalogDataPlugin = {
 	},
 };
 
+// Stub Node.js builtins used by telemetry/sentry.ts — the sentry adapter is
+// not in the browser bundle (tree-shaken out), but esbuild still needs to
+// resolve the import at bundle time. Implemented as a plugin (rather than
+// `define: { "node:crypto": "..." }`) because esbuild 0.28.1 now treats
+// every key in `define` as a JS identifier, and `node:crypto` is not a valid
+// identifier (the `:` breaks the parser). The plugin returns an empty module
+// for each stub instead.
+const nodeBuiltinStubs = {
+	"node:crypto": "{}",
+	"node:perf_hooks": "{}",
+};
+const nodeBuiltinStubPlugin = {
+	name: "node-builtin-stubs",
+	setup(build) {
+		build.onResolve({ filter: /^node:(crypto|perf_hooks)$/ }, (args) => ({
+			path: args.path,
+			namespace: "node-builtin-stub",
+		}));
+		build.onLoad({ filter: /.*/, namespace: "node-builtin-stub" }, (args) => ({
+			contents: nodeBuiltinStubs[args.path] ?? "{}",
+			loader: "js",
+		}));
+	},
+};
+const smokePlugins = [generatedCatalogDataPlugin, nodeBuiltinStubPlugin];
+
 function normalizePath(path) {
 	return path.replaceAll("\\", "/");
 }
@@ -41,38 +67,6 @@ function includesNodePackage(inputs, packageName) {
 }
 
 try {
-	// Stub Node.js builtins used by telemetry/sentry.ts — the sentry adapter
-	// is not in the browser bundle (tree-shaken out), but esbuild still needs to
-	// resolve the import at bundle time. The previous \`define\` approach
-	// (e7ae31b45) only replaces identifier-shaped keys, not import specifiers
-	// like \`node:crypto\`; this plugin returns an empty module instead so
-	// esbuild's parser can complete the bundle.
-	const nodeBuiltinStubPlugin = {
-		name: "node-builtin-stub",
-		setup(build) {
-			build.onResolve({ filter: /^node:/ }, (args) => ({
-				namespace: "node-builtin-stub",
-				path: args.path,
-			}));
-			build.onLoad({ filter: /.*/, namespace: "node-builtin-stub" }, (args) => {
-				// Emit a module that re-exports every identifier that the entry
-				// transitively references from this builtin. The smoke entry
-				// only ever pulls in \`randomUUID\` from \`node:crypto\` and
-				// \`performance\` from \`node:perf_hooks\`; expose those two plus
-				// the default so any future addition resolves cleanly.
-				const perStubExports = {
-					"node:crypto": ["randomUUID"],
-					"node:perf_hooks": ["performance"],
-				};
-				const names = perStubExports[args.path] ?? [];
-				return {
-					contents: `${names.map((name) => `export const ${name} = undefined;`).join("\n")}\nexport default {};`,
-					loader: "js",
-				};
-			});
-		},
-	};
-
 	await build({
 		entryPoints: ["scripts/browser-smoke-entry.ts"],
 		bundle: true,
@@ -80,7 +74,7 @@ try {
 		format: "esm",
 		logLevel: "silent",
 		outfile: outputPath,
-		plugins: [generatedCatalogDataPlugin, nodeBuiltinStubPlugin],
+		plugins: smokePlugins,
 	});
 
 	const agentTreeshakeBuild = await build({
@@ -91,7 +85,7 @@ try {
 		logLevel: "silent",
 		metafile: true,
 		outfile: agentTreeshakeOutputPath,
-		plugins: [generatedCatalogDataPlugin, nodeBuiltinStubPlugin],
+		plugins: smokePlugins,
 		write: false,
 	});
 	const inputs = agentTreeshakeBuild.metafile.inputs;

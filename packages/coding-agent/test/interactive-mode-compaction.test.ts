@@ -224,14 +224,21 @@ describe("InteractiveMode compaction events", () => {
 			expect(fakeThis.ui.terminal.setProgress).toHaveBeenCalledWith(true);
 			expect(fakeThis.showStatusIndicator).toHaveBeenCalledTimes(1);
 			expect(fakeThis.clearStatusIndicator).not.toHaveBeenCalled();
-			expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(1);
+			// requestRender is called twice per turn_start when workingVisible flips
+			// to true: once from the new WorkingStatusIndicator's constructor
+			// (Loader → setIndicator → start → updateDisplay) and once from the
+			// explicit call in the case branch.
+			expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(2);
 
 			fakeThis.workingVisible = false;
 			await handleEvent.call(fakeThis, { type: "turn_start" });
 
 			expect(fakeThis.showStatusIndicator).toHaveBeenCalledTimes(1);
 			expect(fakeThis.clearStatusIndicator).toHaveBeenCalledTimes(1);
-			expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(2);
+			// No new WorkingStatusIndicator is constructed in the else branch
+			// (clearStatusIndicator doesn't call requestRender), so the count
+			// only grows by the explicit requestRender() in the case branch.
+			expect(fakeThis.ui.requestRender).toHaveBeenCalledTimes(3);
 		},
 	);
 
