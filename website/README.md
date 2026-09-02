@@ -2,9 +2,16 @@
 
 This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
 
+> The fork's primary runtime is **Bun**; this website follows the same
+> pattern. CI (`.github/workflows/docs.yml`) uses `bun install --frozen-lockfile`
+> and `bun run build`. Node.js (`npm install` / `npm run build`) still
+> works for local development.
+
 ## Installation
 
 ```bash
+bun install --frozen-lockfile
+# or, equivalently:
 npm install
 ```
 
@@ -13,6 +20,8 @@ npm install
 ## Local Development
 
 ```bash
+bun run start
+# or:
 npm run start
 ```
 
@@ -21,6 +30,8 @@ This command starts a local development server and opens up a browser window. Mo
 ## Build
 
 ```bash
+bun run build
+# or:
 npm run build
 ```
 
@@ -31,12 +42,16 @@ This command generates static content into the `build` directory and can be serv
 Using SSH:
 
 ```bash
+USE_SSH=true bun run deploy
+# or:
 USE_SSH=true npm run deploy
 ```
 
 Not using SSH:
 
 ```bash
+GIT_USER=<Your GitHub username> bun run deploy
+# or:
 GIT_USER=<Your GitHub username> npm run deploy
 ```
 
