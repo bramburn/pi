@@ -12,10 +12,17 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import { getAnalyticsDir } from "../config.ts";
+
+/** Test-only override: when set, analytics is written under this home. */
+function resolveAnalyticsDir(): string {
+	const testHome = process.env.PI_TEST_ANALYTICS_HOME;
+	if (testHome) return join(testHome, "analytics");
+	return getAnalyticsDir();
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,7 +94,7 @@ class AnalyticsStore {
 		const now = new Date();
 		const year = now.getFullYear();
 		const month = String(now.getMonth() + 1).padStart(2, "0");
-		return `${getAnalyticsDir()}/${year}-${month}.db`;
+		return `${resolveAnalyticsDir()}/${year}-${month}.db`;
 	}
 
 	private ensureDir(): void {
