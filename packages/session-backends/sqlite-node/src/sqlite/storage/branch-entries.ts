@@ -131,22 +131,24 @@ function customTypeFromPayload(row: BranchPathEntryRow): string | null {
 }
 
 export function insertBranchEntriesForPath(db: SqliteDatabase, sessionId: string, branchId: string, leafId: string) {
-	const path: BranchPathEntryRow[] = [];
-	const seen = new Set<string>();
-	let entryId: string | null = leafId;
-
-	while (entryId !== null) {
-		if (seen.has(entryId)) throw new SessionError("invalid_entry", `Entry parent cycle at ${entryId}`);
-		seen.add(entryId);
-		const row: BranchPathEntryRow | undefined = sql`SELECT id, seq, parent_id, type, payload
+	// Single recursive CTE replaces the O(N) per-entry SELECT loop.
+	// depth=0 is the leaf; walking parent_id upward gives root-to-leaf order after reversal.
+	const chain = sql<BranchPathEntryRow & { depth: number }>`WITH RECURSIVE path(
+			id, seq, parent_id, type, payload, depth
+		) AS (
+			SELECT id, seq, parent_id, type, payload, 0
 			FROM entries
-			WHERE session_id = ${sessionId} AND id = ${entryId}`.get<BranchPathEntryRow>(db);
-		if (!row) throw new SessionError("invalid_entry", `Entry ${entryId} not found`);
-		path.push(row);
-		entryId = row.parent_id;
-	}
+			WHERE session_id = ${sessionId} AND id = ${leafId}
+			UNION ALL
+			SELECT e.id, e.seq, e.parent_id, e.type, e.payload, p.depth + 1
+			FROM entries AS e
+			JOIN path AS p ON e.id = p.parent_id
+			WHERE e.session_id = ${sessionId}
+		)
+		SELECT id, seq, parent_id, type, payload, depth FROM path`.all(db);
 
-	for (const row of path.reverse()) {
+	// Walk from root (last) to leaf (first) — chain is leaf→root, so reverse it.
+	for (const row of chain.reverse()) {
 		insertBranchEntry(db, sessionId, branchId, row.id, row.seq, row.type, customTypeFromPayload(row));
 	}
 }
