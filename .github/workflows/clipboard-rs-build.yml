@@ -30,9 +30,9 @@ jobs:
       # other 5 results visible for triage.
       fail-fast: false
       matrix:
-        include:
-          # Linux glibc — ubuntu-latest is x86_64. Cross-compile to
-          # arm64 with the standard Rust target.
+        target:
+          # Linux glibc — ubuntu-latest is x86_64; ubuntu-24.04-arm
+          # is the arm64 host.
           - { os: linux-x64-gnu,    runs-on: ubuntu-latest,    rust: x86_64-unknown-linux-gnu,    cross: false }
           - { os: linux-arm64-gnu,  runs-on: ubuntu-24.04-arm, rust: aarch64-unknown-linux-gnu,  cross: false }
           # macOS — the standard GitHub Actions runners cover x64
