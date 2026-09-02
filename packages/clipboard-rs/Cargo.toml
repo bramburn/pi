@@ -24,8 +24,11 @@ napi        = { version = "3.0", default-features = false, features = ["napi6"] 
 napi-derive = "3.0"
 
 [build-dependencies]
-# napi build script generates the C headers napi-rs needs.
-napi-build = "3.0"
+# napi build script generates the C headers napi-rs needs. Pinned to 2.1
+# because 3.0 is not yet published on crates.io (the candidate list only
+# shows up to 2.4.1). The 2.1 series is API-compatible with what
+# napi-rs 3.0 emits.
+napi-build = "2.1"
 
 [features]
 # Default build: link the dynamic libstd so the .node is small and uses the
