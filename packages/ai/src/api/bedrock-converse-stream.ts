@@ -458,7 +458,20 @@ function isReservedHeader(key: string): boolean {
  * all other caller headers override any existing same-named header on the request.
  */
 function addCustomHeadersMiddleware(client: BedrockRuntimeClient, headers: Record<string, string>): void {
-	const middleware: BuildMiddleware<object, MetadataBearer> = (next) => async (args) => {
+	// The Smithy middleware-stack `add()` exposes 5 overloads, one per
+	// step (initialize, serialize, build, finalizeRequest, deserialize).
+	// The exact-generic BuildMiddleware<ServiceInputTypes,
+	// ServiceOutputTypes> we want matches the build overload, but tsc
+	// also evaluates the deserialize overload (the last one) when
+	// `Output` is a union of output types — and the deserialize handler's
+	// `next` is contravariantly narrower than what BuildHandler returns,
+	// which fails the union of overloads. The runtime shape is identical
+	// (`return next(args)`) and the step option is "build", so the
+	// middleware is functionally correct. Cast to `any` to keep the
+	// 4-method contract of `client.middlewareStack.add()` happy without
+	// rewriting the closure.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const middleware: any = (next: any) => async (args: any) => {
 		const request = args.request;
 		if (request && typeof request === "object" && "headers" in request) {
 			const requestHeaders = (request as { headers: Record<string, string> }).headers;
