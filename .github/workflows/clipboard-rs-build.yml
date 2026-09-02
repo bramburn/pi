@@ -61,12 +61,35 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target.rust }}
 
-      # Linux arm64 only: add aarch64 cross-compile libs.
+      # Linux arm64 only: add aarch64 cross-compile libs + the
+      # X11 / Wayland headers arboard links against.
       - name: Install Linux arm64 cross deps
         if: matrix.target.os == 'linux-arm64-gnu'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            libxcb1-dev:arm64 \
+            libwayland-dev:arm64
+          # Some Ubuntu releases don't have multi-arch for the X11 / Wayland
+          # headers; fall back to the host arch headers if the cross-pkg is
+          # missing. arboard's x11 / wayland-data-control features are
+          # default-on; we keep them for the matrix so the crate actually
+          # runs against the same code path on every host.
+          if ! dpkg -s libxcb1-dev:arm64 >/dev/null 2>&1; then
+            sudo apt-get install -y libxcb1-dev libwayland-dev
+          fi
+
+      # Linux x64: arboard links against X11 / Wayland by default.
+      # Install the headers so the build can find them.
+      - name: Install Linux x64 X11/Wayland headers
+        if: matrix.target.os == 'linux-x64-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev \
+            libwayland-dev
 
       - name: Install napi-rs CLI
         run: npm install -g @napi-rs/cli@^3.5.0

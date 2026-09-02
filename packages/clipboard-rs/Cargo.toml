@@ -33,8 +33,11 @@ napi        = { version = "3.0", default-features = false, features = ["napi6"] 
 napi-derive = "3.0"
 
 [build-dependencies]
-# napi build script generates the C headers napi-rs needs.
-napi-build = "3.0"
+# napi build script generates the C headers napi-rs needs. The
+# 3.x line only has prereleases (1.1.0-beta.0); 2.x is the
+# stable line that pairs with napi 3.x runtime. See
+# https://docs.rs/napi-build for the version matrix.
+napi-build = "2.1"
 
 [features]
 # Default build: link the dynamic libstd so the .node is small and uses the
