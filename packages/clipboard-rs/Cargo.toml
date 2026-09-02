@@ -1,4 +1,9 @@
 [package]
+# Cargo's package name rules forbid `@` and `/`. The npm-distribution
+# name (`@bramburn/pi-clipboard-rs` once the fork-publish-rename script
+# runs, currently `@earendil-works/pi-clipboard-rs`) lives in
+# `package.json`; the napi-rs CLI reads that field for the .node
+# filename, not this one. Keep this bare crate name.
 name        = "pi-clipboard-rs"
 version     = "0.0.1"
 edition     = "2021"
@@ -9,6 +14,10 @@ repository  = "https://github.com/bramburn/pi"
 publish     = false
 
 [lib]
+# napi-rs expects a `lib` target. The name is what becomes the .node
+# file's internal Rust symbol; the .node filename comes from the
+# package.json `name` field.
+name = "pi_clipboard_rs"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -24,10 +33,10 @@ napi        = { version = "3.0", default-features = false, features = ["napi6"] 
 napi-derive = "3.0"
 
 [build-dependencies]
-# napi build script generates the C headers napi-rs needs. Pinned to 2.1
-# because 3.0 is not yet published on crates.io (the candidate list only
-# shows up to 2.4.1). The 2.1 series is API-compatible with what
-# napi-rs 3.0 emits.
+# napi build script generates the C headers napi-rs needs. The
+# 3.x line only has prereleases (1.1.0-beta.0); 2.x is the
+# stable line that pairs with napi 3.x runtime. See
+# https://docs.rs/napi-build for the version matrix.
 napi-build = "2.1"
 
 [features]

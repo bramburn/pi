@@ -22,9 +22,15 @@ use arboard::Clipboard;
 
 /// Marker string so the integration test can confirm it loaded the fork
 /// addon and not a stray upstream `@mariozechner/clipboard` resolution.
+///
+/// The cargo package name is `pi-clipboard-rs` (Cargo forbids `@` and `/`
+/// in `[package].name`). The npm-distribution name has `@earendil-works/`
+/// or `@bramburn/` prepended by `fork-publish-rename.mjs` at publish time.
+/// The integration test asserts the marker starts with `pi-clipboard-rs v`
+/// to accept both pre- and post-rename forms.
 #[napi]
 pub fn addon_marker() -> String {
-    format!("@bramburn/clipboard-rs v{}", env!("CARGO_PKG_VERSION"))
+    format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
 }
 
 /// Read plain text from the system clipboard. Returns `null` if the
