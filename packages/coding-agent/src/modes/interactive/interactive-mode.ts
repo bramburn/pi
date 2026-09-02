@@ -63,6 +63,7 @@ import {
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import type { AgentSessionRuntimeDiagnostic } from "../../core/agent-session-services.ts";
+import { captureUncaughtException, flushSentry, reportProviderError } from "../../core/sentry.ts";
 import {
 	CACHE_TTL_MS,
 	type CacheMiss,
@@ -95,7 +96,6 @@ import {
 import { CredentialSynchronizationError } from "../../core/model-runtime.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
-import { captureUncaughtException, flushSentry, reportProviderError } from "../../core/sentry.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
@@ -2105,6 +2105,22 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * Install the working status indicator. Used by both `agent_start` and
+	 * `turn_start` (the latter is emitted when an agent run resumes after a
+	 * compaction, so the working state has to be re-established on every new
+	 * turn, not just every new agent run).
+	 */
+	private showWorkingStatusIndicator(): void {
+		this.showStatusIndicator(
+			new WorkingStatusIndicator(
+				this.ui,
+				this.workingMessage ?? this.defaultWorkingMessage,
+				this.workingIndicatorOptions,
+			),
+		);
+	}
+
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
 		this.workingIndicatorOptions = options;
 		if (this.activeStatusIndicator?.kind === "working") {
@@ -3117,20 +3133,17 @@ export class InteractiveMode {
 				break;
 
 			case "turn_start":
-				// Within-run turn start (e.g. after compaction resumes the same
-				// agent run). Same working-state surface as agent_start, but no
-				// pendingTools/resetEscapeHandler — those are agent-lifecycle.
+				// A turn starts inside an already-running agent (e.g. after a
+				// compaction completes and the same agent run resumes). The
+				// terminal progress indicator and the working status indicator
+				// are tied to the turn, not the agent run, so re-establish them
+				// here. Tools and the retry escape handler were already set up
+				// at `agent_start`, so we deliberately do not touch them.
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(true);
 				}
 				if (this.workingVisible) {
-					this.showStatusIndicator(
-						new WorkingStatusIndicator(
-							this.ui,
-							this.workingMessage ?? this.defaultWorkingMessage,
-							this.workingIndicatorOptions,
-						),
-					);
+					this.showWorkingStatusIndicator();
 				} else {
 					this.clearStatusIndicator();
 				}
