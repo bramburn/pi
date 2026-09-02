@@ -1,5 +1,5 @@
 [package]
-name        = "@bramburn/clipboard-rs"
+name        = "pi-clipboard-rs"
 version     = "0.0.1"
 edition     = "2021"
 rust-version = "1.75"
