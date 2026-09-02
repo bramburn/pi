@@ -3116,6 +3116,27 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
+			case "turn_start":
+				// Within-run turn start (e.g. after compaction resumes the same
+				// agent run). Same working-state surface as agent_start, but no
+				// pendingTools/resetEscapeHandler — those are agent-lifecycle.
+				if (this.settingsManager.getShowTerminalProgress()) {
+					this.ui.terminal.setProgress(true);
+				}
+				if (this.workingVisible) {
+					this.showStatusIndicator(
+						new WorkingStatusIndicator(
+							this.ui,
+							this.workingMessage ?? this.defaultWorkingMessage,
+							this.workingIndicatorOptions,
+						),
+					);
+				} else {
+					this.clearStatusIndicator();
+				}
+				this.ui.requestRender();
+				break;
+
 			case "queue_update":
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
