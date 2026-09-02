@@ -2105,22 +2105,6 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	/**
-	 * Install the working status indicator. Used by both `agent_start` and
-	 * `turn_start` (the latter is emitted when an agent run resumes after a
-	 * compaction, so the working state has to be re-established on every new
-	 * turn, not just every new agent run).
-	 */
-	private showWorkingStatusIndicator(): void {
-		this.showStatusIndicator(
-			new WorkingStatusIndicator(
-				this.ui,
-				this.workingMessage ?? this.defaultWorkingMessage,
-				this.workingIndicatorOptions,
-			),
-		);
-	}
-
 	private setWorkingIndicator(options?: WorkingIndicatorOptions): void {
 		this.workingIndicatorOptions = options;
 		if (this.activeStatusIndicator?.kind === "working") {
@@ -3143,7 +3127,13 @@ export class InteractiveMode {
 					this.ui.terminal.setProgress(true);
 				}
 				if (this.workingVisible) {
-					this.showWorkingStatusIndicator();
+					this.showStatusIndicator(
+						new WorkingStatusIndicator(
+							this.ui,
+							this.workingMessage ?? this.defaultWorkingMessage,
+							this.workingIndicatorOptions,
+						),
+					);
 				} else {
 					this.clearStatusIndicator();
 				}
