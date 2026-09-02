@@ -509,7 +509,13 @@ function addResponseHeadersMiddleware(
 	model: Model<"bedrock-converse-stream">,
 	onObserved: () => void,
 ): void {
-	const middleware: DeserializeMiddleware<object, MetadataBearer> = (next) => async (args) => {
+	// See the note in `addCustomHeadersMiddleware` for why we cast to `any`.
+	// The deserialize step has the same Smithy `add()` overload-resolution
+	// problem: tsc evaluates the union of 5 overloads, and the contravariant
+	// `next` parameter narrows away from the local generic. The runtime
+	// shape is identical (`return next(args)`) so the closure is fine.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const middleware: any = (next: any) => async (args: any) => {
 		const result = await next(args);
 		const providerResponse = toProviderResponse(result.response);
 		if (providerResponse) {
