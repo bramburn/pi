@@ -10,6 +10,10 @@ export interface RunEndEvent {
 	runId: string;
 	outcome: "completed" | "aborted" | "failed";
 	leafId: string;
+	/** Human-readable error code when outcome is "failed" */
+	errorCode?: string;
+	/** Abort attribution when outcome is "aborted" */
+	abortedBy?: "user" | "timeout" | "error";
 }
 
 export type HarnessEvent = RunStartEvent | RunEndEvent;

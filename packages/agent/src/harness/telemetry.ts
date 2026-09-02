@@ -250,6 +250,44 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 					values: ["completed", "aborted", "failed", "suspended"],
 					description: "Run invocation outcome",
 				},
+				"pi.run.aborted_by": {
+					type: "string",
+					required: false,
+					values: ["user", "timeout", "error"],
+					description: "Abort attribution when outcome is aborted",
+				},
+				"pi.run.turn_count": {
+					type: "number",
+					description: "Number of assistant turns in this run",
+				},
+				"pi.run.tool_invocations": {
+					type: "number",
+					description: "Total tool calls executed in this run",
+				},
+				"pi.run.tool_errors": {
+					type: "number",
+					description: "Tool calls that returned an error",
+				},
+				"pi.run.compaction_triggered": {
+					type: "boolean",
+					description: "Whether at least one compaction ran in this run",
+				},
+				"pi.run.usage_input_tokens": {
+					type: "number",
+					description: "Total input tokens consumed by this run",
+				},
+				"pi.run.usage_output_tokens": {
+					type: "number",
+					description: "Total output tokens produced by this run",
+				},
+				"pi.run.usage_cost": {
+					type: "number",
+					description: "Total estimated cost for this run",
+				},
+				"pi.run.ttft_ms": {
+					type: "number",
+					description: "Time-to-first-token in ms for the first turn of this run",
+				},
 				...operationErrorAttributes,
 			},
 			status: { default: "ok", errorWhen: "The run fails or throws" },
@@ -567,6 +605,68 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 			},
 			status: { default: "ok", errorWhen: "Storage rejects the mutation" },
+		},
+		"pi.agent.task": {
+			description: "One sub-agent (task tool) invocation",
+			parents: { kind: "any" },
+			startAttributes: {
+				"pi.task.call_id": {
+					type: "string",
+					required: true,
+					cardinality: "high",
+					description: "Unique call id for this task invocation",
+				},
+				"pi.task.agent_name": {
+					type: "string",
+					required: true,
+					description: "Name of the agent being invoked",
+				},
+				"pi.task.mode": {
+					type: "string",
+					required: true,
+					values: ["single", "parallel", "chain"],
+					description: "Task dispatch mode",
+				},
+				"pi.task.parent_run_id": {
+					type: "string",
+					required: false,
+					cardinality: "high",
+					description: "Parent pi.harness.run operation id",
+				},
+			},
+			endAttributes: {
+				"pi.task.outcome": {
+					type: "string",
+					values: ["success", "failed", "aborted", "unknown_agent"],
+					description: "Task completion outcome",
+				},
+				"pi.task.exit_code": {
+					type: "number",
+					description: "Process exit code (0 = success)",
+				},
+				"pi.task.stop_reason": {
+					type: "string",
+					description: "LLM stop reason from the sub-agent",
+				},
+				"pi.task.usage_input_tokens": {
+					type: "number",
+					description: "Input tokens consumed by this task",
+				},
+				"pi.task.usage_output_tokens": {
+					type: "number",
+					description: "Output tokens produced by this task",
+				},
+				"pi.task.usage_cost": {
+					type: "number",
+					description: "Estimated cost for this task",
+				},
+				"pi.task.error_message": {
+					type: "string",
+					cardinality: "high",
+					description: "Error message when outcome is failed or aborted",
+				},
+			},
+			status: { default: "ok", errorWhen: "never — failures are encoded in outcome" },
 		},
 	},
 } as const satisfies TelemetrySchemaDefinition;

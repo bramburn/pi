@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `HARNESS_TELEMETRY_SCHEMA`: added `pi.agent.task` span type for sub-agent invocation tracking; added run end-attributes (`pi.run.aborted_by`, `pi.run.turn_count`, `pi.run.tool_invocations`, `pi.run.tool_errors`, `pi.run.compaction_triggered`, `pi.run.usage_input_tokens`, `pi.run.usage_output_tokens`, `pi.run.usage_cost`, `pi.run.ttft_ms`).
+- `RunEndEvent` in harness events extended with `errorCode?: string` and `abortedBy?: "user" | "timeout" | "error"` fields.
+
 ## [0.84.5] - 2026-08-30
 ### Fork-local (bramburn)
 ### Fixed

@@ -4,6 +4,7 @@ import { clampThinkingLevel, type Message, type Model, streamSimple } from "@ear
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
+import { createAnalyticsExtension, setAnalyticsSessionId } from "./analytics-ext.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
@@ -185,7 +186,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
 
 	if (!resourceLoader) {
-		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
+		// Inject analytics InlineExtension when analytics is enabled.
+		// The session ID is known at this point (sessionManager is created above).
+		const analyticsEnabled = settingsManager.getEnableAnalytics();
+		const trackingId = settingsManager.getTrackingId() ?? null;
+		const sessionId = sessionManager.getSessionId();
+		setAnalyticsSessionId(sessionId);
+		const analyticsExtensionFactories = analyticsEnabled
+			? [createAnalyticsExtension(analyticsEnabled, trackingId, sessionId)]
+			: [];
+		resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			extensionFactories: analyticsExtensionFactories,
+		});
 		await resourceLoader.reload();
 		time("resourceLoader.reload");
 	}
