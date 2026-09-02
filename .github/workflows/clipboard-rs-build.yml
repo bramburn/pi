@@ -24,6 +24,8 @@ jobs:
   build:
     name: build on ${{ matrix.target.os }} / ${{ matrix.target.arch }}
     runs-on: ${{ matrix.target.runs-on }}
+    permissions:
+      contents: read
     strategy:
       # Don't fail the whole matrix if one platform breaks; the
       # experiment is to learn what works. fail-fast=false keeps the
