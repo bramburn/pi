@@ -49,7 +49,6 @@ describe("Fireworks models", () => {
 		expect(model).toBeUndefined();
 	});
 
-
 	it("aligns GLM 5.2 Fast with GLM 5.2's OpenAI-compatible config", () => {
 		const base = getModel("fireworks", "accounts/fireworks/models/glm-5p2");
 		const fast = getModel("fireworks", "accounts/fireworks/routers/glm-5p2-fast");

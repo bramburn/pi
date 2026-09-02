@@ -579,8 +579,7 @@ describe("AgentHarness tools", () => {
 					// is the virtual MSYS POSIX path (e.g. /tmp/...) while
 					// canonicalPath() returns C:/Users/.../Temp/... for the
 					// same directory, and the assertion fails on Windows.
-					execution.command +=
-						`\npwd_str=$(pwd -W 2>/dev/null || pwd); printf '%s:%s:%s:%s' "$prefix" "\${PI_BASH_PREPARE_INHERITED-}" "$PI_BASH_PREPARE_EXPLICIT" "$pwd_str"`;
+					execution.command += `\npwd_str=$(pwd -W 2>/dev/null || pwd); printf '%s:%s:%s:%s' "$prefix" "\${PI_BASH_PREPARE_INHERITED-}" "$PI_BASH_PREPARE_EXPLICIT" "$pwd_str"`;
 				},
 			});
 
@@ -588,7 +587,9 @@ describe("AgentHarness tools", () => {
 
 			expect(receivedContext).toBe(context);
 			expect(receivedSignal).toBe(controller.signal);
-			expect(textOutput(result)).toBe(`ready::explicit:${toPosix(getOrThrow(await env.canonicalPath(context.workspace)))}`);
+			expect(textOutput(result)).toBe(
+				`ready::explicit:${toPosix(getOrThrow(await env.canonicalPath(context.workspace)))}`,
+			);
 		});
 
 		it("supports command prefixes", async () => {

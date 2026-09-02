@@ -31,19 +31,20 @@ export function readLatestFact(db: SqliteDatabase, sessionId: string, kind: stri
 }
 
 export function readLatestLabelFacts(db: SqliteDatabase, sessionId: string) {
-	return sql`SELECT f.key, f.value
-		FROM facts AS f INDEXED BY idx_facts_session_kind_key_seq
-		WHERE f.session_id = ${sessionId}
-			AND f.kind = 'label'
-			AND f.value IS NOT NULL
-			AND f.seq = (
-				SELECT MAX(candidate.seq)
-				FROM facts AS candidate INDEXED BY idx_facts_session_kind_key_seq
-				WHERE candidate.session_id = f.session_id
-					AND candidate.kind = f.kind
-					AND candidate.key IS f.key
-			)
-		ORDER BY f.key`.all<{ key: string; value: string }>(db);
+	// Window function eliminates the per-key correlated subquery (N+1 → 1 query).
+	return sql`SELECT key, value FROM (
+			SELECT key, value,
+				ROW_NUMBER() OVER (
+					PARTITION BY key
+					ORDER BY seq DESC
+				) AS rn
+			FROM facts
+			WHERE session_id = ${sessionId}
+				AND kind = 'label'
+				AND value IS NOT NULL
+		) sub
+		WHERE rn = 1
+		ORDER BY key`.all<{ key: string; value: string }>(db);
 }
 
 export function readFactRows(

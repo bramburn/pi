@@ -23,7 +23,7 @@ import {
 	ToolResultStatus,
 } from "@aws-sdk/client-bedrock-runtime";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
-import type { BuildMiddleware, DeserializeMiddleware, DocumentType, HttpResponse, MetadataBearer } from "@smithy/types";
+import type { DocumentType, HttpResponse } from "@smithy/types";
 import { HttpProxyAgent } from "http-proxy-agent";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { calculateCost } from "../models.ts";
@@ -458,7 +458,20 @@ function isReservedHeader(key: string): boolean {
  * all other caller headers override any existing same-named header on the request.
  */
 function addCustomHeadersMiddleware(client: BedrockRuntimeClient, headers: Record<string, string>): void {
-	const middleware: BuildMiddleware<object, MetadataBearer> = (next) => async (args) => {
+	// The Smithy middleware-stack `add()` exposes 5 overloads, one per
+	// step (initialize, serialize, build, finalizeRequest, deserialize).
+	// The exact-generic BuildMiddleware<ServiceInputTypes,
+	// ServiceOutputTypes> we want matches the build overload, but tsc
+	// also evaluates the deserialize overload (the last one) when
+	// `Output` is a union of output types — and the deserialize handler's
+	// `next` is contravariantly narrower than what BuildHandler returns,
+	// which fails the union of overloads. The runtime shape is identical
+	// (`return next(args)`) and the step option is "build", so the
+	// middleware is functionally correct. Cast to `any` to keep the
+	// 4-method contract of `client.middlewareStack.add()` happy without
+	// rewriting the closure.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const middleware: any = (next: any) => async (args: any) => {
 		const request = args.request;
 		if (request && typeof request === "object" && "headers" in request) {
 			const requestHeaders = (request as { headers: Record<string, string> }).headers;
@@ -496,7 +509,13 @@ function addResponseHeadersMiddleware(
 	model: Model<"bedrock-converse-stream">,
 	onObserved: () => void,
 ): void {
-	const middleware: DeserializeMiddleware<object, MetadataBearer> = (next) => async (args) => {
+	// See the note in `addCustomHeadersMiddleware` for why we cast to `any`.
+	// The deserialize step has the same Smithy `add()` overload-resolution
+	// problem: tsc evaluates the union of 5 overloads, and the contravariant
+	// `next` parameter narrows away from the local generic. The runtime
+	// shape is identical (`return next(args)`) so the closure is fine.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const middleware: any = (next: any) => async (args: any) => {
 		const result = await next(args);
 		const providerResponse = toProviderResponse(result.response);
 		if (providerResponse) {

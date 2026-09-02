@@ -52,18 +52,12 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		expect(DEFAULT_PRUNER_CONFIG.skipToolNames).toEqual(["read"]);
 	});
 
-	it.skip(
-		"returns the input array unchanged when no result is over-budget",
-		// TODO(pruner): pruneSession currently always allocates a new
-		// array; identity-equality is a follow-up. Enable this test
-		// when the function is updated to return its input reference
-		// when no message is over-budget.
-		() => {
-			const messages: AgentMessage[] = [toolResult("t1", "bash", "small output"), bashResult("echo", "small")];
-			const pruned = pruneSession(messages);
-			expect(pruned).toBe(messages);
-		},
-	);
+	it.skip("returns the input array unchanged when no result is over-budget", () => {
+		// when no message is over-budget. // when the function is updated to return its input reference // array; identity-equality is a follow-up. Enable this test // TODO(pruner): pruneSession currently always allocates a new
+		const messages: AgentMessage[] = [toolResult("t1", "bash", "small output"), bashResult("echo", "small")];
+		const pruned = pruneSession(messages);
+		expect(pruned).toBe(messages);
+	});
 
 	it("rewrites over-budget tool results with head + marker + tail", () => {
 		const messages: AgentMessage[] = [toolResult("t1", "bash", "x".repeat(20_000))];
@@ -88,15 +82,12 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		expect(text.includes(DEFAULT_PRUNER_CONFIG.pruneMarker)).toBeTruthy();
 	});
 
-	it.skip(
-		"does not prune `read` tool results (decision matrix item 10)",
+	it.skip("does not prune `read` tool results (decision matrix item 10)", () => {
 		// TODO(pruner): see earlier note about identity-equality.
-		() => {
-			const messages: AgentMessage[] = [toolResult("r1", "read", "x".repeat(50_000))];
-			const pruned = pruneSession(messages);
-			expect(pruned).toBe(messages);
-		},
-	);
+		const messages: AgentMessage[] = [toolResult("r1", "read", "x".repeat(50_000))];
+		const pruned = pruneSession(messages);
+		expect(pruned).toBe(messages);
+	});
 
 	it("does not prune `bashExecution` rows by default (they are tool outputs, not tool results)", () => {
 		const messages: AgentMessage[] = [bashResult("echo", "x".repeat(50_000))];
@@ -108,15 +99,12 @@ describe("pruneSession (Phase 2, item 3)", () => {
 		expect(pruned[0]).toBe(messages[0]);
 	});
 
-	it.skip(
-		"respects BashExecutionMessage.excludeFromPrune: true",
+	it.skip("respects BashExecutionMessage.excludeFromPrune: true", () => {
 		// TODO(pruner): see earlier note about identity-equality.
-		() => {
-			const messages: AgentMessage[] = [{ ...bashResult("echo", "x".repeat(50_000)), excludeFromPrune: true }];
-			const pruned = pruneSession(messages);
-			expect(pruned[0]).toBe(messages[0]);
-		},
-	);
+		const messages: AgentMessage[] = [{ ...bashResult("echo", "x".repeat(50_000)), excludeFromPrune: true }];
+		const pruned = pruneSession(messages);
+		expect(pruned[0]).toBe(messages[0]);
+	});
 
 	it("respects a custom PrunerConfig (lower threshold)", () => {
 		const config: PrunerConfig = {

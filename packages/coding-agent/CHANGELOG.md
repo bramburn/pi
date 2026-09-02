@@ -147,6 +147,10 @@
 
 - Removed TUI fullscreen mode: the `--tui-mode fullscreen` CLI flag, `tuiMode`, `fullscreenExitOutput`, and `fullscreenScrollbar` settings, fullscreen layout and renderer, and all related documentation.
 
+### Removed
+
+- Removed TUI fullscreen mode: the `--tui-mode fullscreen` CLI flag, `tuiMode`, `fullscreenExitOutput`, and `fullscreenScrollbar` settings, fullscreen layout and renderer, and all related documentation.
+
 ## [0.84.2] - 2026-08-14
 
 ### New Features
