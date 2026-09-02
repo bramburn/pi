@@ -7,9 +7,19 @@ on:
     branches:
       - main
       - feat/rust-clipboard
+    # Only trigger when the clipboard-rs files actually change. PRs that
+    # touch unrelated files (e.g. an install-lock regen) shouldn't burn
+    # 6 runners on a matrix that's expected to fail because the source
+    # isn't there yet.
+    paths:
+      - "packages/clipboard-rs/**"
+      - ".github/workflows/clipboard-rs-build.yml"
   pull_request:
     branches:
       - main
+    paths:
+      - "packages/clipboard-rs/**"
+      - ".github/workflows/clipboard-rs-build.yml"
   # Manual trigger for ad-hoc builds and dry-runs.
   workflow_dispatch:
 
