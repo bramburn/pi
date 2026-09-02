@@ -79,6 +79,15 @@ All end attributes are optional completion enrichment.
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
 | `pi.operation.outcome` | `string` | completed, aborted, failed, suspended |  | Run invocation outcome |
+| `pi.run.aborted_by` | `string` | user, timeout, error |  | Abort attribution when outcome is aborted |
+| `pi.run.turn_count` | `number` |  |  | Number of assistant turns in this run |
+| `pi.run.tool_invocations` | `number` |  |  | Total tool calls executed in this run |
+| `pi.run.tool_errors` | `number` |  |  | Tool calls that returned an error |
+| `pi.run.compaction_triggered` | `boolean` |  |  | Whether at least one compaction ran in this run |
+| `pi.run.usage_input_tokens` | `number` |  |  | Total input tokens consumed by this run |
+| `pi.run.usage_output_tokens` | `number` |  |  | Total output tokens produced by this run |
+| `pi.run.usage_cost` | `number` |  |  | Total estimated cost for this run |
+| `pi.run.ttft_ms` | `number` |  |  | Time-to-first-token in ms for the first turn of this run |
 | `pi.error.code` | `string` |  | low cardinality | Stable operation error code |
 | `pi.error.type` | `string` |  | low cardinality | Low-cardinality operation error class |
 
@@ -375,6 +384,41 @@ All end attributes are optional completion enrichment.
 | Name | Type | Values | Notes | Description |
 |---|---|---|---|---|
 | `pi.session.seq` | `number` |  |  | Committed session sequence when exposed |
+
+#### Events
+
+No declared span events.
+
+### `pi.agent.task`
+
+One sub-agent (task tool) invocation
+
+- Parents: root or any caller span
+- Default status: `ok`
+- Error when: never — failures are encoded in outcome
+
+#### Start attributes
+
+| Name | Type | Required | Values | Notes | Description |
+|---|---|---:|---|---|---|
+| `pi.task.call_id` | `string` | yes |  | high cardinality | Unique call id for this task invocation |
+| `pi.task.agent_name` | `string` | yes |  |  | Name of the agent being invoked |
+| `pi.task.mode` | `string` | yes | single, parallel, chain |  | Task dispatch mode |
+| `pi.task.parent_run_id` | `string` | no |  | high cardinality | Parent pi.harness.run operation id |
+
+#### End attributes
+
+All end attributes are optional completion enrichment.
+
+| Name | Type | Values | Notes | Description |
+|---|---|---|---|---|
+| `pi.task.outcome` | `string` | success, failed, aborted, unknown_agent |  | Task completion outcome |
+| `pi.task.exit_code` | `number` |  |  | Process exit code (0 = success) |
+| `pi.task.stop_reason` | `string` |  |  | LLM stop reason from the sub-agent |
+| `pi.task.usage_input_tokens` | `number` |  |  | Input tokens consumed by this task |
+| `pi.task.usage_output_tokens` | `number` |  |  | Output tokens produced by this task |
+| `pi.task.usage_cost` | `number` |  |  | Estimated cost for this task |
+| `pi.task.error_message` | `string` |  | high cardinality | Error message when outcome is failed or aborted |
 
 #### Events
 
