@@ -4,7 +4,6 @@ import type {
 	AssistantMessage,
 	Context,
 	Message,
-	Model,
 	TextContent,
 	ToolResultMessage,
 	UserMessage,
@@ -13,21 +12,6 @@ import type {
 const FFFD = "\uFFFD";
 const UNPAIRED_HIGH = "\uD834";
 const UNPAIRED_LOW = "\uDD1E";
-
-function makeModel(): Model<"anthropic-messages"> {
-	return {
-		id: "claude-sonnet-4.6",
-		name: "Claude Sonnet 4.6",
-		api: "anthropic-messages",
-		provider: "anthropic",
-		baseUrl: "https://api.anthropic.com",
-		reasoning: true,
-		input: ["text", "image"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200000,
-		maxTokens: 8192,
-	};
-}
 
 function makeAssistant(content: TextContent[]): AssistantMessage {
 	return {
