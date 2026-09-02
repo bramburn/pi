@@ -1,5 +1,10 @@
 [package]
-name        = "@bramburn/clipboard-rs"
+# Cargo's package name rules forbid `@` and `/`. The npm-distribution
+# name (`@bramburn/pi-clipboard-rs` once the fork-publish-rename script
+# runs, currently `@earendil-works/pi-clipboard-rs`) lives in
+# `package.json`; the napi-rs CLI reads that field for the .node
+# filename, not this one. Keep this bare crate name.
+name        = "pi-clipboard-rs"
 version     = "0.0.1"
 edition     = "2021"
 rust-version = "1.75"
@@ -9,6 +14,10 @@ repository  = "https://github.com/bramburn/pi"
 publish     = false
 
 [lib]
+# napi-rs expects a `lib` target. The name is what becomes the .node
+# file's internal Rust symbol; the .node filename comes from the
+# package.json `name` field.
+name = "pi_clipboard_rs"
 crate-type = ["cdylib"]
 
 [dependencies]
