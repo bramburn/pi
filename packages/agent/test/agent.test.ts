@@ -363,6 +363,83 @@ describe("Agent", () => {
 		}
 	});
 
+	it("should not throw when a throttled tool update fires after the run has ended", async () => {
+		// Regression: throttled bash/read tools can have a pending setTimeout
+		// that calls `onUpdate` after the parent run has already finished
+		// (the bug report showed the error blowing up the host process). The
+		// acceptingUpdates flag in executePreparedToolCall catches the common
+		// case, but if a timer slips through, processEvents must drop the
+		// event silently rather than throwing.
+		const toolSchema = Type.Object({});
+		let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+		let capturedUpdate: AgentToolUpdateCallback<{ status: string }> | undefined;
+		const unhandledRejections: unknown[] = [];
+		const onUnhandledRejection = (error: unknown) => {
+			unhandledRejections.push(error);
+		};
+
+		const tool: AgentTool<typeof toolSchema, { status: string }> = {
+			name: "leaky_tool",
+			label: "Leaky Tool",
+			description: "Schedules a timer that fires onUpdate after execute returns",
+			parameters: toolSchema,
+			async execute(_toolCallId, _params, _signal, onUpdate) {
+				capturedUpdate = onUpdate;
+				// Schedule a late update from a setTimeout. Do not store the
+				// handle in a place executePreparedToolCall can clear it, so the
+				// timer will outlive execute()'s return.
+				pendingTimer = setTimeout(() => {
+					onUpdate?.({
+						content: [{ type: "text", text: "leaked" }],
+						details: { status: "leaked" },
+					});
+				}, 50);
+				return {
+					content: [{ type: "text", text: "ok" }],
+					details: { status: "done" },
+					terminate: true,
+				};
+			},
+		};
+		const agent = new Agent({
+			initialState: { tools: [tool] },
+			streamFn: () => {
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantToolUseMessage([
+							{ type: "toolCall", id: "call-1", name: "leaky_tool", arguments: {} },
+						]),
+					});
+				});
+				return stream;
+			},
+		});
+
+		process.on("unhandledRejection", onUnhandledRejection);
+		try {
+			await agent.prompt("run leaky tool");
+
+			// Sanity: the tool captured the update callback.
+			expect(capturedUpdate).toBeDefined();
+			expect(pendingTimer).toBeDefined();
+
+			// Let the leaked timer fire AFTER the run has finished.
+			await new Promise((resolve) => setTimeout(resolve, 100));
+
+			// Force any pending microtasks to flush so a late .catch() rejection
+			// would have a chance to surface as an unhandled rejection.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(unhandledRejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandledRejection);
+			if (pendingTimer) clearTimeout(pendingTimer);
+		}
+	});
+
 	it("should ignore a settled parallel tool update while another tool is still running", async () => {
 		const toolSchema = Type.Object({});
 		const slowStarted = createDeferred();

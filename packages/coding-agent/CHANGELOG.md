@@ -10,6 +10,10 @@
 
 - Added `@sentry/node` as a dependency and wired the official Sentry Node SDK into the coding-agent. When `PI_AI_DEBUG=1` and `SENTRY_DSN` are both set, the SDK initializes at startup, captures uncaught exceptions, unhandled rejections, and process warnings, and flushes on process exit. Both env vars are required; either alone is a no-op.
 - Added an opt-in live smoke test under `test/sentry-live.test.ts` that ships a real event to a configured Sentry DSN. Run with `PI_SENTRY_LIVE_TEST=1 npx vitest --run test/sentry-live.test.ts`.
+
+### Fixed
+
+- **Sentry now captures provider/stream errors**, not just process-level crashes. The agent's LLM adapters are contractually required to encode HTTP 4xx/5xx, network failures, and other provider errors as a normal `AssistantMessage` with `stopReason: "error"` (see `packages/agent/src/types.ts`) — they never throw. The previous Sentry wiring only listened for `uncaughtException` / `unhandledRejection` / `warning`, so the Anthropic `Error: 400 {...}` errors visible in the TUI never reached the dashboard. A new `reportProviderError({ message, stopReason, provider?, model?, requestId? })` helper in `packages/coding-agent/src/core/sentry.ts` is now called at the four model-error sinks (`print-mode.ts`, `interactive-mode.ts` `message_end` / `compaction_end` / `auto_retry_end`). The `request_id` is auto-extracted from the SDK error JSON when present, so the Sentry UI can correlate with the Anthropic console. Also: the TUI's prepended `uncaughtException` handler now captures to Sentry and awaits a flush before `process.exit(1)`, so genuine render-loop crashes are no longer lost either.
 ### Documentation
 
 - Documented the new `PI_AI_DEBUG`, `SENTRY_DSN`, and `SENTRY_TRACES_SAMPLE_RATE` environment variables in the `--help` output.

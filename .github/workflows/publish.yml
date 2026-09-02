@@ -37,6 +37,18 @@ jobs:
           # We install the npm CLI v11.5.1+ explicitly below.
           cache: npm
 
+      # Use Bun for the install step because npm ci is strict about
+      # platform-specific optional deps and refuses to install
+      # @mariozechner/clipboard-darwin-arm64 (a darwin-arm64-only optional)
+      # on the linux-x64 runner. Bun is lenient about optional deps and
+      # does not fail the install. The actual publish still uses `npm
+      # publish` (below) because OIDC trusted publishing requires the npm
+      # CLI 11.5.1+. Same pattern as .github/workflows/ci.yml.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
       # npm CLI v11.5.1+ is required for OIDC trusted publishing; the
       # version of npm bundled with Node 22.x is too old (npm 10.x).
       # See https://docs.npmjs.com/trusted-publishers
@@ -45,10 +57,13 @@ jobs:
         shell: bash
 
       # Install all workspace dependencies (including tsgo at root devDeps)
-      # at the repo root first; per-package npm ci inside subdirs would skip
-      # workspace devDeps and break the tsgo build.
+      # at the repo root. Using `bun install` (no --frozen-lockfile) is
+      # lenient about platform-specific optional deps that `npm ci` refuses
+      # to install. The test contract here is "deps install cleanly", not
+      # "deps install to exactly the same bytes as a previous run". Same
+      # pattern as .github/workflows/ci.yml.
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: bun install --ignore-scripts
 
       # Build all packages in dependency order (no internal deps → leaf → dependent).
       # ai, tui, telemetry, protocol: no internal dependencies

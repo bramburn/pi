@@ -62,6 +62,20 @@ describe("AgentSession concurrent prompt guard", () => {
 	let session: AgentSession;
 	let tempDir: string;
 
+	// The four flaky tests below previously used a fixed 10ms wait to let
+	// `isStreaming` flip to true before asserting against it. Under load the
+	// first prompt can take longer than 10ms to enter the streaming phase,
+	// which makes the subsequent assertion race the agent loop. Poll for the
+	// state change with a short budget instead of sleeping a fixed duration.
+	async function waitForStreaming(target: AgentSession, budgetMs = 2000): Promise<void> {
+		const deadline = Date.now() + budgetMs;
+		while (Date.now() < deadline) {
+			if (target.isStreaming) return;
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		}
+		throw new Error(`session did not enter streaming within ${budgetMs}ms`);
+	}
+
 	beforeEach(async () => {
 		tempDir = join(tmpdir(), `pi-concurrent-test-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
@@ -132,9 +146,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt (don't await, it will block until abort)
 		const firstPrompt = session.prompt("First message");
-
-		// Wait a tick for isStreaming to be set
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// Verify we're streaming
 		expect(session.isStreaming).toBe(true);
@@ -154,7 +166,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// steer should work while streaming
 		expect(() => session.steer("Steering message")).not.toThrow();
@@ -170,7 +182,7 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 
 		// followUp should work while streaming
 		expect(() => session.followUp("Follow-up message")).not.toThrow();
@@ -265,7 +277,7 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		await waitForStreaming(session);
 		expect(session.isStreaming).toBe(true);
 
 		const pi = (

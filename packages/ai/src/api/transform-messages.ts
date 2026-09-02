@@ -1,6 +1,7 @@
 import type {
 	Api,
 	AssistantMessage,
+	Context,
 	ImageContent,
 	Message,
 	Model,
@@ -295,4 +296,47 @@ export function transformMessages<TApi extends Api>(
 	insertSyntheticToolResults();
 
 	return result;
+}
+
+/**
+ * Strip unpaired UTF-16 surrogates and U+FFFD from text content on every
+ * message in `messages`, returning a new array. Used by provider adapters
+ * that handle their own image downgrade / tool call ID normalisation (e.g.
+ * the `pi-messages` adapter and the agent's `streamProxy`) but still need
+ * the sanitiser pass to prevent provider 400s on inputs the LLM would
+ * otherwise reject (e.g. MiniMax sub-code 2013).
+ *
+ * Returns the same array reference when no message needed cleaning, so
+ * downstream callers can short-circuit on identity.
+ */
+export function sanitizeMessages(messages: Message[]): Message[] {
+	let changed = false;
+	const out = new Array<Message>(messages.length);
+	for (let i = 0; i < messages.length; i++) {
+		const cleaned = sanitizeMessageText(messages[i]!);
+		if (cleaned !== messages[i]) changed = true;
+		out[i] = cleaned;
+	}
+	return changed ? out : messages;
+}
+
+/**
+ * Sanitise a `Context` for outgoing requests: strip unpaired UTF-16
+ * surrogates and U+FFFD from the system prompt and from every text block
+ * in the message list. Returns the same Context reference when no
+ * sanitisation was needed.
+ *
+ * Use this from any code path that ships a `Context` over the wire
+ * without going through the per-provider `transformMessages()` call.
+ */
+export function sanitizeContext(context: Context): Context {
+	const cleanedPrompt =
+		typeof context.systemPrompt === "string"
+			? sanitizeRequestText(context.systemPrompt)
+			: context.systemPrompt;
+	const cleanedMessages = sanitizeMessages(context.messages);
+	if (cleanedPrompt === context.systemPrompt && cleanedMessages === context.messages) {
+		return context;
+	}
+	return { ...context, systemPrompt: cleanedPrompt, messages: cleanedMessages };
 }

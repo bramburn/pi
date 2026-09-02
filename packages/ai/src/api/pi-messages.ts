@@ -27,6 +27,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { sanitizeContext } from "./transform-messages.ts";
 
 export interface PiMessagesOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
@@ -362,9 +363,19 @@ export const stream: StreamFunction<"pi-messages", PiMessagesOptions> = (
 				url.searchParams.set("debug", "1");
 			}
 
+			// Sanitise the system prompt and message list before shipping to the
+			// backend. The pi-messages protocol serialises the entire `Context`
+			// verbatim, so any unpaired UTF-16 surrogate or U+FFFD in the input
+			// would otherwise reach a provider (e.g. MiniMax) that rejects them
+			// with 400 invalid params (sub-code 2013). The built-in providers
+			// get this for free via `transformMessages`; pi-messages does not,
+			// because the protocol-level message shape is the same as the wire
+			// shape and the backend handles its own provider-specific shaping.
+			const safeContext = sanitizeContext(context);
+
 			let payload: unknown = {
 				model: model.id,
-				context,
+				context: safeContext,
 				options: {
 					temperature: options?.temperature,
 					maxTokens: options?.maxTokens,

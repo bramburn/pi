@@ -18,6 +18,11 @@ export type { OpenAICodexResponsesOptions, OpenAICodexWebSocketDebugStats } from
 export type { OpenAICompletionsOptions } from "./api/openai-completions.ts";
 export type { OpenAIResponsesOptions } from "./api/openai-responses.ts";
 export type { PiMessagesEvent, PiMessagesOptions, PiMessagesRewriteImpact } from "./api/pi-messages.ts";
+// Exposed so adapter-by-adapter providers (pi-messages, streamProxy) can
+// run the same text sanitisation pass that `transformMessages` does for the
+// built-in providers, without re-running image downgrade / tool call ID
+// normalisation that those providers may handle elsewhere.
+export { sanitizeContext, sanitizeMessages, transformMessages } from "./api/transform-messages.ts";
 export * from "./auth/context.ts";
 export * from "./auth/credential-store.ts";
 export * from "./auth/helpers.ts";

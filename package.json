@@ -68,6 +68,10 @@
 		"rimraf": "6.1.2",
 		"gaxios": {
 			"rimraf": "6.1.2"
-		}
+		},
+		"@smithy/types": "4.14.2"
+	},
+	"dependencies": {
+		"@smithy/types": "4.14.2"
 	}
 }

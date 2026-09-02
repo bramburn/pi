@@ -41,7 +41,10 @@ afterEach(async () => {
 	tempDirectories.clear();
 });
 
-describe("Unix transport conformance", () => {
+describe.skipIf(process.platform === "win32")("Unix transport conformance", () => {
+	// Unix domain sockets behave differently on Windows (named pipes / AF_UNIX
+	// emulation). The conformance suite exercises a real on-disk socket path
+	// and the raw frame protocol; verify on POSIX.
 	test("accepts a transport-fragmented framed-CBOR hello", async () => {
 		const { server } = await startServer();
 		const client = await connect(server);
@@ -361,18 +364,22 @@ describe("Unix transport conformance", () => {
 	});
 });
 
-test("Unix socket decodes multiple framed requests from one raw chunk", async () => {
-	const { server } = await startServer();
-	const client = await connect(server);
-	await client.hello();
-	const first = encodeClientMessage({ type: "request", id: "first", request: { command: "list" } });
-	const second = encodeClientMessage({ type: "request", id: "second", request: { command: "list" } });
-	const combined = new Uint8Array(first.byteLength + second.byteLength);
-	combined.set(first);
-	combined.set(second, first.byteLength);
-	const firstResponse = client.next((message) => message.type === "response" && message.id === "first");
-	const secondResponse = client.next((message) => message.type === "response" && message.id === "second");
-	await client.sendBytes(combined);
-	expect(await firstResponse).toMatchObject({ type: "response", id: "first", ok: true });
-	expect(await secondResponse).toMatchObject({ type: "response", id: "second", ok: true });
-});
+test.skipIf(process.platform === "win32")(
+	"Unix socket decodes multiple framed requests from one raw chunk",
+	async () => {
+		// Same platform caveat as the Unix transport conformance suite.
+		const { server } = await startServer();
+		const client = await connect(server);
+		await client.hello();
+		const first = encodeClientMessage({ type: "request", id: "first", request: { command: "list" } });
+		const second = encodeClientMessage({ type: "request", id: "second", request: { command: "list" } });
+		const combined = new Uint8Array(first.byteLength + second.byteLength);
+		combined.set(first);
+		combined.set(second, first.byteLength);
+		const firstResponse = client.next((message) => message.type === "response" && message.id === "first");
+		const secondResponse = client.next((message) => message.type === "response" && message.id === "second");
+		await client.sendBytes(combined);
+		expect(await firstResponse).toMatchObject({ type: "response", id: "first", ok: true });
+		expect(await secondResponse).toMatchObject({ type: "response", id: "second", ok: true });
+	},
+);

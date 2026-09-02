@@ -42,7 +42,12 @@ jobs:
         # present; this CI does not require a frozen lockfile because the
         # test contract is "deps install cleanly and pass tests", not
         # "deps install to exactly the same bytes as a previous run".
-        run: bun install --ignore-scripts
+ # `--linker=hoisted` forces a flat node_modules layout (like npm) so
+ # transitive deps (e.g. `@smithy/types` from `@aws-sdk/client-bedrock-runtime`)
+ # resolve at `node_modules/@smithy/types` for `tsgo`. The default
+ # `isolated` linker only puts them under `node_modules/.bun/...`, which
+ # TypeScript's node module resolver does not look at.
+ run: bun install --ignore-scripts --linker=hoisted
 
       - name: Build
         run: bun run build

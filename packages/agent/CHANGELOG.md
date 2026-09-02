@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ## [0.84.5] - 2026-08-30
+### Fork-local (bramburn)
+### Fixed
+
+- Sanitized the system prompt and the message list at the `streamProxy` request boundary, so the agent's proxy path is no longer a BYPASS for the text sanitiser. Previously, a stray U+FFFD or unpaired UTF-16 surrogate in user-pasted text, file-read output, or extension-injected content would reach whatever provider the proxy fronts (e.g. MiniMax) and trigger a 400 "invalid params" (sub-code 2013).
 
 ## [0.84.4] - 2026-08-28
 
