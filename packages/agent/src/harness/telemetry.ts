@@ -252,7 +252,6 @@ export const HARNESS_TELEMETRY_SCHEMA = {
 				},
 				"pi.run.aborted_by": {
 					type: "string",
-					required: false,
 					values: ["user", "timeout", "error"],
 					description: "Abort attribution when outcome is aborted",
 				},
