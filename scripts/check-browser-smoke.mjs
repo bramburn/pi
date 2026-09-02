@@ -24,6 +24,32 @@ const generatedCatalogDataPlugin = {
 	},
 };
 
+// Stub Node.js builtins used by telemetry/sentry.ts — the sentry adapter is
+// not in the browser bundle (tree-shaken out), but esbuild still needs to
+// resolve the import at bundle time. Implemented as a plugin (rather than
+// `define: { "node:crypto": "..." }`) because esbuild 0.28.1 now treats
+// every key in `define` as a JS identifier, and `node:crypto` is not a valid
+// identifier (the `:` breaks the parser). The plugin returns an empty module
+// for each stub instead.
+const nodeBuiltinStubs = {
+	"node:crypto": "{}",
+	"node:perf_hooks": "{}",
+};
+const nodeBuiltinStubPlugin = {
+	name: "node-builtin-stubs",
+	setup(build) {
+		build.onResolve({ filter: /^node:(crypto|perf_hooks)$/ }, (args) => ({
+			path: args.path,
+			namespace: "node-builtin-stub",
+		}));
+		build.onLoad({ filter: /.*/, namespace: "node-builtin-stub" }, (args) => ({
+			contents: nodeBuiltinStubs[args.path] ?? "{}",
+			loader: "js",
+		}));
+	},
+};
+const smokePlugins = [generatedCatalogDataPlugin, nodeBuiltinStubPlugin];
+
 function normalizePath(path) {
 	return path.replaceAll("\\", "/");
 }
@@ -41,14 +67,6 @@ function includesNodePackage(inputs, packageName) {
 }
 
 try {
-	// Stub Node.js builtins used by telemetry/sentry.ts — the sentry adapter
-	// is not in the browser bundle (tree-shaken out), but esbuild still needs to
-	// resolve the import at bundle time.
-	const browserStubs = {
-		"node:crypto": "{}",
-		"node:perf_hooks": "{}",
-	};
-
 	await build({
 		entryPoints: ["scripts/browser-smoke-entry.ts"],
 		bundle: true,
@@ -56,8 +74,7 @@ try {
 		format: "esm",
 		logLevel: "silent",
 		outfile: outputPath,
-		plugins: [generatedCatalogDataPlugin],
-		define: browserStubs,
+		plugins: smokePlugins,
 	});
 
 	const agentTreeshakeBuild = await build({
@@ -68,9 +85,8 @@ try {
 		logLevel: "silent",
 		metafile: true,
 		outfile: agentTreeshakeOutputPath,
-		plugins: [generatedCatalogDataPlugin],
+		plugins: smokePlugins,
 		write: false,
-		define: browserStubs,
 	});
 	const inputs = agentTreeshakeBuild.metafile.inputs;
 	for (const forbiddenInput of [
