@@ -13,15 +13,23 @@ concurrency:
 jobs:
   build-check-test:
     runs-on: ubuntu-latest
+    # CI runs on Bun. Node is the legacy runtime and is being phased out;
+    # see AGENTS.md "Bun Development" for the migration plan. The steps below
+    # use `bun install` (which is more lenient about platform-specific
+    # optional deps than `npm ci` — `npm ci --ignore-scripts` was failing
+    # the run on `@mariozechner/clipboard-darwin-arm64`, a darwin-arm64-only
+    # optional that `npm ci` refuses to install on linux-x64), `bun run` for
+    # package.json scripts, and the existing `test.sh` wrapper for the test
+    # step (which still invokes `npm test` internally because vitest + node
+    # test run inside the Bun-launched subprocess).
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: 22
-          cache: npm
+          bun-version: 1.3.14
 
       - name: Install system dependencies
         run: |
@@ -30,13 +38,22 @@ jobs:
           sudo ln -s $(which fdfind) /usr/local/bin/fd
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        # `bun install` (no --frozen-lockfile) writes to `bun.lock` when
+        # present; this CI does not require a frozen lockfile because the
+        # test contract is "deps install cleanly and pass tests", not
+        # "deps install to exactly the same bytes as a previous run".
+        run: bun install --ignore-scripts
 
       - name: Build
-        run: npm run build
+        run: bun run build
 
       - name: Check
-        run: npm run check
+        run: bun run check
 
       - name: Test
-        run: npm test
+        # `test.sh` wraps `npm test` in an isolated HOME + temp dir to keep
+        # the test run hermetic. The `npm test` inside is unchanged for
+        # now; vitest and the `node --test` runner in packages/tui still
+        # work under Bun-launched subprocesses. When the project migrates
+        # vitest to bun test, switch the inner command to `bun test`.
+        run: bash ./test.sh
