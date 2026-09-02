@@ -131,25 +131,34 @@ function customTypeFromPayload(row: BranchPathEntryRow): string | null {
 }
 
 export function insertBranchEntriesForPath(db: SqliteDatabase, sessionId: string, branchId: string, leafId: string) {
-	// Single recursive CTE replaces the O(N) per-entry SELECT loop.
-	// depth=0 is the leaf; walking parent_id upward gives root-to-leaf order after reversal.
-	const chain = sql<BranchPathEntryRow & { depth: number }>`WITH RECURSIVE path(
-			id, seq, parent_id, type, payload, depth
-		) AS (
-			SELECT id, seq, parent_id, type, payload, 0
-			FROM entries
-			WHERE session_id = ${sessionId} AND id = ${leafId}
+	// Single round-trip: walk the parent chain with a recursive CTE, then insert in one pass.
+	sql`WITH RECURSIVE path(id, seq, parent_id, type, payload) AS (
+			SELECT id, seq, parent_id, type, payload FROM entries
+				WHERE session_id = ${sessionId} AND id = ${leafId}
 			UNION ALL
-			SELECT e.id, e.seq, e.parent_id, e.type, e.payload, p.depth + 1
-			FROM entries AS e
-			JOIN path AS p ON e.id = p.parent_id
-			WHERE e.session_id = ${sessionId}
+			SELECT e.id, e.seq, e.parent_id, e.type, e.payload FROM entries e
+				JOIN path p ON p.parent_id = e.id
+				WHERE e.session_id = ${sessionId}
 		)
-		SELECT id, seq, parent_id, type, payload, depth FROM path`.all(db);
+		INSERT INTO branch_entries (session_id, branch_id, entry_id, entry_seq, entry_type, custom_type)
+		SELECT ${sessionId}, ${branchId}, id, seq, type, ${null}
+		FROM path`.run(db);
 
-	// Walk from root (last) to leaf (first) — chain is leaf→root, so reverse it.
-	for (const row of chain.reverse()) {
-		insertBranchEntry(db, sessionId, branchId, row.id, row.seq, row.type, customTypeFromPayload(row));
+	// Denormalise custom_type for custom entries (can't store derived JSON payload in the CTE cleanly).
+	const customRows: BranchPathEntryRow[] = sql`WITH RECURSIVE path(id, seq, parent_id, type, payload) AS (
+			SELECT id, seq, parent_id, type, payload FROM entries
+				WHERE session_id = ${sessionId} AND id = ${leafId}
+			UNION ALL
+			SELECT e.id, e.seq, e.parent_id, e.type, e.payload FROM entries e
+				JOIN path p ON p.parent_id = e.id
+				WHERE e.session_id = ${sessionId}
+		)
+		SELECT id, seq, parent_id, type, payload FROM path WHERE type = 'custom'`.all(db);
+
+	for (const row of customRows) {
+		// Upsert: update custom_type if the row already exists (same entry_id in this branch).
+		sql`UPDATE branch_entries SET custom_type = ${customTypeFromPayload(row)}
+			WHERE session_id = ${sessionId} AND branch_id = ${branchId} AND entry_id = ${row.id}`.run(db);
 	}
 }
 
