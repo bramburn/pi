@@ -131,23 +131,34 @@ function customTypeFromPayload(row: BranchPathEntryRow): string | null {
 }
 
 export function insertBranchEntriesForPath(db: SqliteDatabase, sessionId: string, branchId: string, leafId: string) {
-	const path: BranchPathEntryRow[] = [];
-	const seen = new Set<string>();
-	let entryId: string | null = leafId;
+	// Single round-trip: walk the parent chain with a recursive CTE, then insert in one pass.
+	sql`WITH RECURSIVE path(id, seq, parent_id, type, payload) AS (
+			SELECT id, seq, parent_id, type, payload FROM entries
+				WHERE session_id = ${sessionId} AND id = ${leafId}
+			UNION ALL
+			SELECT e.id, e.seq, e.parent_id, e.type, e.payload FROM entries e
+				JOIN path p ON p.parent_id = e.id
+				WHERE e.session_id = ${sessionId}
+		)
+		INSERT INTO branch_entries (session_id, branch_id, entry_id, entry_seq, entry_type, custom_type)
+		SELECT ${sessionId}, ${branchId}, id, seq, type, ${null}
+		FROM path`.run(db);
 
-	while (entryId !== null) {
-		if (seen.has(entryId)) throw new SessionError("invalid_entry", `Entry parent cycle at ${entryId}`);
-		seen.add(entryId);
-		const row: BranchPathEntryRow | undefined = sql`SELECT id, seq, parent_id, type, payload
-			FROM entries
-			WHERE session_id = ${sessionId} AND id = ${entryId}`.get<BranchPathEntryRow>(db);
-		if (!row) throw new SessionError("invalid_entry", `Entry ${entryId} not found`);
-		path.push(row);
-		entryId = row.parent_id;
-	}
+	// Denormalise custom_type for custom entries (can't store derived JSON payload in the CTE cleanly).
+	const customRows: BranchPathEntryRow[] = sql`WITH RECURSIVE path(id, seq, parent_id, type, payload) AS (
+			SELECT id, seq, parent_id, type, payload FROM entries
+				WHERE session_id = ${sessionId} AND id = ${leafId}
+			UNION ALL
+			SELECT e.id, e.seq, e.parent_id, e.type, e.payload FROM entries e
+				JOIN path p ON p.parent_id = e.id
+				WHERE e.session_id = ${sessionId}
+		)
+		SELECT id, seq, parent_id, type, payload FROM path WHERE type = 'custom'`.all(db);
 
-	for (const row of path.reverse()) {
-		insertBranchEntry(db, sessionId, branchId, row.id, row.seq, row.type, customTypeFromPayload(row));
+	for (const row of customRows) {
+		// Upsert: update custom_type if the row already exists (same entry_id in this branch).
+		sql`UPDATE branch_entries SET custom_type = ${customTypeFromPayload(row)}
+			WHERE session_id = ${sessionId} AND branch_id = ${branchId} AND entry_id = ${row.id}`.run(db);
 	}
 }
 

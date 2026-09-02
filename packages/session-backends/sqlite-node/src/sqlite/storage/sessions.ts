@@ -59,39 +59,21 @@ export function insertSessionRow(db: SqliteDatabase, session: NewSessionRow) {
 }
 
 export function readSessionRow(db: SqliteDatabase, sessionId: string) {
-	return sql`SELECT s.id, s.created_at, s.metadata, s.cwd, s.parent_session_id,
-			name_fact.seq IS NOT NULL AS has_session_name,
-			name_fact.value AS session_name
-		FROM sessions AS s
-		LEFT JOIN facts AS name_fact
-			ON name_fact.session_id = s.id
-			AND name_fact.kind = 'name'
-			AND name_fact.key IS NULL
-			AND name_fact.seq = (
-				SELECT MAX(f.seq)
-				FROM facts AS f
-				WHERE f.session_id = s.id AND f.kind = 'name' AND f.key IS NULL
-			)
-		WHERE s.id = ${sessionId}`.get<SessionRow>(db);
+	return sql`SELECT id, created_at, metadata, cwd, parent_session_id,
+			session_name IS NOT NULL AS has_session_name,
+			session_name
+		FROM sessions
+		WHERE id = ${sessionId}`.get<SessionRow>(db);
 }
 
 export function readSessionRows(db: SqliteDatabase, options: { cwd?: string } = {}) {
-	const where = options.cwd === undefined ? sql`` : sql`WHERE s.cwd = ${options.cwd}`;
-	return sql`SELECT s.id, s.created_at, s.metadata, s.cwd, s.parent_session_id,
-			name_fact.seq IS NOT NULL AS has_session_name,
-			name_fact.value AS session_name
-		FROM sessions AS s
-		LEFT JOIN facts AS name_fact
-			ON name_fact.session_id = s.id
-			AND name_fact.kind = 'name'
-			AND name_fact.key IS NULL
-			AND name_fact.seq = (
-				SELECT MAX(f.seq)
-				FROM facts AS f
-				WHERE f.session_id = s.id AND f.kind = 'name' AND f.key IS NULL
-			)
+	const where = options.cwd === undefined ? sql`` : sql`WHERE cwd = ${options.cwd}`;
+	return sql`SELECT id, created_at, metadata, cwd, parent_session_id,
+			session_name IS NOT NULL AS has_session_name,
+			session_name
+		FROM sessions
 		${where}
-		ORDER BY s.created_at DESC`.all<SessionRow>(db);
+		ORDER BY created_at DESC`.all<SessionRow>(db);
 }
 
 export function deleteSessionRow(db: SqliteDatabase, sessionId: string) {
