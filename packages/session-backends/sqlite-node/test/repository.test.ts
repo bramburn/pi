@@ -288,7 +288,12 @@ END;
 
 		const db = await sqlite.open(databasePath);
 		try {
-			await db.prepare("UPDATE facts SET value = ? WHERE session_id = ? AND kind = 'name'").run(stored, "session-1");
+			// 002_add_session_name.sql denormalises the latest 'name' fact onto
+			// `sessions.session_name`. The implementation reads the denormalised
+			// column, not the facts table, so the corruption must land there.
+			await db
+				.prepare("UPDATE sessions SET session_name = ? WHERE id = ?")
+				.run(stored, "session-1");
 		} finally {
 			await db.close();
 		}

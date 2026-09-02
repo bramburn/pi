@@ -25,6 +25,11 @@ export async function loadMigrations(): Promise<SqliteMigration[]> {
 			order: 2,
 			sql: await loadMigrationSql("./migrations/002_add_session_name.sql"),
 		},
+		{
+			id: "003_fix_session_name_trigger.sql",
+			order: 3,
+			sql: await loadMigrationSql("./migrations/003_fix_session_name_trigger.sql"),
+		},
 	];
 }
 

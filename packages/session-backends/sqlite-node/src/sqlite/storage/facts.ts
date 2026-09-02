@@ -32,6 +32,10 @@ export function readLatestFact(db: SqliteDatabase, sessionId: string, kind: stri
 
 export function readLatestLabelFacts(db: SqliteDatabase, sessionId: string) {
 	// Window function eliminates the per-key correlated subquery (N+1 → 1 query).
+	// The `value IS NOT NULL` filter sits in the outer query, not the inner one:
+	// if it lived in the inner query, a key whose most-recent fact is `null` would
+	// fall back to an older non-null value. Putting it outside means the latest
+	// seq for each key is selected first, and only emitted if its value is set.
 	return sql`SELECT key, value FROM (
 			SELECT key, value,
 				ROW_NUMBER() OVER (
@@ -41,9 +45,8 @@ export function readLatestLabelFacts(db: SqliteDatabase, sessionId: string) {
 			FROM facts
 			WHERE session_id = ${sessionId}
 				AND kind = 'label'
-				AND value IS NOT NULL
 		) sub
-		WHERE rn = 1
+		WHERE rn = 1 AND value IS NOT NULL
 		ORDER BY key`.all<{ key: string; value: string }>(db);
 }
 
