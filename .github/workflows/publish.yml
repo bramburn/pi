@@ -122,3 +122,11 @@ jobs:
       - name: Publish @bramburn/pi-server
         run: |
           node scripts/fork-publish-rename.mjs packages/server npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+
+      - name: Publish @bramburn/pi-clipboard-rs
+        # Source name is already in the bramburn/ namespace (no fork-publish-rename needed).
+        # The prebuilds/* dir is built by .github/workflows/clipboard-rs-build.yml on the
+        # same tag and committed to the repo before this step runs; if it's empty the
+        # published tarball is still valid JS metadata, just without per-platform binaries.
+        run: |
+          cd packages/clipboard-rs && npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
