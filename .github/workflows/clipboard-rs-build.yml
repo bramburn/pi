@@ -121,7 +121,7 @@ jobs:
             --target ${{ matrix.target.rust }} \
             --release \
             --strip \
-            --binary-name clipboard-rs \
+            --bin clipboard-rs \
             --js index.js \
             --dts index.d.ts \
             --output-dir ../clipboard-rs-dist
