@@ -1,9 +1,8 @@
 [package]
 # Cargo's package name rules forbid `@` and `/`. The npm-distribution
-# name (`@bramburn/pi-clipboard-rs` once the fork-publish-rename script
-# runs, currently `@earendil-works/pi-clipboard-rs`) lives in
-# `package.json`; the napi-rs CLI reads that field for the .node
-# filename, not this one. Keep this bare crate name.
+# name (`@bramburn/pi-clipboard-rs`) lives in `package.json`; the napi-rs
+# CLI reads that field for the .node filename, not this one. Keep this
+# bare crate name.
 name        = "pi-clipboard-rs"
 version     = "0.0.1"
 edition     = "2021"
