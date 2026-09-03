@@ -76,4 +76,11 @@ for name in CI GITHUB_ACTIONS; do
 done
 
 echo "Running tests without API keys in isolated home: $test_root/home"
-env -i "${test_env[@]}" npm test
+# Phase 1: route the test invocation through bun's runtime but keep the
+# existing vitest + node --test orchestration (the `test` script in the
+# root package.json). `bun test` would invoke bun's native runner, which
+# does not understand vitest's `vi.mock()` and hangs on the existing
+# test suite; `bun run test` lets bun act as the executable and runs the
+# npm-script orchestration unchanged. Dropping the inner `npm` calls in
+# the root package.json's test scripts is Phase 2+ of D11.
+env -i "${test_env[@]}" bun run test
