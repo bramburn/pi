@@ -231,6 +231,40 @@ Attribution:
 
 5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Adding a new workspace package
+
+When you create a new package under `packages/*` or `packages/session-backends/*` that should ship to npm, the workspace layout, the release pre-flight, and the publish workflow all need to learn about it. Skipping any of these steps is the single most common reason a fresh release fails with "the following public workspace packages are not registered on npm". Follow this checklist:
+
+1. **Pick the published name up front.** The fork ships under `@bramburn/pi-*` on npm. Two patterns exist today:
+   - **Source name `@earendil-works/pi-<x>`** — used for packages that exist upstream under the same name (e.g. `@earendil-works/pi-ai`). `scripts/fork-publish-rename.mjs` rewrites the name to `@bramburn/pi-<x>` at publish time. This is the default for packages ported from upstream.
+   - **Source name `@bramburn/pi-<x>`** — used for fork-original packages with no upstream counterpart (e.g. `@bramburn/pi-clipboard-rs`). No rename shim; the package is published as-is.
+   Do not introduce a third pattern. If the package is a fork-original but you accidentally name it `@earendil-works/...`, the rename shim will still rewrite it to `@bramburn/...` but the release pre-flight `npm view` check (which uses the source name) will fail because nothing in the `@earendil-works` namespace will ever publish.
+
+2. **Add a workspace entry** in the root `package.json` under `workspaces` (or `packages/session-backends/*` is already in the array). Without this, the release script's `findPackageDirectories()` and the npm CLI will not see the package.
+
+3. **Add a publish step** in `.github/workflows/publish.yml`. The other 9 packages follow the pattern:
+   ```yaml
+   - name: Publish @bramburn/pi-<x>
+     run: |
+       node scripts/fork-publish-rename.mjs packages/<dir> npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+   ```
+   For fork-original packages (where the source name is already in the bramburn namespace), skip the rename script:
+   ```yaml
+   - name: Publish @bramburn/pi-<x>
+     run: |
+       cd packages/<dir> && npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+   ```
+   The `|| echo "skip: ..."` makes the step idempotent — re-running on an already-published version exits 0.
+
+4. **Bootstrap the package on npm once before the first release.** The release script's pre-flight (`npm view <name> version`) fails if the package does not exist on npm yet. Two routes:
+   - For packages with prebuilt native binaries: run the platform-build workflow first (e.g. `.github/workflows/clipboard-rs-build.yml`) on a tag or a throwaway branch to populate `prebuilds/`, then publish via the workflow's `publish-npm` job.
+   - For pure-JS packages: `cd packages/<dir> && npm publish --access public --tag fork` from a local checkout that is logged in to npm (the `gh auth token` flow does not have npm publish rights; use `npm login` first).
+   Without this bootstrap, the next `release:patch` will exit with a "packages are not registered on npm" error before it ever bumps a version.
+
+5. **Decide on `private`.** If the package is internal-only and should never ship to npm (e.g. a test harness, a build-time tool), set `"private": true` in its `package.json`. `scripts/release-packages.mjs` filters private packages out of the pre-flight check and the publish loop. Do not mix `private: true` with the `@bramburn/pi-` naming — the name implies a public release artifact.
+
+6. **Add a regression test that pulls the package by name** (e.g. `import { ... } from "@bramburn/pi-<x>"` in a vitest spec). This catches two failures fast: a typo in the name during dev, and the missing bootstrap above.
+
 ## Forking
 
 When this repo is forked (e.g. `bramburn/pi` from `earendil-works/pi`), the fork needs build-time markers so users can tell at a glance that they are running the fork rather than upstream:
