@@ -61,6 +61,7 @@ function assertPackagesAreRegisteredWithNpm() {
 		const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["view", packageName, "version", "--json"], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
+			shell: true,
 		});
 
 		if (result.status === 0 && result.stdout.trim()) {
