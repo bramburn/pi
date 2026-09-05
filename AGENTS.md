@@ -131,8 +131,9 @@ This checkout is a fork of `earendil-works/pi` (the original upstream). Two remo
 
 Rules:
 
-- **Never push to `origin`.** All pushes — branches, tags, force-with-lease — go to `fork` only. Treat `origin` as read-only.
-- **Never open a PR against `earendil-works/pi` from this account** unless the user explicitly approves the upstream PR. The standard workflow is: push the branch to `fork`, then the user opens the PR against upstream from the GitHub UI.
+- **Never push to `origin`.** This includes `origin/main`, `origin/<any-branch>`, and any tag pointing to an `origin` ref. All pushes — branches, tags, force-with-lease — go to `fork` only. Treat `origin` as read-only.
+- **Never create a PR against `origin`**, including `origin/main` (`earendil-works/pi`). Every PR Claude opens targets `fork` (`bramburn/pi`), with `fork/main` as the base. The standard workflow is: push the branch to `fork`, then Claude opens the PR against `fork/main`. The user (not Claude) opens any PR against upstream from the GitHub UI.
+- **Never auto-merge into `fork/main`.** A "Merge into fork/main" step in a test plan, follow-up list, or automation is a step Claude does **not** perform. PRs Claude opens are left for the user to review and merge. Do not include "Merge into fork/main" as an action item in PR descriptions, follow-up checklists, or any agent-issued task list.
 - Before any push, double-check the remote name in the command. `git push origin <branch>` is the wrong command; `git push fork <branch>` is right.
 - If a `gh` command targets `earendil-works/pi` and the API returns `user is blocked` / `HTTP 422: user is blocked`, surface the block to the user and stop. Do not retry against upstream via a different endpoint or token.
 
