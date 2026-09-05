@@ -66,6 +66,7 @@ describe("xAI Responses provider", () => {
 			"grok-3-fast",
 			"grok-4.20-0309-non-reasoning",
 			"grok-4.20-0309-reasoning",
+			"grok-build-0.1",
 			"grok-code-fast-1",
 		]) {
 			expect(Object.keys(XAI_MODELS)).not.toContain(modelId);
@@ -77,8 +78,11 @@ describe("xAI Responses provider", () => {
 		// openai-completions endpoint is reserved for older Grok 3/4 releases
 		// that have been retired from the built-in catalog.
 		expect(XAI_MODELS["grok-4.5"].api).toBe("openai-responses");
+		expect(XAI_MODELS["grok-4.6"].api).toBe("openai-responses");
 		expect(XAI_MODELS["grok-4.3"].api).toBe("openai-responses");
 		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.5"])).toEqual(["low", "medium", "high"]);
+		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.6"])).toEqual(["low", "medium", "high", "xhigh"]);
+		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.3"])).toEqual(["off", "low", "medium", "high"]);
 	});
 
 	it("uses /responses with bearer auth and xAI-compatible request fields", async () => {
