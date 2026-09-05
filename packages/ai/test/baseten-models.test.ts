@@ -31,7 +31,7 @@ describe("Baseten models", () => {
 				xhigh: null,
 				max: "max",
 			},
-			input: ["text", "image"],
+			input: ["text"],
 			contextWindow: 1048576,
 			maxTokens: 262144,
 			cost: {
