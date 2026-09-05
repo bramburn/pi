@@ -42,3 +42,27 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+
+# pi-loop runtime state (tracked siblings live under .pi/extensions, .pi/prompts, .pi/skills)
+.pi/.goals-pool-snapshot.json
+.pi/goals/
+.pi/loops/
+.pi/pi-loop-settings.json
+.pi/reviews/
+
+# Worktree state
+.worktrees/
+worktrees/
+
+# Lab review scratch
+lab/reviews/
+
+# Generic temp
+tmp/
+
+# Stray nested build outputs (accidental self-copies of packages during build)
+packages/agent/agent/
+packages/session-backends/sqlite-node/sqlite-node/
+
+# Sync-upstream script runtime state
+scripts/.upstream-sync-state.json
