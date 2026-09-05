@@ -37,6 +37,8 @@
 			"!packages/mom/data/**/*",
 			"!**/.worktrees/**/*",
 			"!!**/.worktrees",
+			"!**/worktrees/**/*",
+			"!!**/worktrees",
 			"!!**/node_modules"
 		]
 	}
