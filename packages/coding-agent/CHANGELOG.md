@@ -9,7 +9,15 @@
 - New `analytics-ext.ts` InlineExtension that wires `agent_start`, `turn_start`, `tool_execution_start/end`, `session_compact`, and `agent_settled` events to the store.
 - The `subagent` extension now emits `pi.agent.task` spans for every spawned subprocess (both synchronous `runSingleAgent` and background `runBackgroundSubagentInner`).
 
-## [0.84.5] - 2026-08-30
+### Fixed
+
+- Fixed premature missing-model errors after login by waiting for catalog discovery. Radius now defaults to `balanced`, falling back to the first available Radius model when needed.
+
+## [0.85.1] - 2026-09-05
+
+### New Features
+
+- **GPT-6 Astra** — Available through OpenAI API keys and OpenAI Codex subscriptions. See [API Keys](docs/providers.md#api-keys) and [OpenAI Codex](docs/providers.md#openai-codex).
 
 ### Added
 
