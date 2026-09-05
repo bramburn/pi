@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added GPT-6 Astra for OpenAI API keys and OpenAI Codex subscriptions.
+
+## [0.85.0] - 2026-09-04
+
+### Breaking Changes
+
+- Replaced `createGatewayBindingFetch()` with `createAiBindingFetch()` for Cloudflare Workers AI bindings. Configure the model's Workers AI Gateway passthrough `baseUrl` directly; requests now pass through the binding unchanged ([#8287](https://github.com/earendil-works/pi/pull/8287) by [@Maximo-Guk](https://github.com/Maximo-Guk)).
 ## [0.84.5] - 2026-08-30
 
 ### Fork-local (bramburn)
