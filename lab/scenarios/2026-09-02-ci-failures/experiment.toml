@@ -1,0 +1,43 @@
+[scenario]
+name        = "2026-09-02-ci-failures"
+date        = "2026-09-02"
+topic       = "Triage and fix GitHub Actions CI failures on bramburn/pi"
+status      = "scaffolded"
+owner       = "mavis"
+related_prs = [873, 876, 877, 880]
+related_run_ids = [33675057545, 33674889692, 33664432592, 33663685418]
+
+[question]
+# What is the smallest set of fixes that turns bramburn/pi's GitHub Actions
+# CI green again, and which of those fixes is mandatory vs optional?
+
+[fixes]
+# Candidate fixes, each on its own row in the runlog.
+yaml_indent_ci_yml = "Re-indent lines 45-50 of .github/workflows/ci.yml by 8 spaces; was at column 1."
+pr_880_followup = "Audit PR #880 (browser-smoke + matrix path filter + regen shrinkwrap) for additional YAML breakage or other failures."
+pr_877_followup = "Confirm the feat/rust-clipboard branch CI is green and the matrix build workflow has progressed past run 7 in runlog.md."
+pr_876_followup = "Audit PR #876 (SQLite analytics) — has it been pushed through CI on the fork?"
+pr_873_followup = "Audit PR #873 (fork-publish-rename) — has it been pushed through CI on the fork?"
+
+[metrics]
+# 1. ci.yml on the fix branch parses as valid YAML.
+# 2. The ci.yml GitHub Actions run on the fix branch goes from "Invalid
+#    workflow file" to at least the "Install dependencies" step.
+# 3. The PR #880, #877, #876, #873 branches all converge to a state where
+#    the next push produces a green ci.yml run (or the failure cause is
+#    recorded and accepted as deferred).
+# 4. The "Build @bramburn/clipboard-rs native prebuilds" matrix has at
+#    least one platform with a successful round-trip test, if any
+#    platform completed since the last runlog update.
+
+[promotion_gates]
+# To "selected":
+# - ci.yml parses and runs past the Install step on the fix branch.
+# - Each open PR's blocker is either fixed or explicitly deferred with
+#   a recorded reason.
+#
+# To "graduated":
+# - All open PRs either merged or closed with reason.
+# - main ci.yml run is green for at least 24h without a re-failure.
+# - Drop-node decision (if any) is documented in AGENTS.md and a
+#   follow-up D-record.
