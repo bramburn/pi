@@ -13,6 +13,9 @@
 
 - Sanitized unpaired UTF-16 surrogates and the U+FFFD replacement character from message text before sending to providers that reject them with 400 "invalid params" (e.g. MiniMax sub-code 2013). Valid surrogate pairs (e.g. emoji, supplementary plane characters) are preserved.
 - Sanitized the system prompt and the message list at every `pi-messages` (`stream` and `streamSimple`) request boundary, so the pi-messages protocol adapter is no longer a full BYPASS for the sanitiser. Previously a stray U+FFFD in `AGENTS.md` / `CLAUDE.md` / a `before_agent_start` system-prompt override could ride through to a MiniMax-class provider and trigger sub-code 2013.
+- Removed the unnecessary Chord dependency from pi-ai by defining its exported `JsonValue` type directly.
+- Fixed GitHub Copilot Claude Fable 5 requests to use the Anthropic Messages adapter so selected reasoning levels are sent ([#8961](https://github.com/earendil-works/pi/issues/8961)).
+- Fixed OpenAI Codex SSE parsing to process terminal events that are not followed by a blank line ([#9047](https://github.com/earendil-works/pi/issues/9047)).
 ## [0.84.4] - 2026-08-28
 
 ### Added
