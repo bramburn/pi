@@ -39,7 +39,9 @@ export function buildStatusSection(tasks: BackgroundTask[]): StatusSection {
 		lines.push("| ID | Role | Status | Started | Last Output |");
 		lines.push("|---|---|---|---|---|");
 		for (const t of running) {
-			const lastOutput = t.lastOutput ? t.lastOutput.replace(/\|/g, "\\|").slice(0, 60) : "—";
+			const lastOutput = t.lastOutput
+				? t.lastOutput.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").slice(0, 60)
+				: "—";
 			lines.push(`| ${t.id} | ${t.role} | **running** | ${formatTime(t.startedAt)} | ${lastOutput} |`);
 		}
 		lines.push("");
