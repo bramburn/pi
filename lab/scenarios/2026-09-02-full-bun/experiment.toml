@@ -1,0 +1,54 @@
+[scenario]
+name        = "2026-09-02-full-bun"
+date        = "2026-09-02"
+topic       = "Phase out Node.js runtime from bramburn/pi CI and release pipeline"
+status      = "scaffolded"
+owner       = "mavis"
+related_scenarios = ["2026-09-02-ci-failures", "2026-09-02-rust-clipboard"]
+related_decisions = ["D8", "D9", "D10", "D11", "D12"]
+
+[question]
+# What is the minimum sequence of changes that lets bramburn/pi drop the
+# Node.js runtime from every CI and release workflow, without breaking
+# the npm OIDC trusted-publishing flow that the publish path depends on?
+
+[phases]
+# Each phase is a separate PR. Order matters: later phases need the
+# earlier ones.
+
+phase_1_test_sh_swap = "test.sh: 'npm test' -> 'bun test' (1 line, low risk). Land first; no other dependency."
+phase_2_oidc_setup = "OIDC trusted publishing for @bramburn/pi-* on npmjs.com (8 manual configs) + publish.yml id-token: write. Blocked on user action; one-time npm-side config."
+phase_3_drop_node_from_workflows = "clipboard-rs-build.yml + build-binaries.yml publish-npm job: drop setup-node, swap npm invocations for bun. Depends on Phase 2 (need npm CLI 11.5.1+ for the publish step, which now comes from a single npm install line, not a Node runtime)."
+phase_4_drop_node_from_scripts = "All 'node scripts/*.mjs' invocations in workflows become 'bun scripts/*.mjs'. Mechanical. Depends on Phase 3."
+phase_5_docs = "AGENTS.md, README.md, website/docs/fork/ updated to reflect Node-free CI. No CI impact. Last because it should describe the actual final state, not the in-flight one."
+
+[metrics]
+# Phase 1
+phase_1_vitest_count_unchanged = "bun test reports the same number of test files and test cases as `npm test` did before."
+phase_1_no_vi_mock_breaks = "No test that uses `vi.mock(` regresses; grep for `vi.mock(` is empty (or any matches are validated to still work)."
+
+# Phase 2
+phase_2_oidc_publish_succeeds = "A tag-push publishes a package via OIDC; dist.attestations references the GH Actions run."
+phase_2_no_npm_token_in_logs = "The publish job log does not contain NPM_TOKEN, NODE_AUTH_TOKEN, or any token-shaped string."
+
+# Phase 3
+phase_3_no_setup_node_remaining = "`grep -r 'actions/setup-node' .github/workflows/` returns 0 lines after the change."
+phase_3_all_six_prebuild_platforms_build = "linux-x64-gnu, linux-arm64-gnu, darwin-x64, darwin-arm64, win32-x64-msvc, win32-arm64-msvc all produce a valid .node prebuild via the bun-invoked napi-rs CLI."
+
+# Phase 4
+phase_4_no_node_scripts_invocation = "`grep -r 'node scripts/' .github/workflows/` returns 0 lines."
+phase_4_bun_check_passes = "`bun run check` (with all script invocations switched to bun) still passes all 6 check:* sub-gates."
+
+# Phase 5
+phase_5_no_node_mention = "`grep -ri 'node' AGENTS.md README.md website/docs/fork/ | grep -v -E '(node_modules|.node|cargo|napi-rs|node:test|npm|tool-versions)'` returns 0 hits that would mislead a contributor."
+
+[promotion_gates]
+# To "selected":
+# - All five phases land successfully and individually promote to "selected" before the next phase starts.
+# - No regression in any other lab scenario.
+# - User sign-off on Phase 2 (the OIDC step) before Phase 3 begins.
+
+# To "graduated":
+# - All five phases are merged to main and the `actions/setup-node` count across the repo is 0.
+# - Two consecutive weekly releases succeed end-to-end via OIDC.
+# - Documentation reflects the Node-free state.

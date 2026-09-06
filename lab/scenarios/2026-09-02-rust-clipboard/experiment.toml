@@ -1,0 +1,43 @@
+[scenario]
+name        = "2026-09-02-rust-clipboard"
+date        = "2026-09-02"
+topic       = "Replace @mariozechner/clipboard with a fork-local Rust crate"
+status      = "scaffolded"
+owner       = "mavis"
+binary_root = "packages/clipboard-rs"
+source_root = "C:/dev/pi/.worktrees/feat-rust-clipboard"
+
+[question]
+# Can a Rust crate, built once per target platform and shipped as a .node addon,
+# match @mariozechner/clipboard's four-method API surface and work on all six
+# target platforms (linux-x64, linux-arm64, darwin-x64, darwin-arm64,
+# win32-x64, win32-arm64) without the EBADPLATFORM install fragility of npm ci?
+
+[fixtures]
+# Cross-platform identity test: write "hello" via setText, read back via
+# getText, assert equality. Runs in the build matrix.
+round_trip_text = "hello clipboard from rust"
+# Linux-only: empty-text edge case. setText("") then getText() must return
+# either "" or null, not throw.
+round_trip_empty = ""
+# Round-trip for image. Stubbed out in v1; image is the hasImage + 0-bytes case.
+has_image_after_text = false
+
+[metrics]
+# 1. Build success per platform. exit code 0 from `cargo build --target X`.
+# 2. Round-trip test per platform. text written == text read.
+# 3. Set latency on the same target. p50 / p99 over 100 iterations.
+# 4. Binary size. .node file on disk per platform.
+
+[promotion_gates]
+# To "selected":
+# - All six target platforms build cleanly.
+# - Round-trip test passes on all six.
+# - No regression in the coding-agent integration test (existing
+#   `packages/coding-agent/test/clipboard.test.ts` or its successor).
+#
+# To "graduated":
+# - @mariozechner/clipboard removed from packages/coding-agent/optionalDependencies.
+# - fork-publish-rename.mjs picks up the new package on the next publish.
+# - Smoke test: `npx -y @bramburn/pi-coding-agent@<next> --version` still works
+#   on all six platforms.
