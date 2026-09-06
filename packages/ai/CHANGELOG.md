@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added GPT-6 Astra for OpenAI API keys and OpenAI Codex subscriptions.
+
+## [0.85.0] - 2026-09-04
+
+### Breaking Changes
+
+- Replaced `createGatewayBindingFetch()` with `createAiBindingFetch()` for Cloudflare Workers AI bindings. Configure the model's Workers AI Gateway passthrough `baseUrl` directly; requests now pass through the binding unchanged ([#8287](https://github.com/earendil-works/pi/pull/8287) by [@Maximo-Guk](https://github.com/Maximo-Guk)).
 ## [0.84.5] - 2026-08-30
 
 ### Fork-local (bramburn)
@@ -13,6 +22,10 @@
 
 - Sanitized unpaired UTF-16 surrogates and the U+FFFD replacement character from message text before sending to providers that reject them with 400 "invalid params" (e.g. MiniMax sub-code 2013). Valid surrogate pairs (e.g. emoji, supplementary plane characters) are preserved.
 - Sanitized the system prompt and the message list at every `pi-messages` (`stream` and `streamSimple`) request boundary, so the pi-messages protocol adapter is no longer a full BYPASS for the sanitiser. Previously a stray U+FFFD in `AGENTS.md` / `CLAUDE.md` / a `before_agent_start` system-prompt override could ride through to a MiniMax-class provider and trigger sub-code 2013.
+- Fixed the Qwen Token Plan Individual catalog to include Qwen3.8 Flash ([#9021](https://github.com/earendil-works/pi/issues/9021)).
+- Removed the unnecessary Chord dependency from pi-ai by defining its exported `JsonValue` type directly.
+- Fixed GitHub Copilot Claude Fable 5 requests to use the Anthropic Messages adapter so selected reasoning levels are sent ([#8961](https://github.com/earendil-works/pi/issues/8961)).
+- Fixed OpenAI Codex SSE parsing to process terminal events that are not followed by a blank line ([#9047](https://github.com/earendil-works/pi/issues/9047)).
 ## [0.84.4] - 2026-08-28
 
 ### Added
