@@ -1878,13 +1878,18 @@ describe("ModelRegistry", () => {
 				expect(count).toBe(0);
 			});
 
+			// regression: #890 — github-copilot catalog (packages/ai/src/providers/data/github-copilot.json,
+			// gitignored + auto-regenerated) no longer ships gpt-4.1. Pin the test to a model that is
+			// present in the current catalog (gpt-5-mini, openai-responses). The test's intent —
+			// filterModels restricts the available list to the account picker's advertised ids — is
+			// preserved; only the model id changes to a current one.
 			test("getAvailable filters GitHub Copilot OAuth models to account picker availability", async () => {
 				await authStorage.modify("github-copilot", async () => ({
 					type: "oauth",
 					refresh: "github-access-token",
 					access: "tid=test;exp=9999999999;proxy-ep=proxy.individual.githubcopilot.com;",
 					expires: Date.now() + 60_000,
-					availableModelIds: ["gpt-4.1"],
+					availableModelIds: ["gpt-5-mini"],
 				}));
 
 				const registry = await createModelRegistry(authStorage, modelsJsonPath);
@@ -1894,7 +1899,7 @@ describe("ModelRegistry", () => {
 						.getAvailable()
 						.filter((m) => m.provider === "github-copilot")
 						.map((m) => m.id),
-				).toEqual(["gpt-4.1"]);
+				).toEqual(["gpt-5-mini"]);
 			});
 
 			test("getApiKeyAndHeaders resolves authHeader on every request", async () => {
