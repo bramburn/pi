@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeContext, sanitizeMessages } from "../src/api/transform-messages.ts";
-import type {
-	AssistantMessage,
-	Context,
-	Message,
-	TextContent,
-	ToolResultMessage,
-	UserMessage,
-} from "../src/types.ts";
+import type { AssistantMessage, Context, Message, TextContent, ToolResultMessage, UserMessage } from "../src/types.ts";
 
 const FFFD = "\uFFFD";
 const UNPAIRED_HIGH = "\uD834";

@@ -331,9 +331,7 @@ export function sanitizeMessages(messages: Message[]): Message[] {
  */
 export function sanitizeContext(context: Context): Context {
 	const cleanedPrompt =
-		typeof context.systemPrompt === "string"
-			? sanitizeRequestText(context.systemPrompt)
-			: context.systemPrompt;
+		typeof context.systemPrompt === "string" ? sanitizeRequestText(context.systemPrompt) : context.systemPrompt;
 	const cleanedMessages = sanitizeMessages(context.messages);
 	if (cleanedPrompt === context.systemPrompt && cleanedMessages === context.messages) {
 		return context;
