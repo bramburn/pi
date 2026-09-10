@@ -26,6 +26,16 @@ export interface NormalizedProviderError {
 	messageCarriesBody: boolean;
 }
 
+/**
+ * Coarse classification of an HTTP error body. Used to decide whether
+ * `formatProviderError` should hide the body (HTML / Cloudflare challenge)
+ * or surface it as-is (JSON / plain text).
+ *
+ * Exported for tests and for callers that want to inspect how the body was
+ * classified (e.g. for logging).
+ */
+export type ErrorBodyKind = "json" | "html" | "cloudflare-challenge" | "text";
+
 type SdkErrorShape = Error & {
 	statusCode?: unknown;
 	status?: unknown;
@@ -131,7 +141,81 @@ export function formatProviderError(norm: NormalizedProviderError, prefix?: stri
 			? `${prefix} (${norm.status}): ${norm.message}`
 			: norm.message;
 	}
+	const placeholder = buildHtmlBodyPlaceholder(norm.status, norm.body, prefix);
+	if (placeholder !== undefined) return placeholder;
 	return prefix !== undefined ? `${prefix} (${norm.status}): ${norm.body}` : `${norm.status}: ${norm.body}`;
+}
+
+/**
+ * Coarse classification of an HTTP error body. Detection is by a small set
+ * of markers, not full HTML parsing, so the catch path stays cheap.
+ *
+ * The body may have been re-stringified from a parsed JSON object (the openai
+ * SDK keeps parsed error bodies on `error.error` and `extractBody` re-emits
+ * them), so when the prefix is a JSON delimiter, we ALSO scan inside the
+ * stringified values for HTML or Cloudflare markers — otherwise an HTML
+ * payload wrapped as `{"error":{"message":"<!DOCTYPE ..."}}` would slip past.
+ */
+export function classifyErrorBody(body: string | undefined): ErrorBodyKind {
+	if (body === undefined || body.length === 0) return "text";
+	// Cloudflare challenge/turnstile pages embed `__CF$cv$params` (a JS
+	// payload seen in the wild) or `cf-chl-bypass` markup. The relevant
+	// script is near the end of the page, so scan the full body.
+	if (/__CF\$cv\$params/.test(body) || /__CF\$cv\$invoke/.test(body) || /cf-chl-bypass/i.test(body)) {
+		return "cloudflare-challenge";
+	}
+	const trimmedStart = body.trimStart();
+	if (
+		trimmedStart.startsWith("<!DOCTYPE") ||
+		trimmedStart.startsWith("<!doctype") ||
+		trimmedStart.startsWith("<HTML") ||
+		trimmedStart.startsWith("<html") ||
+		trimmedStart.startsWith("<?xml")
+	) {
+		return "html";
+	}
+	if (trimmedStart.startsWith("{") || trimmedStart.startsWith("[")) {
+		// Inside a JSON document, an HTML payload typically appears as a
+		// string value. Detect the open tag of an HTML payload.
+		if (/<!DOCTYPE|<HTML|<html|<\?xml|<body/i.test(body)) return "html";
+		return "json";
+	}
+	return "text";
+}
+
+/**
+ * Extract the Cloudflare request id from a challenge page body. The marker
+ * is `__CF$cv$params={r:'<hex>',t:'<digits>'}`. The regex stops at the first
+ * hex-looking sequence so it works even when the page is truncated.
+ *
+ * Returns undefined when the body does not contain the marker.
+ */
+export function extractCloudflareRequestId(body: string): string | undefined {
+	const match = body.match(/__CF\$cv\$params[^}]*?r:["']([0-9a-fA-F]+)["']/);
+	return match?.[1];
+}
+
+/**
+ * Build a one-line placeholder error for HTML / Cloudflare-challenge bodies.
+ * Returns undefined when the body should pass through unchanged.
+ *
+ * The placeholder references the provider prefix (when supplied) plus the
+ * HTTP status. For Cloudflare challenges, the CF request id is appended so
+ * the user has a stable reference when contacting support.
+ */
+function buildHtmlBodyPlaceholder(status: number, body: string, prefix: string | undefined): string | undefined {
+	const kind = classifyErrorBody(body);
+	if (kind !== "html" && kind !== "cloudflare-challenge") return undefined;
+	const head = prefix !== undefined ? `${prefix} (${status})` : `${status}`;
+	if (kind === "cloudflare-challenge") {
+		const cfId = extractCloudflareRequestId(body);
+		const suffix =
+			cfId !== undefined
+				? `; the provider is behind Cloudflare and served a challenge page (cf-request-id: ${cfId})`
+				: "; the provider is behind Cloudflare and served a challenge page";
+		return `${head}: unexpected HTML response${suffix}`;
+	}
+	return `${head}: unexpected HTML response from the provider; the response body was hidden`;
 }
 
 export function truncateErrorText(text: string, maxChars: number): string {

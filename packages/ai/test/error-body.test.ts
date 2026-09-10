@@ -6,7 +6,13 @@
 // parsed-body edge case, and the formatProviderError compose helper.
 
 import { describe, expect, it } from "vitest";
-import { formatProviderError, MAX_PROVIDER_ERROR_BODY_CHARS, normalizeProviderError } from "../src/utils/error-body.ts";
+import {
+	classifyErrorBody,
+	extractCloudflareRequestId,
+	formatProviderError,
+	MAX_PROVIDER_ERROR_BODY_CHARS,
+	normalizeProviderError,
+} from "../src/utils/error-body.ts";
 
 describe("normalizeProviderError", () => {
 	it("extracts status and body from a Mistral-shaped error", () => {
@@ -222,5 +228,145 @@ describe("formatProviderError", () => {
 		const norm = normalizeProviderError({ reason: "boom" });
 
 		expect(formatProviderError(norm)).toBe('{"reason":"boom"}');
+	});
+});
+
+describe("classifyErrorBody", () => {
+	it("classifies a Cloudflare challenge body", () => {
+		const body =
+			"<!DOCTYPE html><html><body>404: Not Found<script>__CF$cv$params={r:'a391f29a4ad3ed0c',t:'MTc4OTA4MDE2NQ=='}</script></body></html>";
+		expect(classifyErrorBody(body)).toBe("cloudflare-challenge");
+	});
+
+	it("classifies a Next.js HTML 404 as html", () => {
+		expect(classifyErrorBody("<!DOCTYPE html><html><body><h2>404: Not Found</h2></body></html>")).toBe("html");
+	});
+
+	it("classifies upper-case HTML and xml prolog as html", () => {
+		expect(classifyErrorBody("<HTML><body></body></HTML>")).toBe("html");
+		expect(classifyErrorBody('<?xml version="1.0" encoding="UTF-8"?><root/>')).toBe("html");
+	});
+
+	it("passes JSON through unchanged", () => {
+		expect(classifyErrorBody('{"error":"blocked by gateway WAF"}')).toBe("json");
+		expect(classifyErrorBody("[1, 2, 3]")).toBe("json");
+	});
+
+	it("falls back to text for plain strings", () => {
+		expect(classifyErrorBody("upstream exploded")).toBe("text");
+	});
+
+	it("returns text for an empty or missing body", () => {
+		expect(classifyErrorBody("")).toBe("text");
+		expect(classifyErrorBody(undefined)).toBe("text");
+	});
+});
+
+describe("extractCloudflareRequestId", () => {
+	it("returns the r value from __CF$cv$params", () => {
+		const body = "...<script>...window.__CF$cv$params={r:'a391f29a4ad3ed0c',t:'MTc4OTA4MDE2NQ=='};</script>";
+		expect(extractCloudflareRequestId(body)).toBe("a391f29a4ad3ed0c");
+	});
+
+	it("works with double quotes around the r value", () => {
+		const body = '__CF$cv$params={r:"deadbeef",t:"1"}';
+		expect(extractCloudflareRequestId(body)).toBe("deadbeef");
+	});
+
+	it("returns undefined when the marker is missing", () => {
+		expect(extractCloudflareRequestId("<html>not a challenge</html>")).toBeUndefined();
+	});
+});
+
+describe("formatProviderError with HTML / Cloudflare-challenge bodies", () => {
+	const htmlBody =
+		"<!DOCTYPE html><html data-dpl-id=\"dpl_881zSnaBmgZRtstbA6dF8YS5Qui5\" id=\"__next_error__\"><head>...</head><body><h2>404: Not Found</h2><script>(function(){...window.__CF$cv$params={r:'a391f29a4ad3ed0c',t:'MTc4OTA4MDE2NQ=='};...</script></body></html>";
+
+	it("replaces an HTML body with a short placeholder (no raw HTML in the output)", () => {
+		const norm = normalizeProviderError(
+			Object.assign(new Error("404 status code (no body)"), {
+				status: 404,
+				error: { error: { message: htmlBody } },
+			}),
+		);
+
+		const formatted = formatProviderError(norm);
+
+		expect(formatted).toContain("404");
+		expect(formatted).not.toContain("<!DOCTYPE");
+		expect(formatted).not.toContain("__next_error__");
+		expect(formatted).not.toContain(htmlBody);
+	});
+
+	it("includes the Cloudflare request-id when the body is a CF challenge page", () => {
+		const norm = normalizeProviderError(
+			Object.assign(new Error("404 status code (no body)"), {
+				status: 404,
+				error: { error: { message: htmlBody } },
+			}),
+		);
+
+		const formatted = formatProviderError(norm, "OpenRouter API error");
+
+		expect(formatted).toBe(
+			"OpenRouter API error (404): unexpected HTML response; the provider is behind Cloudflare and served a challenge page (cf-request-id: a391f29a4ad3ed0c)",
+		);
+	});
+
+	it("falls back to a generic CF message when the request-id cannot be extracted", () => {
+		const cfBody = "<!DOCTYPE html><html><body><script>__CF$cv$params={t:'MTc4OTA4MDE2NQ=='}</script></body></html>";
+		const norm = normalizeProviderError(
+			Object.assign(new Error("404 status code (no body)"), {
+				status: 404,
+				error: { error: { message: cfBody } },
+			}),
+		);
+
+		const formatted = formatProviderError(norm, "OpenRouter");
+
+		expect(formatted).toBe(
+			"OpenRouter (404): unexpected HTML response; the provider is behind Cloudflare and served a challenge page",
+		);
+	});
+
+	it("still surfaces a plain JSON body verbatim", () => {
+		const norm = normalizeProviderError(
+			Object.assign(new Error("400 status code (no body)"), {
+				status: 400,
+				error: { error: "blocked by gateway WAF" },
+			}),
+		);
+
+		const formatted = formatProviderError(norm, "OpenAI API error");
+
+		expect(formatted).toBe('OpenAI API error (400): {"error":"blocked by gateway WAF"}');
+	});
+
+	it("handles an HTML 5xx body via the placeholder", () => {
+		const body = "<!DOCTYPE html><html><body><h1>502 Bad Gateway</h1></body></html>";
+		const norm = normalizeProviderError(
+			Object.assign(new Error("502 status code (no body)"), {
+				status: 502,
+				error: { error: { message: body } },
+			}),
+		);
+
+		const formatted = formatProviderError(norm, "OpenRouter");
+
+		expect(formatted).toBe(
+			"OpenRouter (502): unexpected HTML response from the provider; the response body was hidden",
+		);
+	});
+
+	it("returns the bare message when body is undefined", () => {
+		const norm: { status?: number; body?: string; message: string; messageCarriesBody: boolean } = {
+			status: undefined,
+			body: undefined,
+			message: "connection reset",
+			messageCarriesBody: true,
+		};
+
+		expect(formatProviderError(norm)).toBe("connection reset");
+		expect(formatProviderError(norm, "OpenRouter")).toBe("connection reset");
 	});
 });
