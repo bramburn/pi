@@ -136,14 +136,35 @@ function isPlainNonEmptyObject(value: unknown): boolean {
  * - prefix:    `"<prefix> (<status>): <body>"`
  */
 export function formatProviderError(norm: NormalizedProviderError, prefix?: string): string {
+	// The openai SDK folds non-JSON response bodies into `error.message`
+	// itself (it only attaches the body as a parsed object on `error.error`
+	// when the body parses as JSON). HTML responses therefore arrive with
+	// `messageCarriesBody === true` and the raw markup sitting in
+	// `norm.message` — classify `message` first so the placeholder path
+	// catches the actual production code path.
+	const messageAsPlaceholder = buildHtmlBodyPlaceholder(norm.status, norm.message, prefix, true);
+	if (messageAsPlaceholder !== undefined) return messageAsPlaceholder;
 	if (norm.messageCarriesBody || norm.status === undefined || norm.body === undefined) {
 		return prefix !== undefined && norm.status !== undefined
 			? `${prefix} (${norm.status}): ${norm.message}`
 			: norm.message;
 	}
-	const placeholder = buildHtmlBodyPlaceholder(norm.status, norm.body, prefix);
-	if (placeholder !== undefined) return placeholder;
+	const bodyAsPlaceholder = buildHtmlBodyPlaceholder(norm.status, norm.body, prefix, false);
+	if (bodyAsPlaceholder !== undefined) return bodyAsPlaceholder;
 	return prefix !== undefined ? `${prefix} (${norm.status}): ${norm.body}` : `${norm.status}: ${norm.body}`;
+}
+
+/**
+ * Strip the `<status> ` prefix that the openai SDK prepends to non-JSON
+ * response bodies in `error.message` (built by `makeMessage(status, errJSON,
+ * errMessage)`). Returns the rest of the message unchanged when no leading
+ * numeric prefix is found.
+ *
+ * Exported for tests and for callers that want to look at the body that
+ * the SDK actually received.
+ */
+export function stripSdkStatusPrefix(message: string): string {
+	return message.replace(/^\d{3}\s*/, "");
 }
 
 /**
@@ -155,16 +176,21 @@ export function formatProviderError(norm: NormalizedProviderError, prefix?: stri
  * them), so when the prefix is a JSON delimiter, we ALSO scan inside the
  * stringified values for HTML or Cloudflare markers — otherwise an HTML
  * payload wrapped as `{"error":{"message":"<!DOCTYPE ..."}}` would slip past.
+ *
+ * Pass `stripSdkPrefix: true` when classifying an openai SDK
+ * `error.message` (which has a `<status> ` prefix); the helper strips it
+ * before scanning.
  */
-export function classifyErrorBody(body: string | undefined): ErrorBodyKind {
+export function classifyErrorBody(body: string | undefined, stripSdkPrefix = false): ErrorBodyKind {
 	if (body === undefined || body.length === 0) return "text";
+	const target = stripSdkPrefix ? stripSdkStatusPrefix(body) : body;
 	// Cloudflare challenge/turnstile pages embed `__CF$cv$params` (a JS
 	// payload seen in the wild) or `cf-chl-bypass` markup. The relevant
 	// script is near the end of the page, so scan the full body.
-	if (/__CF\$cv\$params/.test(body) || /__CF\$cv\$invoke/.test(body) || /cf-chl-bypass/i.test(body)) {
+	if (/__CF\$cv\$params/.test(target) || /__CF\$cv\$invoke/.test(target) || /cf-chl-bypass/i.test(target)) {
 		return "cloudflare-challenge";
 	}
-	const trimmedStart = body.trimStart();
+	const trimmedStart = target.trimStart();
 	if (
 		trimmedStart.startsWith("<!DOCTYPE") ||
 		trimmedStart.startsWith("<!doctype") ||
@@ -177,7 +203,7 @@ export function classifyErrorBody(body: string | undefined): ErrorBodyKind {
 	if (trimmedStart.startsWith("{") || trimmedStart.startsWith("[")) {
 		// Inside a JSON document, an HTML payload typically appears as a
 		// string value. Detect the open tag of an HTML payload.
-		if (/<!DOCTYPE|<HTML|<html|<\?xml|<body/i.test(body)) return "html";
+		if (/<!DOCTYPE|<HTML|<html|<\?xml|<body/i.test(target)) return "html";
 		return "json";
 	}
 	return "text";
@@ -203,19 +229,27 @@ export function extractCloudflareRequestId(body: string): string | undefined {
  * HTTP status. For Cloudflare challenges, the CF request id is appended so
  * the user has a stable reference when contacting support.
  */
-function buildHtmlBodyPlaceholder(status: number, body: string, prefix: string | undefined): string | undefined {
-	const kind = classifyErrorBody(body);
+function buildHtmlBodyPlaceholder(
+	status: number | undefined,
+	body: string,
+	prefix: string | undefined,
+	stripSdkPrefix: boolean,
+): string | undefined {
+	const kind = classifyErrorBody(body, stripSdkPrefix);
 	if (kind !== "html" && kind !== "cloudflare-challenge") return undefined;
-	const head = prefix !== undefined ? `${prefix} (${status})` : `${status}`;
+	const headParts: string[] = [];
+	if (prefix !== undefined) headParts.push(prefix);
+	if (status !== undefined) headParts.push(`(${status})`);
+	const head = headParts.length > 0 ? `${headParts.join(" ")}: ` : "";
 	if (kind === "cloudflare-challenge") {
 		const cfId = extractCloudflareRequestId(body);
 		const suffix =
 			cfId !== undefined
 				? `; the provider is behind Cloudflare and served a challenge page (cf-request-id: ${cfId})`
 				: "; the provider is behind Cloudflare and served a challenge page";
-		return `${head}: unexpected HTML response${suffix}`;
+		return `${head}unexpected HTML response${suffix}`;
 	}
-	return `${head}: unexpected HTML response from the provider; the response body was hidden`;
+	return `${head}unexpected HTML response from the provider; the response body was hidden`;
 }
 
 export function truncateErrorText(text: string, maxChars: number): string {

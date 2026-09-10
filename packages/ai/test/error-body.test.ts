@@ -369,4 +369,38 @@ describe("formatProviderError with HTML / Cloudflare-challenge bodies", () => {
 		expect(formatProviderError(norm)).toBe("connection reset");
 		expect(formatProviderError(norm, "OpenRouter")).toBe("connection reset");
 	});
+
+	it("replaces the HTML markup when the openai SDK folded it into error.message (the realistic path)", () => {
+		// openai SDK APIError: when the response body is not valid JSON (e.g. an
+		// HTML 4xx page), the SDK leaves `error.error` undefined and puts the raw
+		// body into `error.message` as "<status> <body>". `extractBody` returns
+		// undefined in that shape, so `norm.messageCarriesBody` is true. The
+		// placeholder path must still trigger off `norm.message`.
+		const htmlBody =
+			"<!DOCTYPE html><html id=\"__next_error__\"><body><h2>404: Not Found</h2><script>window.__CF$cv$params={r:'a391f29a4ad3ed0c',t:'MTc4OTA4MDE2NQ=='};</script></body></html>";
+		const error = Object.assign(new Error(`404 ${htmlBody}`), { status: 404 });
+		const norm = normalizeProviderError(error);
+
+		const formatted = formatProviderError(norm, "OpenRouter API error");
+
+		expect(formatted).toBe(
+			"OpenRouter API error (404): unexpected HTML response; the provider is behind Cloudflare and served a challenge page (cf-request-id: a391f29a4ad3ed0c)",
+		);
+		// Raw markup must NOT leak through.
+		expect(formatted).not.toContain("<!DOCTYPE");
+		expect(formatted).not.toContain("<html");
+		expect(formatted).not.toContain(htmlBody);
+	});
+
+	it("replaces plain HTML in error.message without a CF id", () => {
+		const htmlBody = "<!DOCTYPE html><html><body><h1>502 Bad Gateway</h1></body></html>";
+		const error = Object.assign(new Error(`502 ${htmlBody}`), { status: 502 });
+		const norm = normalizeProviderError(error);
+
+		const formatted = formatProviderError(norm, "OpenRouter");
+
+		expect(formatted).toBe(
+			"OpenRouter (502): unexpected HTML response from the provider; the response body was hidden",
+		);
+	});
 });
