@@ -12,8 +12,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	cherryPickFromBranch,
-	currentHead,
 	createWorktree,
+	currentHead,
 	diffVsParent,
 	experimentsRootPath,
 	isGitRepo,

@@ -53,9 +53,7 @@ describe("RunParams", () => {
 	});
 
 	it("accepts optional timeout_ms", () => {
-		expect(
-			isValid(RunParams, { experiment_id: "exp-1", command: "echo hi", timeout_ms: 1000 }),
-		).toBe(true);
+		expect(isValid(RunParams, { experiment_id: "exp-1", command: "echo hi", timeout_ms: 1000 })).toBe(true);
 	});
 });
 
@@ -148,9 +146,7 @@ describe("CompareParams", () => {
 	});
 
 	it("accepts optional axes array", () => {
-		expect(isValid(CompareParams, { exp_id_1: "a", exp_id_2: "b", axes: ["speed", "memory"] })).toBe(
-			true,
-		);
+		expect(isValid(CompareParams, { exp_id_1: "a", exp_id_2: "b", axes: ["speed", "memory"] })).toBe(true);
 	});
 });
 

@@ -8,15 +8,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	addExperiment,
+	type ExperimentRow,
 	experimentDir,
 	experimentsDir,
 	getExperiment,
-	listExperiments,
 	LOCK_FILE_NAME,
+	listExperiments,
 	makeExperimentId,
-	readRegistry,
 	REGISTRY_VERSION,
-	type ExperimentRow,
+	readRegistry,
 	updateExperiment,
 	withWriteLock,
 } from "../src/registry.ts";
@@ -86,11 +86,7 @@ describe("readRegistry", () => {
 
 	it("returns empty registry when version mismatch", () => {
 		const dir = experimentsDir(repoRoot);
-		writeFileSync(
-			join(dir, "registry.json"),
-			JSON.stringify({ version: 999, experiments: [{ id: "x" }] }),
-			"utf-8",
-		);
+		writeFileSync(join(dir, "registry.json"), JSON.stringify({ version: 999, experiments: [{ id: "x" }] }), "utf-8");
 		const reg = readRegistry(repoRoot);
 		expect(reg.experiments).toEqual([]);
 	});

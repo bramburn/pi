@@ -40,10 +40,7 @@ export interface MockPi {
 	flags: Map<string, unknown>;
 	registerTool: (def: MockToolRegistration) => void;
 	registerCommand: (name: string, def: { description?: string; handler: MockCommandRegistration["handler"] }) => void;
-	registerShortcut: (
-		key: string,
-		def: { description?: string; handler: MockShortcutRegistration["handler"] },
-	) => void;
+	registerShortcut: (key: string, def: { description?: string; handler: MockShortcutRegistration["handler"] }) => void;
 	on: (event: string, handler: (...args: unknown[]) => unknown) => void;
 	getFlag: (key: string) => unknown;
 	sendMessage: (...args: unknown[]) => void;

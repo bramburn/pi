@@ -1,12 +1,12 @@
 /**
  * Test utilities for the @earendil-works/pi-subagent package.
  *
- * Re-exports the in-memory spawn/gIT/registry fakes plus a mock ExtensionAPI
- * stub. Consumed by unit tests under `test/**/*.test.ts`.
+ * Re-exports the in-memory spawn/git/registry fakes plus a mock ExtensionAPI
+ * stub. Consumed by unit tests under `test/(star)(star)/(star).test.ts`.
  */
 
-import type { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
+import type { Readable } from "node:stream";
 
 export interface SpawnInvocation {
 	command: string;
@@ -48,13 +48,11 @@ export function createFakeSpawn(opts: { pid?: number; signal?: AbortSignal } = {
 	const stderr = new EventEmitter() as unknown as Readable;
 	const procEmitter = new EventEmitter();
 
-	let killCalled = false;
 	const handle: FakeSpawnHandle = {
 		stdout,
 		stderr,
 		pid: opts.pid ?? 12345,
 		kill(signal?: NodeJS.Signals) {
-			killCalled = true;
 			procEmitter.emit("close", null, signal ?? "SIGTERM");
 			return true;
 		},

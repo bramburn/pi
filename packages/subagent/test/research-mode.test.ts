@@ -39,13 +39,7 @@ describe("ResearchModeTracker", () => {
 		tracker.recordToolResult("s1", "bash", true, "ENOENT:  no  such  file\n", undefined);
 		// Same core message but with extra padding — still normalised to the
 		// same fingerprint (whitespace collapsed, leading/trailing trimmed).
-		const fired = tracker.recordToolResult(
-			"s1",
-			"bash",
-			true,
-			"  ENOENT: no such file   ",
-			undefined,
-		);
+		const fired = tracker.recordToolResult("s1", "bash", true, "  ENOENT: no such file   ", undefined);
 		expect(fired).toBe(true);
 	});
 

@@ -10,12 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	appendLogEvent,
-	ensureLogFile,
-	runCommand,
-	runCommandSequence,
-} from "../src/runner.ts";
+import { appendLogEvent, ensureLogFile, runCommand, runCommandSequence } from "../src/runner.ts";
 
 let tmp: string;
 
@@ -59,28 +54,27 @@ describe("appendLogEvent", () => {
 
 describe("runCommand", () => {
 	it("captures exit code 0 for a successful command", async () => {
-		const result = await runCommand("node -e \"process.exit(0)\"", { cwd: tmp });
+		const result = await runCommand('node -e "process.exit(0)"', { cwd: tmp });
 		expect(result.exitCode).toBe(0);
 		expect(result.timedOut).toBe(false);
 		expect(result.cancelled).toBe(false);
 	});
 
 	it("captures non-zero exit code", async () => {
-		const result = await runCommand("node -e \"process.exit(3)\"", { cwd: tmp });
+		const result = await runCommand('node -e "process.exit(3)"', { cwd: tmp });
 		expect(result.exitCode).toBe(3);
 	});
 
 	it("captures stdout and stderr", async () => {
-		const result = await runCommand(
-			"node -e \"process.stdout.write('hi'); process.stderr.write('bye')\"",
-			{ cwd: tmp },
-		);
+		const result = await runCommand("node -e \"process.stdout.write('hi'); process.stderr.write('bye')\"", {
+			cwd: tmp,
+		});
 		expect(result.stdout).toContain("hi");
 		expect(result.stderr).toContain("bye");
 	});
 
 	it("records duration in ms", async () => {
-		const result = await runCommand("node -e \"setTimeout(() => process.exit(0), 50)\"", { cwd: tmp });
+		const result = await runCommand('node -e "setTimeout(() => process.exit(0), 50)"', { cwd: tmp });
 		expect(result.durationMs).toBeGreaterThanOrEqual(40);
 	});
 
@@ -88,7 +82,7 @@ describe("runCommand", () => {
 		// On Windows, `proc.kill("SIGTERM")` does not actually terminate the
 		// child (no signal handlers in the Node subprocess), so this test only
 		// runs on POSIX where kill semantics are well-defined.
-		const result = await runCommand("node -e \"setTimeout(() => process.exit(0), 60_000)\"", {
+		const result = await runCommand('node -e "setTimeout(() => process.exit(0), 60_000)"', {
 			cwd: tmp,
 			timeoutMs: 200,
 		});
@@ -99,7 +93,7 @@ describe("runCommand", () => {
 	it("honors an already-aborted signal", async () => {
 		const controller = new AbortController();
 		controller.abort();
-		const result = await runCommand("node -e \"setTimeout(() => process.exit(0), 5000)\"", {
+		const result = await runCommand('node -e "setTimeout(() => process.exit(0), 5000)"', {
 			cwd: tmp,
 			signal: controller.signal,
 		});
@@ -137,7 +131,7 @@ describe("runCommand", () => {
 describe("runCommandSequence", () => {
 	it("runs commands serially and stops on first failure", async () => {
 		const results = await runCommandSequence(
-			["node -e \"process.exit(0)\"", "node -e \"process.exit(7)\"", "node -e \"process.exit(0)\""],
+			['node -e "process.exit(0)"', 'node -e "process.exit(7)"', 'node -e "process.exit(0)"'],
 			{ cwd: tmp },
 		);
 		expect(results).toHaveLength(2);
@@ -147,7 +141,7 @@ describe("runCommandSequence", () => {
 
 	it("continues on error when continueOnError is set", async () => {
 		const results = await runCommandSequence(
-			["node -e \"process.exit(0)\"", "node -e \"process.exit(7)\"", "node -e \"process.exit(0)\""],
+			['node -e "process.exit(0)"', 'node -e "process.exit(7)"', 'node -e "process.exit(0)"'],
 			{ cwd: tmp, continueOnError: true },
 		);
 		expect(results).toHaveLength(3);
