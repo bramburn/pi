@@ -23,7 +23,7 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist coverage .nyc_output",
-		"build": "tsgo -p tsconfig.build.json && shx cp -r agents dist/ && shx cp -r prompts dist/",
+		"build": "tsgo -p tsconfig.build.json && shx cp -r agents dist/ && shx mkdir -p dist/prompts && shx cp src/prompts/*.md dist/prompts/",
 		"test": "vitest --run",
 		"test:watch": "vitest",
 		"test:coverage": "vitest --run --coverage",
