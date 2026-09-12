@@ -4,6 +4,7 @@
 
 import type { BackgroundTask } from "../src/background.ts";
 import { buildStatusInjection } from "../src/status-injector.ts";
+import { describe, expect, it } from "vitest";
 
 function makeTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
 	return {

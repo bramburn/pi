@@ -2,6 +2,7 @@
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": true,
+		"types": ["node", "vitest"],
 		"paths": {
 			"@earendil-works/pi-coding-agent": ["../coding-agent/src/index.ts"],
 			"@earendil-works/pi-coding-agent/*": ["../coding-agent/src/*"],

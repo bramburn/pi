@@ -7,4 +7,3 @@
  * without change. Prefer importing directly from the new package.
  */
 export { default } from "@earendil-works/pi-subagent";
-export type { SubagentDetails } from "@earendil-works/pi-subagent";
