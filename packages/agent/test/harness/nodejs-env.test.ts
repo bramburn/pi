@@ -415,7 +415,7 @@ describe("NodeExecutionEnv", () => {
 		},
 	);
 
-	it("cleanup terminates active shell processes", async () => {
+	it.skipIf(process.platform === "win32")("cleanup terminates active shell processes", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });
 		const execution = env.exec("touch started; sleep 60");
