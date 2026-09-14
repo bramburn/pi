@@ -13,7 +13,7 @@
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
-		"build": "cd packages/tui && npm run build && cd ../telemetry && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build",
+		"build": "bun run --cwd packages/tui build && bun run --cwd packages/telemetry build && bun run --cwd packages/ai build && bun run --cwd packages/agent build && bun run --cwd packages/session-backends/sqlite-node build && bun run --cwd packages/protocol build && bun run --cwd packages/client build && bun run --cwd packages/server build && bun run --cwd packages/coding-agent build",
 		"build:offline": "cd packages/tui && npm run build && cd ../telemetry && npm run build && cd ../ai && npm run build:offline && cd ../agent && npm run build && cd ../session-backends/sqlite-node && npm run build && cd ../../protocol && npm run build && cd ../client && npm run build && cd ../server && npm run build && cd ../coding-agent && npm run build",
 		"check": "biome check --write --error-on-warnings --no-errors-on-unmatched . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:browser-smoke",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",

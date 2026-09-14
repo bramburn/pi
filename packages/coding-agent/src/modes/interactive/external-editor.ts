@@ -56,7 +56,7 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 		// (e.g. `C:\Program Files\Vim\vim.exe`), quote it before passing to the
 		// shell. POSIX keeps `shell: false` so the kernel receives a clean argv.
 		const exitCode = await new Promise<number | null>((resolve) => {
-			let child;
+			let child: ReturnType<typeof spawn>;
 			if (process.platform === "win32") {
 				const quoted = [editor, ...editorArgs]
 					.map((arg) => (/\s|"/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
