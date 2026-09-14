@@ -1,0 +1,64 @@
+{
+	"name": "@earendil-works/pi-subagent",
+	"version": "0.84.5",
+	"description": "Subagent delegation + worktree-based experimental mode for pi.dev",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"pi": {
+		"extensions": ["./dist/index.js"]
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"agents",
+		"prompts",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist coverage .nyc_output",
+		"build": "tsgo -p tsconfig.build.json && shx cp -r agents dist/ && shx mkdir -p dist/prompts && shx cp src/prompts/*.md dist/prompts/",
+		"test": "vitest --run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest --run --coverage",
+		"lint": "biome check src test",
+		"prepublishOnly": "npm run clean && npm run build && npm run test:coverage"
+	},
+	"dependencies": {
+		"@earendil-works/pi-agent-core": "^0.84.5",
+		"@earendil-works/pi-ai": "^0.84.5",
+		"@earendil-works/pi-coding-agent": "^0.84.5",
+		"@earendil-works/pi-tui": "^0.84.5",
+		"typebox": "1.3.7"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.19",
+		"@vitest/coverage-v8": "4.1.9",
+		"shx": "0.4.0",
+		"typescript": "5.9.3",
+		"vitest": "4.1.9"
+	},
+	"keywords": [
+		"pi",
+		"extension",
+		"subagent",
+		"experimental",
+		"worktree"
+	],
+	"author": "Bramburn",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/subagent"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
