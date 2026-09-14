@@ -88,10 +88,22 @@ if [[ "$OUTPUT_DIR" != /* ]]; then
 fi
 
 if [[ "$SKIP_INSTALL" == "false" ]]; then
-    echo "==> Installing dependencies..."
-    npm ci --ignore-scripts
+ echo "==> Installing dependencies..."
+ # Use bun install when available (matches ci.yml + publish.yml).
+ # npm ci refuses to install cross-platform optional deps
+ # (e.g. `@mariozechner/clipboard-darwin-arm64`) on linux-x64
+ # runners, so a plain `npm ci --ignore-scripts` aborts the build
+ # before the cross-platform deps workaround below can run.
+ # `--linker=hoisted` matches ci.yml so transitive deps resolve at
+ # the conventional `node_modules/<scope>/<name>` paths (e.g. for
+ # `tsgo` and downstream scripts that read from the tree).
+ if command -v bun >/dev/null 2>&1; then
+ bun install --ignore-scripts --linker=hoisted
+ else
+ npm ci --ignore-scripts --no-optional
+ fi
 else
-    echo "==> Skipping npm ci (--skip-install)"
+ echo "==> Skipping install (--skip-install)"
 fi
 
 if [[ "$SKIP_DEPS" == "false" ]]; then
