@@ -57,7 +57,8 @@
 		"directory": "packages/agent"
 	},
 	"engines": {
-		"node": ">=22.19.0"
+		"node": ">=22.19.0",
+		"bun": ">=1.3.14"
 	},
 	"devDependencies": {
 		"@types/node": "22.19.19",

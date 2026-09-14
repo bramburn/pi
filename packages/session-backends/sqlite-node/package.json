@@ -31,7 +31,8 @@
 		"directory": "packages/session-backends/sqlite-node"
 	},
 	"engines": {
-		"node": ">=22.19.0"
+		"node": ">=22.19.0",
+		"bun": ">=1.3.14"
 	},
 	"dependencies": {
 		"@earendil-works/pi-ai": "^0.84.5",
