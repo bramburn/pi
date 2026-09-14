@@ -130,24 +130,78 @@ function registryTarballUrl(packageName, version) {
 	return `https://registry.npmjs.org/${packageName}/-/${tarballName}-${version}.tgz`;
 }
 
+function isInternalPackageName(name) {
+	return typeof name === "string" && name.startsWith(internalPackagePrefix);
+}
+
+function swapForkScope(name) {
+	// Map the upstream workspace scope to the fork scope (and back),
+	// preserving the `pi-` segment so `@earendil-works/pi-agent-core`
+	// maps to `@bramburn/pi-agent-core` (not `@bramburn/agent-core`).
+	if (typeof name !== "string") return name;
+	if (name.startsWith(`${internalPackagePrefix}`)) {
+		return `@bramburn/pi-${name.slice(internalPackagePrefix.length)}`;
+	}
+	if (name.startsWith("@bramburn/pi-")) {
+		return `${internalPackagePrefix}${name.slice("@bramburn/pi-".length)}`;
+	}
+	return name;
+}
+
 function getInternalWorkspaces(lockPackages) {
 	const workspaces = new Map();
 
 	for (const [lockPath, entry] of Object.entries(lockPackages)) {
-		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.name || !entry.version) {
+		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.version) {
 			continue;
 		}
-		if (!entry.name.startsWith(internalPackagePrefix)) {
+		let packageJson;
+		try {
+			packageJson = readJson(join(repoRoot, lockPath, "package.json"));
+		} catch {
+			continue;
+		}
+		// Accept the workspace if either the lockfile's recorded name or the
+		// on-disk package.json's name is under the internal prefix. After
+		// `fork-publish-rename.mjs` swaps the publishing package's name and
+		// workspace deps, the publishing package.json lists deps under
+		// `@bramburn/pi-*` while the lockfile and other workspace
+		// package.json files still use `@earendil-works/pi-*`. The shrinkwrap
+		// must therefore resolve either spelling back to the same workspace.
+		const lockName = isInternalPackageName(entry.name) ? entry.name : undefined;
+		const pkgName = isInternalPackageName(packageJson.name) ? packageJson.name : undefined;
+		if (!lockName && !pkgName) {
 			continue;
 		}
 
-		workspaces.set(entry.name, {
+		workspaces.set(lockPath, {
 			lockPath,
-			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
+			lockName: lockName ?? entry.name,
+			pkgName: pkgName ?? packageJson.name,
+			packageJson,
 		});
 	}
 
 	return workspaces;
+}
+
+function buildInternalWorkspaceIndex(workspaces) {
+	// Index every workspace under its known names plus the swapped fork /
+	// upstream equivalent so lookups succeed regardless of which scope the
+	// caller requests. fork-publish-rename renames the publishing
+	// package's deps to @bramburn/pi-* without touching the lockfile or
+	// other workspaces' package.json files; without this index, the
+	// renamed dep names would resolve to "no matching lockfile entry".
+	const index = new Map();
+	for (const workspace of workspaces.values()) {
+		for (const name of new Set([workspace.lockName, workspace.pkgName])) {
+			if (!name) continue;
+			index.set(name, workspace);
+			const swapped = swapForkScope(name);
+			if (swapped !== name) index.set(swapped, workspace);
+		}
+	}
+	return index;
 }
 
 function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
@@ -297,6 +351,7 @@ function generateShrinkwrap() {
 	const lockPackages = rootLock.packages;
 	const codingAgentPackage = readJson(join(codingAgentDir, "package.json"));
 	const internalWorkspaces = getInternalWorkspaces(lockPackages);
+	const internalWorkspaceIndex = buildInternalWorkspaceIndex(internalWorkspaces);
 	const shrinkwrapPackages = {
 		"": copyPackageJsonEntry(codingAgentPackage, { includeName: true }),
 	};
@@ -310,12 +365,17 @@ function generateShrinkwrap() {
 			break;
 		}
 
-		const workspace = internalWorkspaces.get(item.name);
+		const workspace = internalWorkspaceIndex.get(item.name);
 		if (workspace) {
-			const outputPath = `node_modules/${item.name}`;
-			internalNames.add(item.name);
+			// Preserve the requested name (typically the fork-scope spelling
+			// after fork-publish-rename has rewritten the publishing
+			// package's deps) so the shrinkwrap output's `node_modules/<name>`
+			// paths and resolved tarball URLs match the published tarball.
+			const outputName = item.name ?? workspace.pkgName;
+			const outputPath = `node_modules/${outputName}`;
+			internalNames.add(outputName);
 			if (!addedPaths.has(outputPath)) {
-				addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, item.name, workspace);
+				addInternalWorkspace(shrinkwrapPackages, addedPaths, queue, outputName, workspace);
 			}
 			continue;
 		}
