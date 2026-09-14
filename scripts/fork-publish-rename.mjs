@@ -94,20 +94,11 @@ let exitCode = 0;
 try {
 	let result;
 	if (process.platform === "win32") {
-		// On Windows, `spawnSync` with `shell: true` hands the command line to
-		// cmd.exe, which string-splits on spaces. An absolute executable path
-		// like `C:\Program Files\nodejs\node.exe` would be split into
-		// `C:\Program` (not found) and the rest. To support unit tests that
-		// pass `process.execPath` as the executable, quote every arg that
-		// contains whitespace or a quote character, and pass the joined
-		// command as a single string with empty args.
-		const quoted = [cmd[0], ...cmd.slice(1)]
-			.map((arg) => (/\s|"/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
-			.join(" ");
-		result = spawnSync(quoted, [], {
+		// Avoid manual command-string quoting/escaping on Windows. Passing
+		// executable and args separately lets Node handle argument passing.
+		result = spawnSync(cmd[0], cmd.slice(1), {
 			stdio: "inherit",
 			cwd: resolve(pkgDir),
-			shell: true,
 		});
 	} else {
 		result = spawnSync(cmd[0], cmd.slice(1), {
