@@ -27,6 +27,11 @@ const allowedExternalPackages = new Set([
 	// resolved by Node's runtime loader from node_modules/ at module-load
 	// time, so esbuild does not bundle it.
 	"https-proxy-agent",
+	// Node.js built-in SQLite module. esbuild leaves it as an external
+	// import; resolved at module-load time by the node:sqlite native addon.
+	// `isBuiltin("node:sqlite")` returns false under bun 1.3.x, so the
+	// allowed set is the explicit allowlist.
+	"node:sqlite",
 ]);
 
 const lazyJitiPlugin = {
