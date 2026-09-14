@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.85.0-b1] - 2026-09-14
+
 ### Added
 
 - Added GPT-6 Astra for OpenAI API keys and OpenAI Codex subscriptions.
