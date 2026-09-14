@@ -59,7 +59,9 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 			let child: ReturnType<typeof spawn>;
 			if (process.platform === "win32") {
 				const quoted = [editor, ...editorArgs]
-					.map((arg) => (/\s|"/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+					.map((arg) =>
+						/\s|"/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg,
+					)
 					.join(" ");
 				child = spawn(quoted, [filePath], {
 					stdio: "inherit",
