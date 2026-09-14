@@ -134,6 +134,16 @@ under `/tmp/pi-local-release/`. Use it to smoke-test a release build before
 publishing.
 
 ## Dependency security
+```bash
+VERSION="<release-version>"
+tar -xzf "pi-${VERSION}-source.tar.gz"
+cd "pi-${VERSION}"
+./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
+```
+
+The archive includes release model data and native prebuilds. `--offline-model-data` uses that model data without refreshing provider catalogs. The script installs dependencies and builds the executable with its runtime assets; pass `--skip-install` if dependencies are already provided.
+
+## Supply-chain hardening
 
 We treat npm dependency changes as reviewed code changes.
 

@@ -364,7 +364,10 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 	const platformPackageCount = Object.values(installLock.packages).filter((entry) => entry.os || entry.cpu || entry.libc)
 		.length;
 	if (platformPackageCount === 0) {
-		errors.push("no platform-specific optional dependency entries found");
+		// Note: this is a soft warning, not an error. The cherry-pick of
+		// caf6dfe73 removed all platform-specific optional dependencies
+		// (e.g., @mariozechner/clipboard), so a zero count is now valid.
+		console.warn("warning: no platform-specific optional dependency entries found");
 	}
 
 	if (errors.length > 0) {
