@@ -36,9 +36,17 @@ function run(command, args, options = {}) {
 }
 
 function assertBuildOutputExists(directory) {
-	if (!existsSync(join(directory, "dist"))) {
-		throw new Error(`${directory}/dist does not exist. Run npm run build before publishing.`);
+	// Most packages compile TypeScript into `dist/`. Native packages
+	// (Rust/napi-rs addons, e.g. `@bramburn/pi-clipboard-rs`) ship
+	// prebuilt `.node` files alongside a hand-written `index.js` and
+	// have no `dist/` directory. Treat the presence of either as
+	// proof the package was built; only fail when both are missing.
+	const distDir = join(directory, "dist");
+	const rootIndex = join(directory, "index.js");
+	if (existsSync(distDir) || existsSync(rootIndex)) {
+		return;
 	}
+	throw new Error(`${directory} has neither dist/ nor index.js. Run npm run build before publishing.`);
 }
 
 function validatePack(directory) {
