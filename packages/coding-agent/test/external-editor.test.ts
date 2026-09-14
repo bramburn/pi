@@ -18,7 +18,12 @@ interface EditorCapture {
 // tokenizes correctly when the production function splits on space. Required
 // on Windows because `process.execPath` is `C:\Program Files\nodejs\node.exe`.
 function quoteIfNeeded(value: string): string {
-	return /\s/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+	if (!/\s/.test(value)) {
+		return value;
+	}
+
+	const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	return `"${escaped}"`;
 }
 
 async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
