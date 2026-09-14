@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Helper for the publish workflow: rename package.json to @bramburn/* before
 // npm publish, then restore on exit. Also rewrites every workspace dep under
 // the @earendil-works/pi-* scope and the repository.url so the published

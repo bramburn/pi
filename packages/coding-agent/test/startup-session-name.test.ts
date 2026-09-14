@@ -116,14 +116,15 @@ describe("startup session name", () => {
 	it.skipIf(process.platform === "win32")(
 		"sets --name on the selected session before runtime model validation",
 		async () => {
-		const dirs = setup();
-		const result = await runCli(
-			["--session", dirs.sessionFile, "--name", "  CLI Named Session  ", "--model", "missing-model", "-p", "hi"],
-			dirs,
-		);
+			const dirs = setup();
+			const result = await runCli(
+				["--session", dirs.sessionFile, "--name", "  CLI Named Session  ", "--model", "missing-model", "-p", "hi"],
+				dirs,
+			);
 
-		expect(result.code).toBe(1);
-		expect(result.signal).toBeNull();
-		expect(readSessionInfoNames(dirs.sessionFile)).toEqual(["CLI Named Session"]);
-	});
+			expect(result.code).toBe(1);
+			expect(result.signal).toBeNull();
+			expect(readSessionInfoNames(dirs.sessionFile)).toEqual(["CLI Named Session"]);
+		},
+	);
 });

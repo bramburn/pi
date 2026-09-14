@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { isBuiltin } from "node:module";
