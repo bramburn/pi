@@ -43,11 +43,11 @@ This suffix signals "fork build on the upstream baseline" without colliding with
 ### 4. Regenerate shrinkwrap and install-lock
 
 ```bash
-node scripts/generate-coding-agent-shrinkwrap.mjs
-node scripts/generate-coding-agent-install-lock.mjs
+bun scripts/generate-coding-agent-shrinkwrap.mjs
+bun scripts/generate-coding-agent-install-lock.mjs
 ```
 
-These regenerate the npm shrinkwrap and install-lock files for the `@bramburn/*` scope.
+These regenerate the npm shrinkwrap and install-lock files for the `@bramburn/*` scope. Both scripts run under bun (they invoke npm CLI internally for the actual registry operations where required).
 
 ### 5. Re-apply fork preserves
 
@@ -75,7 +75,7 @@ gh pr create --base fork/main --head sync/upstream-0.85.0 \
   --body "Syncs upstream release 0.85.0 into bramburn/pi."
 ```
 
-CI runs `npm run check`, `npm run build`, and `./test.sh`. Fix any failures before merging.
+CI runs `bun run check`, `bun run build`, and `./test.sh`. Fix any failures before merging.
 
 ### 8. Tag and release
 
@@ -97,6 +97,7 @@ The tag push triggers the fork's CI: builds, runs tests, publishes npm packages 
 | `packages/*/package.json` | Bump to `<version>-b1` |
 | `CHANGELOG.md` files | Append fork-local section under `[Unreleased]` |
 | `AGENTS.md`, `workflows.md` | Keep fork version; append upstream changes |
+| `website/docs/fork/features.mdx` (Runtime support table) | Update after each sync to reflect current fork runtime status |
 | All other files | Accept upstream unless the change breaks fork-specific code |
 
 ## Frequency
