@@ -136,10 +136,10 @@ fi
 if [[ "$SKIP_BUILD" == "false" ]]; then
     if [[ "$OFFLINE_MODEL_DATA" == "true" ]]; then
         echo "==> Building all packages with bundled model data..."
-        npm run build:offline
+        bun run build:offline
     else
         echo "==> Building all packages..."
-        npm run build
+        bun run build
     fi
 else
     echo "==> Skipping package build (--skip-build)"
