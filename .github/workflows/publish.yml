@@ -86,42 +86,43 @@ jobs:
           # restores the original @earendil-works/pi-ai name. This way
           # npm publish publishes under the trusted-publisher-protected
           # name while the workspace name on disk stays untouched.
-          # The trailing '|| echo' makes the step idempotent: re-running
-          # a tag whose version already exists on npm fails fast at the
-          # npm CLI but the workflow continues to the other packages.
-          node scripts/fork-publish-rename.mjs packages/ai npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+ # scripts/publish-with-skip.mjs makes the step idempotent: a version
+ # that's already on npm is treated as success, but any other failure
+ # (notably ENEEDAUTH when the trusted publisher config on npmjs.com is
+ # missing) surfaces as a step failure.
+ node scripts/fork-publish-rename.mjs packages/ai node scripts/publish-with-skip.mjs packages/ai npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-tui
         run: |
-          node scripts/fork-publish-rename.mjs packages/tui npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/tui node scripts/publish-with-skip.mjs packages/tui npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-telemetry
         run: |
-          node scripts/fork-publish-rename.mjs packages/telemetry npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/telemetry node scripts/publish-with-skip.mjs packages/telemetry npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-protocol
         run: |
-          node scripts/fork-publish-rename.mjs packages/protocol npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/protocol node scripts/publish-with-skip.mjs packages/protocol npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-client
         run: |
-          node scripts/fork-publish-rename.mjs packages/client npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/client node scripts/publish-with-skip.mjs packages/client npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-agent-core
         run: |
-          node scripts/fork-publish-rename.mjs packages/agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/agent node scripts/publish-with-skip.mjs packages/agent npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-session-backend-sqlite-node
         run: |
-          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/session-backends/sqlite-node node scripts/publish-with-skip.mjs packages/session-backends/sqlite-node npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-coding-agent
         run: |
-          node scripts/fork-publish-rename.mjs packages/coding-agent npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/coding-agent node scripts/publish-with-skip.mjs packages/coding-agent npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-server
         run: |
-          node scripts/fork-publish-rename.mjs packages/server npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/fork-publish-rename.mjs packages/server node scripts/publish-with-skip.mjs packages/server npm publish --access public --tag fork
 
       - name: Publish @bramburn/pi-clipboard-rs
         # Source name is already in the bramburn/ namespace (no fork-publish-rename needed).
@@ -129,4 +130,4 @@ jobs:
         # same tag and committed to the repo before this step runs; if it's empty the
         # published tarball is still valid JS metadata, just without per-platform binaries.
         run: |
-          cd packages/clipboard-rs && npm publish --access public --tag fork || echo "skip: $name already at $npm_package_version"
+          node scripts/publish-with-skip.mjs packages/clipboard-rs npm publish --access public --tag fork
