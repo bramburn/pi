@@ -256,6 +256,45 @@ When upstream `earendil-works/pi` ships a new release and the fork needs to foll
 8. **Commit, push, open a PR to fork `main`, and rely on CI** for `npm run check` + `npm run build` + `npm test`. Do not run vitest locally; CI is cleaner.
 9. **After CI passes**, push the fork tag: `git tag -a v<version>-b<patch> -m "..."; git push fork v<version>-b<patch>`.
 
+### npm trusted publisher setup (one-time per `@bramburn/*` package)
+
+`.github/workflows/publish.yml` uses npm's OIDC trusted publishing with the
+`npm-publish` GitHub environment. **Each fork package needs its own trusted
+publisher entry on npmjs.com** — they are not shared. A missing entry
+produces `ENEEDAUTH` on every publish, which `scripts/publish-with-skip.mjs`
+now surfaces as a hard step failure (see `## Fork publish troubleshooting`
+below).
+
+Configure once per package:
+
+1. Open https://www.npmjs.com/package/<name>/edit (e.g.
+   `/package/@bramburn%2fpi-coding-agent/edit`) and sign in as the fork
+   maintainer. If the package does not exist on npm yet (e.g.
+   `@bramburn/pi-clipboard-rs`), publish it first via local `npm login` +
+   `cd packages/<pkg> && npm publish --access public --tag fork`, then come
+   back to this step.
+2. Under **Trusted Publishers** → **Add GitHub Actions**, set:
+   - **Repository**: `bramburn/pi`
+   - **Workflow filename**: `publish.yml`
+   - **Environment name**: `npm-publish` (must match `environment:` in the
+     workflow's `jobs.publish` block)
+3. Save. The next tag push should publish that package without further
+   config. Repeat for every `@bramburn/pi-*` workspace package.
+
+Verify with `npm view @bramburn/pi-<pkg> versions --json` after each
+release — the new version should appear under the `fork` dist-tag.
+
+### Fork publish troubleshooting
+
+When a tag push's `Publish npm packages` workflow reports failures, the
+distinguishing log line now comes from `scripts/publish-with-skip.mjs`:
+
+| log line | meaning | fix |
+| --- | --- | --- |
+| `version already on npm, treating as success (idempotent)` | npm returned HTTP 403 `You cannot publish over the previously published versions`. Expected on re-runs. | nothing |
+| `ENEEDAUTH / registry auth failure. ... Configure it under the package's npmjs.com Settings -> Trusted Publishers` | The npm trusted publisher entry for this package is missing, or its workflow filename / environment / repository doesn't match the running workflow. | Add or fix the entry per `## npm trusted publisher setup` above, then re-run the workflow (`gh workflow run publish.yml --repo bramburn/pi --ref v<version> -f tag=v<version>`). |
+| `Cannot resolve @bramburn/pi-<x> from root. No matching lockfile entry found.` | `fork-publish-rename.mjs` has rewritten the publishing package's deps to `@bramburn/pi-*` and the shrinkwrap / install-lock script can't find a matching workspace entry. | The shrinkwrap fix in this branch builds a fork-scope-aware workspace index; ensure both `scripts/generate-coding-agent-shrinkwrap.mjs` and `generate-coding-agent-install-lock.mjs` are on the latest version, then re-run the workflow. |
+
 ### Windows prebuild file lock
 
 On Windows, `git merge` / `git rebase` / `git reset --hard` will fail with `unable to unlink old ... Invalid argument` when the working tree contains
