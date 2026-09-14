@@ -30,7 +30,7 @@
 	"scripts": {
 		"clean": "shx rm -rf prebuilds *.node",
 		"build:napi": "napi build --platform --release --strip --binary-name clipboard-rs --js index.js --dts index.d.ts",
-		"build:local": "npm run build:napi",
+		"build:local": "bun --bun run build:napi",
 		"build:all": "echo 'multi-platform build is run in CI; locally use build:local'",
 		"check": "tsgo --noEmit",
 		"test": "node --test test/*.test.mjs"

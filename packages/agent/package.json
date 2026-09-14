@@ -32,7 +32,7 @@
 		"test": "vitest --run",
 		"test:harness": "vitest --run --config vitest.harness.config.ts",
 		"coverage:harness": "vitest --run --config vitest.harness.config.ts --coverage",
-		"prepublishOnly": "npm run build"
+		"prepublishOnly": "bun --bun run build"
 	},
 	"dependencies": {
 		"@earendil-works/pi-ai": "^0.84.5",
