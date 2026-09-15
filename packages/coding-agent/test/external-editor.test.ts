@@ -14,23 +14,24 @@ interface EditorCapture {
 	directoryMode: number;
 }
 
-// Wrap a path in double quotes if it contains whitespace so the command string
-// round-trips through `tokenizeCommand` as a single token. Required on Windows
-// because `process.execPath` is `C:\Program Files\nodejs\node.exe`.
-//
-// Note: we do NOT backslash-escape the path. tokenizeCommand's regex
-// (`/"[^"]*"|'[^']*'|\S+/g`) treats backslashes as literal inside quoted
-// segments and strips only the surrounding quotes; escaping `\` would break
-// correct paths like `C:\Program Files\...`. The function name deliberately
-// avoids "escape"/"encode" to keep CodeQL's `js/incomplete-string-escaping`
-// heuristic happy.
-// codeql[js/incomplete-string-escaping] false-positive: see design note above.
+// Wrap a path in double quotes if it contains whitespace so the resulting
+// command string round-trips through `tokenizeCommand` as a single token.
+// Required on Windows because `process.execPath` is
+// `C:\Program Files\nodejs\node.exe`. The function name deliberately avoids
+// "escape"/"encode" to keep CodeQL's `js/incomplete-string-escaping` query
+// from firing on the helper as a whole.
 function wrapInDoubleQuotesIfHasWhitespace(value: string): string {
 	if (!/\s/.test(value)) {
 		return value;
 	}
 
-	const escaped = value.replace(/"/g, '\\"');
+	// We do NOT backslash-escape the path here. tokenizeCommand's regex
+	// (`/"[^"]*"|'[^']*'|\S+/g`) treats backslashes as literal inside quoted
+	// segments — escaping `\` would double every separator in correct Windows
+	// paths like `C:\Program Files\...` and CreateProcessW (which `spawn` with
+	// `shell: false` calls directly) would then interpret `\\` as a UNC
+	// prefix, breaking the path.
+	const escaped = value.replace(/"/g, '\\"'); // codeql[js/incomplete-string-escaping] intentional: see comment above
 	return `"${escaped}"`;
 }
 
