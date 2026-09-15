@@ -12,11 +12,15 @@ function toBashSingleQuotedArg(value: string): string {
 
 function createInheritedStdioCommand(pidFile: string): string {
 	const pidFileArg = toBashSingleQuotedArg(pidFile);
+	// Use the literal `node` binary (resolved from PATH) instead of
+	// `process.execPath` so the inner detached child does not break on Windows
+	// under bun, where `process.execPath` resolves to a path containing spaces
+	// (e.g. `C:\Program Files\...\bun.exe`) and cmd.exe splits on those spaces.
 	return (
 		'node -e "' +
 		"const fs=require('fs');" +
 		"const {spawn}=require('child_process');" +
-		"const child=spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:'inherit',detached:true});" +
+		"const child=spawn('node',['-e','setTimeout(()=>{},60000)'],{stdio:'inherit',detached:true});" +
 		"fs.writeFileSync(process.argv[1], String(child.pid));" +
 		"child.unref();" +
 		"console.log('child-exiting');" +
@@ -70,15 +74,12 @@ function getTextOutput(result: { content?: Array<{ type: string; text?: string }
 }
 
 // NOTE: this file tests Windows-specific bash child-process close handling.
-// The two tests inside consistently time out under bun-launched vitest on
-// Windows because the test commands use `process.execPath` inside a
-// `node -e "..."` shell invocation. Under bun, `process.execPath` resolves
-// to a path that contains a space (e.g. `C:\Program Files\...`), which
-// cmd.exe splits on, causing the inner child process to never start.
-// Skip the entire file on all platforms — these tests are not run in
-// CI (the CI workflow is ubuntu-only) and the Windows-flake is unrelated
-// to the bun migration. Tracked as a separate Windows test-flake fix.
-describe.skip("Windows child-process close handling", () => {
+// The two tests inside target a known issue with `node -e "..."` invocations
+// where Windows cmd.exe path-splitting (on paths containing spaces) prevents
+// the inner child from starting. We use `describe.skipIf(win32-only)` so the
+// file is exercised whenever the test runner is on Windows.
+// TODO: track Windows bash test flake in follow-up issue
+describe.skipIf(process.platform !== "win32")("Windows child-process close handling", () => {
 	let testDir: string;
 
 	beforeEach(() => {

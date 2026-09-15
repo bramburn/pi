@@ -481,15 +481,11 @@ describe("Coding Agent Tools", () => {
 		);
 	});
 
-	// NOTE: many of the tests in this describe use POSIX-only commands like
-	// `seq` and `tail` that don't exist on Windows under Git Bash. CI runs
-	// on ubuntu-latest only; on the Windows dev box these tests fail
-	// because the underlying commands don't exist. The block-level skipIf
-	// keeps the existing per-platform behavior (run on Linux CI, skip on
-	// Windows) for all the POSIX-only bash tool tests. Specific tests
-	// that need to run on Windows use `it.runIf(process.platform === "win32")`
-	// inside the block.
-	describe.skipIf(process.platform === "win32")("bash tool", () => {
+	// NOTE: some tests in this block use POSIX-only commands (seq, tail, head)
+	// that don't exist on Windows under Git Bash. Those tests have individual
+	// `it.skipIf(process.platform === "win32")` guards. The block itself runs
+	// on all platforms.
+	describe("bash tool", () => {
 		it("should execute simple commands", async () => {
 			const result = await bashTool.execute("test-call-8", { command: "echo 'test output'" });
 
@@ -503,15 +499,15 @@ describe("Coding Agent Tools", () => {
 			);
 		});
 
-		// NOTE: this test uses `process.execPath` which under bun on Windows
-		// resolves to a path with spaces (e.g. `C:\Program Files\...\bun.exe`).
-		// When the bash tool spawns this via cmd.exe, the space in the path
-		// causes cmd.exe to split the command and the inner `node -e` script
-		// never starts — the test then times out. Skip on Windows until the
-		// test is rewritten to use a path-without-spaces binary (e.g. `node`
-		// resolved from PATH).
+		// NOTE: this test invokes a long-running `node -e "..."` script via the
+		// bash tool. We deliberately use the literal `node` (PATH-resolved)
+		// instead of `process.execPath` to avoid Windows cmd.exe path-splitting
+		// on bun-launched vitest (where `process.execPath` resolves to a path
+		// containing spaces, e.g. `C:\Program Files\...\bun.exe`). On Windows
+		// the test still has known argv-parsing issues inside the bash tool,
+		// so we keep an `it.skipIf(win32)` guard here.
 		it.skipIf(process.platform === "win32")("should respect timeout", async () => {
-			const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify("setInterval(() => {}, 1000)")}`;
+			const command = `node -e ${JSON.stringify("setInterval(() => {}, 1000)")}`;
 			await expect(bashTool.execute("test-call-10", { command, timeout: 0.05 })).rejects.toThrow(/timed out/i);
 		});
 
@@ -594,7 +590,7 @@ describe("Coding Agent Tools", () => {
 			expect(getShellConfigSpy).toHaveBeenCalledWith("/custom/bash");
 		});
 
-		it("should send commands over stdin when shell resolution requires it", async () => {
+		it.skipIf(process.platform === "win32")("should send commands over stdin when shell resolution requires it", async () => {
 			vi.spyOn(shellModule, "getShellConfig").mockReturnValue({
 				shell: process.execPath,
 				args: [
@@ -740,7 +736,7 @@ describe("Coding Agent Tools", () => {
 			expect(Buffer.concat(chunks).toString("utf-8").trim()).toBe("from-local-ops");
 		});
 
-		it("should preserve executeBash sanitization when using local bash operations", async () => {
+		it.skipIf(process.platform === "win32")("should preserve executeBash sanitization when using local bash operations", async () => {
 			const result = await executeBashWithOperations(
 				"printf '\\033[31mred\\033[0m\\r\\n'",
 				process.cwd(),
@@ -751,7 +747,7 @@ describe("Coding Agent Tools", () => {
 			expect(result.output).toBe("red\n");
 		});
 
-		it("should persist full output when truncation happens by line count only", async () => {
+		it.skipIf(process.platform === "win32")("should persist full output when truncation happens by line count only", async () => {
 			const bash = createBashTool(testDir);
 			const result = await bash.execute("test-call-line-truncation", { command: "seq 3000" });
 			const output = getTextOutput(result);
@@ -774,7 +770,7 @@ describe("Coding Agent Tools", () => {
 			expect(fullOutput).toContain("2998\n2999\n3000");
 		});
 
-		it("executeBash should persist full output when truncation happens by line count only", async () => {
+		it.skipIf(process.platform === "win32")("executeBash should persist full output when truncation happens by line count only", async () => {
 			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
 			const fullOutputPath = result.fullOutputPath;
 
