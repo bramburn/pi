@@ -1,0 +1,60 @@
+=== Unit 2: build-both.mjs refactor - Gate Output Snapshot ===
+
+Branch: chore/unit-2
+Worktree: C:/dev/.worktrees/unit-2
+
+CHANGES APPLIED (scripts/build-both.mjs):
+- 4.1: Documented double-build in --help output (added "Note:" paragraph).
+- 4.2: detectRuntime now uses shell: false for --version, shell: true only
+       for where.exe/which. Resolves .exe/.cmd candidates on Windows.
+- 4.3: Removed unused quote() helper; runCommand log uses plain join.
+- 4.4: Dropped redundant bun-clean step; node-clean already runs the same
+       workspace-wide clean (added comment to document intent).
+- 4.5: useShell removed; runCommand uses shell: false explicitly.
+- 4.6: verifyRepoRoot() now runs before parseArgs() so non-pi checkouts
+       fail fast.
+
+GATE A - bun install --ignore-scripts --linker=hoisted
+  exit 0 (389 packages installed)
+
+GATE B - bun run build
+  exit 0 (Built packages\coding-agent\dist\bundle (55 files, 8.2 MiB))
+
+GATE C - bun run check
+  exit 0 (biome, check-pinned-deps, check-ts-imports, check-shrinkwrap,
+  check-install-lock:coding-agent, tsgo --noEmit, check-browser-smoke all OK)
+
+GATE D - bash ./test.sh
+  Two test files had PRE-EXISTING failures unrelated to this unit:
+    1) packages/coding-agent/test/session-id-readonly.test.ts: 
+       "rejects ids invalid under SessionManager rules without stack traces" -
+       Windows EBUSY rmdir flake on C:\Users\bramburn\AppData\Local\Temp\
+       pi-test.mxNJne\tmp\pi-session-id-readonly-KMpASo\project
+       (test timeout 30000ms in afterEach cleanup).
+    2) packages/coding-agent/test/stdout-cleanliness.test.ts:
+       "keeps stdout empty for -p --help while routing trusted startup 
+       chatter to stderr" - same Windows EBUSY rmdir flake pattern.
+  These tests fail in any pi checkout on Windows because they invoke the CLI
+  from a temp dir and try to rmdir while something still holds a handle. The
+  failures are flaky on second run (the second invocation exposed different
+  failures - bun:test NotImplementedError on `test() inside another test()` 
+  in scripts/sync-versions.test.mjs).
+  Neither failure touches scripts/build-both.mjs or any file this unit 
+  changed. They were present at HEAD 83a126c11 before this branch.
+
+GATE K - bun run --cwd packages/coding-agent build:binary
+  The binary compiles successfully and packages/coding-agent/dist/pi.exe
+  exists. Running `./packages/coding-agent/dist/pi --version` prints:
+    "pi 0.84.5 [bramburn]"
+  The post-step `bun --bun run build:promote` (scripts/promote-binary.mjs)
+  fails because it assumes a worktree layout `<main>/.worktrees/<name>/<repo>`
+  but this worktree is at `<main>/.worktrees/unit-2` (no repo subdirectory).
+  This is a pre-existing path-resolution issue in promote-binary.mjs that
+  doesn't reference scripts/build-both.mjs and is outside the scope of unit 2.
+
+HELP OUTPUT VERIFIED:
+  `bun scripts/build-both.mjs --help` renders the new "Note:" paragraph
+  about the double-build (line 128-129) and the runtime-detection comment
+  in detectRuntime is exercised correctly when invoked.
+
+=== End of evidence ===
