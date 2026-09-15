@@ -17,12 +17,14 @@ interface EditorCapture {
 // Quote a path if it contains whitespace so the resulting command string
 // tokenizes correctly when the production function splits on space. Required
 // on Windows because `process.execPath` is `C:\Program Files\nodejs\node.exe`.
+// Note: production now uses shell:false, so we do NOT need to backslash-escape
+// the path (that escaping was only needed when the command went through cmd.exe).
 function quoteIfNeeded(value: string): string {
 	if (!/\s/.test(value)) {
 		return value;
 	}
 
-	const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	const escaped = value.replace(/"/g, '\\"');
 	return `"${escaped}"`;
 }
 

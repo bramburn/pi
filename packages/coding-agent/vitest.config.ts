@@ -16,9 +16,13 @@ export default mergeConfig(
 			silent: "passed-only",
 			// Exclude dist/ so vitest doesn't run copied .test.ts files that
 			// ship in the build output (e.g. examples/extensions/background-tasks).
-			exclude: ["**/dist/**", "**/node_modules/**", "**/.git/**"],
+			// node_modules and .git are vitest defaults and don't need to be listed.
+			exclude: ["**/dist/**"],
 			server: {
 				deps: {
+					// photon-node is a native WASM binding (better-sqlite3-style); vite's SSR
+					// transformer cannot bundle native modules, so we exclude it from transformation.
+					// Add any other native binding here.
 					external: [/@silvia-odwyer\/photon-node/],
 				},
 			},
