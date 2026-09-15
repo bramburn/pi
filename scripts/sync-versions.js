@@ -3,6 +3,11 @@
 /**
  * Validates lockstep versions for published packages, then synchronizes
  * internal dependency versions in all workspace packages, including private ones.
+ *
+ * INVARIANT: every public workspace package MUST have the same version.
+ * The caret range on inter-package deps (e.g. "^0.84.5") is decorative —
+ * it does NOT auto-flow through semver resolution. To bump, run
+ * `bun run version:patch|minor|major` or use `scripts/release.mjs`.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";

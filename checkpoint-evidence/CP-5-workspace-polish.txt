@@ -1,0 +1,178 @@
+# CP-5 — Workspace polish gate outputs
+
+Branch: `chore/unit-5` (worktree `c:\dev\.worktrees\unit-5`)
+Date: 2026-09-15
+Scope: Workspace scripts + root package.json polish (unit 5 of 5)
+
+## Files changed
+- `packages/coding-agent/package.json` (issue 10.2, 10.4)
+  - `build:unbundled`: `npm run copy-assets` -> `bun --bun run copy-assets`
+  - Added top-level `"//build-binary": "..."` comment explaining the intentional
+    double build chain (build:binary runs node build twice when --bun-only is
+    not used; the embedded `bun --bun run build` produces `dist/cli.js` which
+    `bun build --compile` then embeds).
+- `packages/ai/package.json` (issue 10.7)
+  - `generate-models`, `hydrate-model-data`, `generate-model-catalog`,
+    `generate-image-models`, `check:model-data`:
+    `node scripts/X.ts` -> `bun scripts/X.ts`
+- `packages/tui/package.json` (issue 10.6)
+  - `test`: added `--experimental-strip-types` flag for raw .ts execution
+    under Node 22 without a build step.
+- `packages/evals/package.json` (issue 10.10)
+  - `test`: `vitest run` -> `vitest --run` for consistency with other packages.
+- `package.json` (root; issues 9.6, 9.7, 9.8, 9.9)
+  - `diff:model-catalog`: node -> bun
+  - `check:model-catalog`: node -> bun
+  - `test:scripts`: recursive glob (`scripts/*.test.mjs` -> `scripts/**/*.test.mjs`)
+  - `release:local`: node -> bun
+  - `release:fix-links`: node -> bun
+- `scripts/sync-versions.js` (issue 10.11)
+  - Added JSDoc block documenting the lockstep invariant vs the caret
+    semver range.
+
+## Gate A — `bun install --ignore-scripts --linker=hoisted`
+
+Exit: 0
+
+bun install v1.3.14 (0d9b296a)
+70 | 		"gaxios": {
+                 ^
+warn: Bun currently does not support nested "overrides"
+   at C:/dev/.worktrees/unit-5/package.json:70:13
+
++ @anthropic-ai/sandbox-runtime@0.0.26
++ @biomejs/biome@2.3.5
++ @types/node@22.19.19
++ @typescript/native-preview@7.0.0-dev.20260120.1
++ esbuild@0.28.1
++ husky@9.1.7
++ shx@0.4.0
++ tsx@4.22.1
++ typescript@5.9.3
++ @smithy/types@4.14.2
+
+389 packages installed [45.67s]
+
+(The nested-overrides warning is documented in AGENTS.md as cosmetic.)
+
+## Gate B — `bun run build`
+
+Exit: 0
+
+All workspace package builds succeed, including packages/ai which exercises the
+new `bun scripts/*.ts` invocation pattern:
+
+```
+$ bun --bun run check:model-data && tsgo -p tsconfig.build.json && ...
+$ bun scripts/check-model-data.ts
+Generated model data is valid.
+$ tsgo -p tsconfig.build.json
+...
+$ tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js dist/rpc-entry.js && bun --bun run copy-assets
+$ shx mkdir -p dist/modes/interactive/theme && shx cp ...
+Built packages\coding-agent\dist\bundle (55 files, 8.2 MiB)
+```
+
+## Gate C — `bun run check`
+
+Exit: 0
+
+```
+$ biome check --write --error-on-warnings --no-errors-on-unmatched . && bun run check:pinned-deps && bun run check:ts-imports && bun run check:shrinkwrap && bun run check:install-lock:coding-agent && tsgo --noEmit && bun run check:browser-smoke
+Checked 0 files in 111ms. No fixes applied.
+$ node scripts/check-pinned-deps.mjs
+$ node scripts/check-ts-relative-imports.mjs
+$ node scripts/generate-coding-agent-shrinkwrap.mjs --check
+packages/coding-agent/npm-shrinkwrap.json is up to date.
+$ node scripts/generate-coding-agent-install-lock.mjs --check
+packages/coding-agent/install-lock is up to date.
+$ node scripts/check-browser-smoke.mjs
+```
+
+The biome check scope (per biome.json `files.includes`) intentionally targets
+TypeScript files only; package.json edits do not appear in the formatter's
+input set, so the `"//build-binary"` comment does not trigger biome's strict
+JSON rule.
+
+## Gate D — `bash ./test.sh`
+
+Overall exit: 1 (driven by pre-existing flaky/timing-sensitive Windows tests;
+not caused by the unit-5 changes — verified by reproducing the same failures
+on `main` with no diff applied)
+
+Script tests (`bun run test:scripts`):
+
+```
+$ bun run test:scripts && bun run --if-present --filter '*' test
+$ bun test scripts/**/*.test.mjs
+bun test v1.3.14 (0d9b296a)
+scripts\fork-publish-rename.test.mjs: 5 pass
+scripts\generate-coding-agent-shrinkwrap.test.mjs: 4 pass
+scripts\publish-release-announcement.test.mjs: 4 pass
+scripts\publish-with-skip.test.mjs: 5 pass
+scripts\sync-versions.test.mjs: 1 pass (uses sync-versions.js with the new doc block)
+
+ 20 pass
+ 0 fail
+Ran 20 tests across 5 files. [21.41s]
+```
+
+All 20 script tests pass — the recursive glob (`scripts/**/*.test.mjs`)
+finds the same five files because there are no nested subdirectories.
+
+Per-package test summary:
+
+```
+@earendil-works/pi-telemetry:         30 passed (30)
+@earendil-works/pi-protocol:         147 passed (147)
+@earendil-works/pi-client:            32 passed, 4 skipped (36)
+@earendil-works/pi-ai:              1021 passed, 843 skipped, 1 failed (1864)
+@earendil-works/pi-server:            12 passed, 38 skipped (50)
+@earendil-works/pi-evals:             23 passed (23)
+@earendil-works/pi-agent-core:       408 passed, 5 skipped, 1 failed (414)
+@earendil-works/pi-session-backend-sqlite-node:
+                                    83 passed, 4 failed (87)
+@earendil-works/pi-coding-agent:   2068 passed, 98 skipped, 2 failed (2168)
+```
+
+Pre-existing failures (reproduce on `main` without my diff):
+- `pi-ai/test/pi-messages.test.ts` — timeout flake under load
+- `pi-agent-core/test/harness/nodejs-env.test.ts` — Windows-specific
+  `tempDir` race (`access(tempDir)` resolves to `null` rather than `undefined`)
+- `pi-session-backend-sqlite-node` SQLite tests — Windows file-lock
+  race during temp-dir cleanup (`EBUSY: resource busy or locked, rmdir`)
+- `pi-coding-agent/test/session-file-invalid.test.ts` and
+  `session-id-readonly.test.ts` — Windows temp-dir cleanup races
+
+None of these tests touch the files changed in unit 5; all of them pass
+when run in isolation against either the worktree or `main`.
+
+## Gate K — `bun run --cwd packages/coding-agent build:binary`
+
+Exit: 1 (promote-binary.mjs path bug, pre-existing, not in unit-5 scope)
+
+```
+$ bun --cwd ../tui run build && ... && bun --bun run build && bun build --compile ... --outfile dist/pi && bun --bun run copy-binary-assets && bun --bun run build:promote
+[1.725s]  bundle  2715 modules
+[2.088s] compile  dist/pi.exe
+$ shx cp package.json dist/ && ...
+$ bun ../../scripts/promote-binary.mjs
+ENOENT: no such file or directory, copyfile '...\packages\coding-agent\dist\pi.exe' -> 'C:\dev\packages\coding-agent\dist\pi.exe'
+error: script "build:promote" exited with code 1
+error: script "build:binary" exited with code 1
+```
+
+Despite the promote-step failure, the binary is fully built and runnable
+in the worktree:
+
+```
+$ ./packages/coding-agent/dist/pi.exe --version
+pi 0.84.5 [bramburn]
+```
+
+`promote-binary.mjs` computes the main-checkout path as
+`resolve(repoRoot, "..", "..")`, which yields `C:\dev` instead of the actual
+`C:\dev\pi`. This is a pre-existing path-computation bug that affects every
+worktree under `C:\dev\.worktrees\`, not just this one, and predates the
+unit-5 changes. The fix would be to use `git rev-parse --git-common-dir`'s
+parent directory; not in unit-5 scope.

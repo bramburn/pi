@@ -6,6 +6,7 @@
 	"piConfig": {
 		"configDir": ".pi"
 	},
+	"//build-binary": "Note: build:binary also invokes the full node build chain (via the embedded 'bun --bun run build' step) because the bundle's dist/cli.js must exist before 'bun build --compile' can include it. This is intentional and is why 'bun run build-both' runs the node build twice when --bun-only is not used.",
 	"bin": {
 		"pi": "dist/bundle/cli.js"
 	},
@@ -35,7 +36,7 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"build": "bun --bun run build:unbundled && bun ../../scripts/build-coding-agent-bundle.mjs",
-		"build:unbundled": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js dist/rpc-entry.js && npm run copy-assets",
+		"build:unbundled": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js dist/rpc-entry.js && bun --bun run copy-assets",
 		"build:binary": "bun --cwd ../tui run build && bun --cwd ../telemetry run build && bun --cwd ../ai run build && bun --cwd ../agent run build && bun --cwd ../protocol run build && bun --cwd ../client run build && bun --bun run build && bun build --compile --no-compile-autoload-bunfig ./src/bun/cli.ts ./src/utils/image-resize-worker.ts --outfile dist/pi && bun --bun run copy-binary-assets && bun --bun run build:promote",
 		"build:promote": "bun ../../scripts/promote-binary.mjs",
 		"copy-assets": "shx mkdir -p dist/modes/interactive/theme && shx cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && shx mkdir -p dist/modes/interactive/assets && shx cp src/modes/interactive/assets/*.png dist/modes/interactive/assets/ && shx mkdir -p dist/core/export-html/vendor && shx cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && shx cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/",
