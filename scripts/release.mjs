@@ -48,8 +48,21 @@ function run(cmd, options = {}) {
 }
 
 function getVersion() {
-	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
-	return pkg.version;
+	// All public workspace packages share the same version (lockstep). If any
+	// package.json drifted, fail loudly rather than picking one arbitrarily.
+	const pkgs = getPublicWorkspacePackages();
+	const versions = new Set(pkgs.map((pkg) => pkg.version));
+	if (versions.size !== 1) {
+		const byVersion = new Map();
+		for (const pkg of pkgs) {
+			const list = byVersion.get(pkg.version) ?? [];
+			list.push(pkg.name);
+			byVersion.set(pkg.version, list);
+		}
+		const summary = [...byVersion.entries()].map(([v, names]) => `  ${v}: ${names.join(", ")}`).join("\n");
+		throw new Error(`Public workspace packages are not on a single version:\n${summary}`);
+	}
+	return [...versions][0];
 }
 
 function assertPackagesAreRegisteredWithNpm() {
@@ -61,12 +74,22 @@ function assertPackagesAreRegisteredWithNpm() {
 		const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["view", packageName, "version", "--json"], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
-			shell: true,
+			shell: false,
 		});
 
 		if (result.status === 0 && result.stdout.trim()) {
-			console.log(`  ${packageName}`);
-			continue;
+			// `npm view --json` returns a JSON-encoded version string (e.g. "0.84.5").
+			// Validate it parses before declaring success — a non-JSON response
+			// (e.g. ENEEDAUTH, "Not found") would otherwise be treated as success.
+			try {
+				const parsed = JSON.parse(result.stdout.trim());
+				if (typeof parsed === "string" && parsed.length > 0) {
+					console.log(`  ${packageName}`);
+					continue;
+				}
+			} catch {
+				// fall through to the failure branch below
+			}
 		}
 
 		const output = [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n");
@@ -97,10 +120,6 @@ function compareVersions(a, b) {
 	}
 
 	return 0;
-}
-
-function shellQuote(value) {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function removeStaleWorkspaceLockEntries() {
@@ -137,7 +156,13 @@ function stageChangedFiles() {
 		return;
 	}
 
-	run(`git add -- ${paths.map(shellQuote).join(" ")}`);
+	// Pass paths as argv (not shell-joined) to avoid cmd.exe quoting fragility on
+	// Windows for paths containing spaces, brackets, etc.
+	const result = spawnSync("git", ["add", "--", ...paths], { stdio: "inherit" });
+	if (result.status !== 0) {
+		console.error(`git add failed with status ${result.status}`);
+		process.exit(result.status ?? 1);
+	}
 }
 
 function bumpOrSetVersion(target) {
@@ -153,15 +178,15 @@ function bumpOrSetVersion(target) {
 		}
 
 		console.log(`Setting explicit version (${target})...`);
-		run(`bun scripts/bump-version.mjs ${target} && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && node -e "require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')"`);
+		run(`bun scripts/bump-version.mjs ${target} && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && bun scripts/format-package-lock.mjs`);
 	}
 
 	// npm version can temporarily install the previous workspace versions before
-	// sync-versions updates inter-package ranges. Remove those stale lock entries,
-	// refresh the lockfile, then hydrate from the final dependency graph.
+	// sync-versions updates inter-package ranges. Removing the stale lock entries
+	// lets `bun install --frozen-lockfile` resolve cleanly from the refreshed graph.
 	removeStaleWorkspaceLockEntries();
-	run(`bun install --no-save --ignore-scripts && node -e "require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')"`);
 	run("bun install --frozen-lockfile --ignore-scripts");
+	run("bun scripts/format-package-lock.mjs");
 	return getVersion();
 }
 

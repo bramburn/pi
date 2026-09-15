@@ -92,20 +92,14 @@ process.stdout.write(
 
 let exitCode = 0;
 try {
-	let result;
-	if (process.platform === "win32") {
-		// Avoid manual command-string quoting/escaping on Windows. Passing
-		// executable and args separately lets Node handle argument passing.
-		result = spawnSync(cmd[0], cmd.slice(1), {
-			stdio: "inherit",
-			cwd: resolve(pkgDir),
-		});
-	} else {
-		result = spawnSync(cmd[0], cmd.slice(1), {
-			stdio: "inherit",
-			cwd: resolve(pkgDir),
-		});
-	}
+	// Use `shell: false` (default) on every platform so the OS spawn API handles
+	// argument passing. The previous Windows-vs-POSIX branches were byte-identical
+	// after the CP-0.3 fix removed shell-string joining. Spawning via array form
+	// also avoids quoting hazards on Windows for paths containing spaces.
+	const result = spawnSync(cmd[0], cmd.slice(1), {
+		stdio: "inherit",
+		cwd: resolve(pkgDir),
+	});
 	exitCode = result.status ?? 1;
 } finally {
 	writeFileSync(pkgJsonPath, orig);

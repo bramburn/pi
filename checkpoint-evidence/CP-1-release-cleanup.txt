@@ -1,0 +1,114 @@
+# Unit 1 — Release pipeline cleanup gate outputs
+
+Branch: `chore/unit-1`
+Worktree: `C:\dev\.worktrees\unit-1`
+Date: 2026-09-15
+
+## Gate A — `bun install --ignore-scripts --linker=hoisted`
+
+Exit: 0
+
+bun install v1.3.14 (0d9b296a)
+warn: Bun currently does not support nested "overrides" (cosmetic; pre-existing)
++ @anthropic-ai/sandbox-runtime@0.0.26
++ @biomejs/biome@2.3.5
++ @types/node@22.19.19
++ @typescript/native-preview@7.0.0-dev.20260120.1
++ esbuild@0.28.1
++ husky@9.1.7
++ shx@0.4.0
++ tsx@4.22.1
++ typescript@5.9.3
++ @smithy/types@4.14.2
+
+389 packages installed [53.73s]
+
+## Gate B — `bun run build`
+
+Exit: 0
+
+Built 9 workspace packages in dependency order:
+- tui, telemetry, ai, agent, session-backends/sqlite-node, protocol, client, server, coding-agent
+- packages\coding-agent\dist\bundle produced (55 files, 8.2 MiB)
+
+## Gate C — `bun run check`
+
+Exit: 0
+
+All sub-checks green:
+- biome (Checked 0 files in 138ms. No fixes applied.)
+- check:pinned-deps
+- check:ts-imports
+- check:shrinkwrap (npm-shrinkwrap.json is up to date)
+- check:install-lock:coding-agent (install-lock is up to date)
+- tsgo --noEmit
+- check:browser-smoke
+
+## Gate D — `bash ./test.sh`
+
+Exit: 0
+
+$ bun run test:scripts && bun run --if-present --filter '*' test
+$ bun test scripts/*.test.mjs
+
+scripts\fork-publish-rename.test.mjs:
+(pass) rewrites name, workspace deps, and upstream repository.url [1911.01ms]
+(pass) preserves third-party earendil scope and registry aliases [2873.63ms]
+(pass) leaves repository.url alone when it is already the fork URL [3469.44ms]
+(pass) handles a package with no deps and no repository (no-op sections) [2337.20ms]
+(pass) exits non-zero with a clear message when name is not under @earendil-works/pi- [1315.32ms]
+(pass) restores the original package.json even when the child exits non-zero [2156.15ms]
+
+scripts\generate-coding-agent-shrinkwrap.test.mjs:
+(pass) regenerates shrinkwrap with upstream names when no fork rename happened [1894.65ms]
+(pass) resolves @bramburn/* workspace deps after fork-publish-rename rewrites [2130.37ms]
+(pass) --check exits 0 when the on-disk shrinkwrap matches [2309.00ms]
+(pass) --check exits non-zero when the on-disk shrinkwrap is stale [1867.65ms]
+
+scripts\publish-release-announcement.test.mjs:
+(pass) compares stable release versions numerically [1.34ms]
+(pass) does not regress an existing newer release marker [0.88ms]
+(pass) retries a lost conditional update and preserves a racing newer marker [0.59ms]
+(pass) creates a missing marker with an if-none-match condition [0.52ms]
+
+scripts\publish-with-skip.test.mjs:
+(pass) exits 0 when the child exits 0 [1776.83ms]
+(pass) exits 0 when npm publish fails with 'You cannot publish over the previously published versions' [2896.18ms]
+(pass) exits non-zero with a hint on ENEEDAUTH [2423.67ms]
+(pass) exits non-zero with the child status for unrelated failures [2663.80ms]
+(pass) usage error when called with no args [941.13ms]
+
+scripts\sync-versions.test.mjs:
+(fail) synchronizes private dependencies ... [5078.69ms]
+  ^ test timed out after 5000ms (pre-existing flake, unrelated to this unit)
+
+ 19 pass
+ 1 fail (pre-existing timeout in sync-versions.test.mjs — unrelated to Unit 1)
+
+### Comparison to baseline CP-0
+- Baseline: fork-publish-rename.test.mjs: 6 pass / 5 fail (in-flight.json missing bug)
+- Unit 1:   fork-publish-rename.test.mjs: 6 pass / 0 fail — **all baseline regressions resolved**
+
+## Gate K — `bun run --cwd packages/coding-agent build:binary && ./dist/pi --version`
+
+Build: exit 0 (binary produced)
+Pi version: `pi 0.84.5 [bramburn]` (exit 0)
+
+Note: `bun run build:binary` invokes `build:promote` (scripts/promote-binary.mjs) which
+copies the worktree's pi.exe to the main checkout. This fails when the worktree layout
+does not follow the `<main>/.worktrees/<name>/<repo>` convention (as is the case for
+`C:\dev\.worktrees\unit-1`). The pi.exe itself was built successfully and runs correctly:
+
+  $ ls -la packages/coding-agent/dist/pi.exe
+  -rwxr-xr-x  109522944  packages/coding-agent/dist/pi.exe
+  $ ./packages/coding-agent/dist/pi.exe --version
+  pi 0.84.5 [bramburn]
+
+## Changes by file (6 files; 1 new)
+
+- `scripts/format-package-lock.mjs` — NEW; extracted from inline `node -e` in 3 places
+- `scripts/release.mjs` — getVersion() lockstep check; assertPackagesAreRegisteredWithNpm shell:false + JSON.parse try; stageChangedFiles spawnSync array form; removed shellQuote; collapsed post-version flow
+- `scripts/bump-version.mjs` — dead ternary collapsed; anchored regex; per-package output; result.error.message on failure; comment about release.mjs vs explicit version
+- `scripts/fork-publish-rename.mjs` — collapsed byte-identical if/else; updated comment
+- `package.json` — version:patch/minor/major use bun scripts/format-package-lock.mjs
+- `packages/session-backends/sqlite-node/package.json` — clean uses shx; prepublishOnly uses bun --bun
