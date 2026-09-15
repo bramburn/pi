@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -98,7 +98,13 @@ test("worktree with sibling layout promotes the binary to the main checkout", as
 			try {
 				git(["worktree", "remove", "--force", siblingRepo], mainRepo);
 			} catch {
-				// best-effort cleanup
+				// On Windows the rm below can race with lingering handles; fall
+				// back to a prune so the .git/worktrees/wt entry doesn't leak.
+				try {
+					git(["worktree", "prune"], mainRepo);
+				} catch {
+					// best-effort cleanup
+				}
 			}
 		}
 		await rm(root, { recursive: true, force: true });
@@ -129,7 +135,13 @@ test("worktree with missing source exits 2 with a clear error", async () => {
 			try {
 				git(["worktree", "remove", "--force", siblingRepo], mainRepo);
 			} catch {
-				// best-effort cleanup
+				// On Windows the rm below can race with lingering handles; fall
+				// back to a prune so the .git/worktrees/wt entry doesn't leak.
+				try {
+					git(["worktree", "prune"], mainRepo);
+				} catch {
+					// best-effort cleanup
+				}
 			}
 		}
 		await rm(root, { recursive: true, force: true });

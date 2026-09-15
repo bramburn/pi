@@ -42,13 +42,22 @@ function findMainCheckout(repoRoot) {
 		if (error.code === "ENOENT") {
 			console.error("[promote-binary] git not found on PATH");
 		} else {
-			console.error(`[promote-binary] git rev-parse failed: ${error.message}`);
+			const stderr = error.stderr ? error.stderr.toString().trim() : "";
+			console.error(
+				`[promote-binary] git rev-parse failed: ${error.message}${stderr ? `\n${stderr}` : ""}`,
+			);
 		}
 		return null;
 	}
 	const resolvedCommon = isAbsolute(commonDir) ? commonDir : resolve(repoRoot, commonDir);
 	const main = resolve(resolvedCommon, "..");
-	if (!existsSync(main)) {
+	let mainStat;
+	try {
+		mainStat = statSync(main);
+	} catch {
+		return null;
+	}
+	if (!mainStat.isDirectory()) {
 		return null;
 	}
 	return main;
