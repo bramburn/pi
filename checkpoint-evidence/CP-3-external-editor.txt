@@ -1,0 +1,86 @@
+# CP-3 External Editor + vitest config Improvements — Gate Evidence
+
+Unit 3 of 5 code-review cleanup for `bramburn/pi` fork.
+
+## Files changed (3)
+- `packages/coding-agent/src/modes/interactive/external-editor.ts`
+- `packages/coding-agent/vitest.config.ts`
+- `packages/coding-agent/test/external-editor.test.ts` (test fixture updated to
+  match shell:false semantics; the prior `quoteIfNeeded` helper double-escaped
+  backslashes which was only correct for the old `shell:true` approach. See
+  diff below.)
+
+## Diff summary
+
+### external-editor.ts (7 issues fixed)
+1. `tokenizeCommand` replaced with regex tokenizer that handles `"..."`,
+   `'...'`, and bare tokens, and strips surrounding quotes + unescapes `\"`/`\'`.
+2. Windows spawn block switched from `shell: true` + manual backslash escaping
+   to `shell: false` with token array (single `spawn(editor, [...editorArgs,
+   filePath], { shell: false })` for both Windows and POSIX).
+3. Silent `child.on("error", () => resolve(null))` replaced with logging:
+   `console.error(\`[external-editor] spawn error: ${err.message}\`)`.
+4. `mkdtempSync(join(tmpdir(), "pi-editor-"))` → uses
+   `crypto.randomUUID()` for collision resistance.
+5. "Launching external editor" message now shows only `tokens[0]` (the
+   executable), not the full command — avoids leaking sensitive args.
+
+### vitest.config.ts (2 issues fixed)
+6. `exclude` array dropped redundant `**/node_modules/**` and `**/.git/**`
+   (vitest defaults cover them); kept `**/dist/**` explicit (copied .test.ts
+   files from PR #923).
+7. Added comment above `server.deps.external` explaining why
+   `@silvia-odwyer/photon-node` is excluded (native WASM binding; vite SSR
+   cannot bundle native modules).
+
+### external-editor.test.ts (test fixture update, required)
+- `quoteIfNeeded` no longer double-escapes backslashes. The backslash escaping
+  was specifically required for the prior `shell: true` cmd.exe-mediated spawn,
+  which was the very issue the production change fixes. With `shell: false`,
+  Node's `child_process.spawn` passes the path directly to `CreateProcessW`,
+  which handles spaces natively — no shell escaping needed.
+
+## Gate evidence
+
+### Gate A — bun install
+`bun install --ignore-scripts --linker=hoisted` exited 0. 389 packages installed.
+
+### Gate B — bun run build
+`bun run build` exited 0. Built packages\coding-agent\dist\bundle (55 files, 8.2 MiB).
+
+### Gate C — bun run check
+`bun run check` exited 0. 0 TS errors. All checks (biome, pinned-deps,
+ts-imports, shrinkwrap, install-lock, tsgo --noEmit, browser-smoke) pass.
+
+### Gate D — bash ./test.sh
+`bash ./test.sh` exited 0. Pi-coding-agent: 254 test files passed (1 file
+failed with 2 unrelated pre-existing failures in `session-id-readonly.test.ts`
+and `stdout-cleanliness.test.ts`; these fail on `main` too — verified). Other
+packages: pi-telemetry 30/30, pi-protocol 147/147, pi-client 32/36 (4 skipped),
+pi-ai 1020/1021 (1 pre-existing failure), pi-evals 23/23, pi-server 12/50 (38
+skipped), pi-agent-core 408/414 (1 pre-existing failure), pi-session-backend-
+sqlite-node 86/87 (1 pre-existing failure), pi-coding-agent 2068/2168 (98
+skipped, 2 pre-existing failures).
+
+### Focused external-editor test
+`bunx vitest --run test/external-editor.test.ts` exited 0 (3/3 tests passed).
+Output:
+```
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  11:32:39
+   Duration  1.11s
+```
+
+### Gate K — build binary + --version
+`bun run --cwd packages/coding-agent build:binary` produces
+`packages/coding-agent/dist/pi.exe`. The `build:promote` sub-step fails because
+`scripts/promote-binary.mjs` hardcodes the worktree layout to
+`<main>/.worktrees/<name>/` (two parents up from worktree root), but our
+worktrees are at `C:\dev\.worktrees\<name>\` (sibling to main). This is a
+pre-existing script limitation unrelated to Unit 3's changes. The binary
+itself builds and runs:
+```
+$ ./packages/coding-agent/dist/pi --version
+pi 0.84.5 [bramburn]
+```
