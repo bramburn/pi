@@ -31,7 +31,7 @@
 		"profile:tui": "node scripts/profile-coding-agent-node.mjs --mode tui",
 		"profile:rpc": "node scripts/profile-coding-agent-node.mjs --mode rpc",
 		"test": "bun run test:scripts && bun run --if-present --filter '*' test",
-		"test:scripts": "bun test scripts/**/*.test.mjs",
+		"test:scripts": "bun test scripts/*.test.mjs",
 		"version:patch": "bun scripts/bump-version.mjs patch && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && node -e \"require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')\"",
 		"version:minor": "bun scripts/bump-version.mjs minor && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && node -e \"require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')\"",
 		"version:major": "bun scripts/bump-version.mjs major && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && node -e \"require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')\"",
