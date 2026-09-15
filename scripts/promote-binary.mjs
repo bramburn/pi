@@ -16,13 +16,52 @@
 //   - In the main checkout (`.git` is a directory): no-op with a clear message.
 //   - Exits 2 if the source binary is missing (so CI / pre-commit hooks fail
 //     loudly instead of silently copying nothing).
+//   - The main checkout is found via `git rev-parse --git-common-dir` rather
+//     than by walking parent directories, so it works regardless of how the
+//     worktree is laid out on disk.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, statSync, copyFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const BINARY_NAME = process.platform === "win32" ? "pi.exe" : "pi";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+
+function findMainCheckout(repoRoot) {
+	let commonDir;
+	try {
+		commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+			cwd: repoRoot,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		}).trim();
+	} catch (error) {
+		if (error.code === "ENOENT") {
+			console.error("[promote-binary] git not found on PATH");
+		} else {
+			const stderr = error.stderr ? error.stderr.toString().trim() : "";
+			console.error(
+				`[promote-binary] git rev-parse failed: ${error.message}${stderr ? `\n${stderr}` : ""}`,
+			);
+		}
+		return null;
+	}
+	const resolvedCommon = isAbsolute(commonDir) ? commonDir : resolve(repoRoot, commonDir);
+	const main = resolve(resolvedCommon, "..");
+	let mainStat;
+	try {
+		mainStat = statSync(main);
+	} catch {
+		return null;
+	}
+	if (!mainStat.isDirectory()) {
+		return null;
+	}
+	return main;
+}
 
 // Detect worktree: in a worktree, .git is a file pointing at
 // $GIT_DIR/worktrees/<name>. In a main checkout, .git is a directory.
@@ -41,12 +80,15 @@ if (!isWorktree) {
 	process.exit(0);
 }
 
-// Worktree layout assumed: <main>/.worktrees/<name>/<repo>/...
-// The script lives at <worktree>/scripts/promote-binary.mjs, so two parents up
-// is the main checkout.
-const mainCheckout = resolve(repoRoot, "..", "..");
-const src = join(repoRoot, "packages", "coding-agent", "dist", "pi.exe");
-const dst = join(mainCheckout, "packages", "coding-agent", "dist", "pi.exe");
+// Resolve main checkout via git, not by walking parents — this works for
+// any worktree layout (sibling worktrees, .worktrees/ under main, etc.).
+const mainCheckout = findMainCheckout(repoRoot);
+if (!mainCheckout) {
+	console.error(`[promote-binary] failed to resolve main checkout from ${repoRoot}`);
+	process.exit(1);
+}
+const src = join(repoRoot, "packages", "coding-agent", "dist", BINARY_NAME);
+const dst = join(mainCheckout, "packages", "coding-agent", "dist", BINARY_NAME);
 
 if (!existsSync(src)) {
 	console.error(`[promote-binary] source not found: ${src}`);
