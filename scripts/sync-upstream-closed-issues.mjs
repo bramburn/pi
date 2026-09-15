@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // sync-upstream-closed-issues.mjs
 //
 // Periodic sync: pull user-contributed closed issues from earendil-works/pi

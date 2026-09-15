@@ -58,13 +58,14 @@ if ($noEnv) {
 	Write-Host "Running without API keys..."
 }
 
-$tsxBin = Join-Path $scriptDir "node_modules/.bin/tsx.cmd"
-if (-not (Test-Path -LiteralPath $tsxBin)) {
-	throw "tsx not found at $tsxBin. Run npm install from the repo root first."
+$bunBin = Join-Path $env:USERPROFILE ".bun/bin/bun.exe"
+if (-not (Test-Path -LiteralPath $bunBin)) {
+	throw "bun not found at $bunBin. Install bun from https://bun.sh or run 'npm install -g bun'."
 }
 
 $cliPath = Join-Path $scriptDir "packages/coding-agent/src/cli.ts"
-& $tsxBin $cliPath @forwardArgs
+$tsconfigPath = Join-Path $scriptDir "tsconfig.json"
+& $bunBin "--tsconfig=`"$tsconfigPath`"" $cliPath @forwardArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
 	exit $exitCode

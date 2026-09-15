@@ -14,6 +14,18 @@ interface EditorCapture {
 	directoryMode: number;
 }
 
+// Quote a path if it contains whitespace so the resulting command string
+// tokenizes correctly when the production function splits on space. Required
+// on Windows because `process.execPath` is `C:\Program Files\nodejs\node.exe`.
+function quoteIfNeeded(value: string): string {
+	if (!/\s/.test(value)) {
+		return value;
+	}
+
+	const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	return `"${escaped}"`;
+}
+
 async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
 	result: ExternalEditorResult;
 	capture: EditorCapture;
@@ -22,7 +34,7 @@ async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
 	const capturePath = join(testDirectory, "capture.json");
 	try {
 		const result = await editInExternalEditor({
-			command: `${process.execPath} ${editorFixturePath} ${capturePath}${fixtureFlag ? ` ${fixtureFlag}` : ""}`,
+			command: `${quoteIfNeeded(process.execPath)} ${quoteIfNeeded(editorFixturePath)} ${quoteIfNeeded(capturePath)}${fixtureFlag ? ` ${fixtureFlag}` : ""}`,
 			content: "original",
 		});
 		const capture = JSON.parse(readFileSync(capturePath, "utf-8")) as EditorCapture;

@@ -1,0 +1,112 @@
+# Baseline gate outputs (Phase 0)
+
+Branch: `migration/full-bun-helix` off `main`
+Date: 2026-09-14
+
+## Gate A — `bun install --ignore-scripts --linker=hoisted`
+
+Exit: 0
+
+bun install v1.3.14 (0d9b296a)
+Resolving dependencies
+Resolved, downloaded and extracted [6]
+warn: Bun currently does not support nested "overrides" at C:/dev/pi/package.json:69:13 (cosmetic; documented in AGENTS.md)
+Saved lockfile
++ @anthropic-ai/sandbox-runtime@0.0.26
++ @biomejs/biome@2.3.5
++ @types/node@22.19.19
++ @typescript/native-preview@7.0.0-dev.20260120.1
++ esbuild@0.28.1
++ husky@9.1.7
++ shx@0.4.0
++ tsx@4.22.1
++ typescript@5.9.3 (v7.0.2 available)
++ @smithy/types@4.14.2
+389 packages installed [98.23s]
+Removed: 1
+
+## Gate B — `bun run build`
+
+Exit: 0
+
+Built 9 workspace packages in dependency order:
+- tui, telemetry, ai, agent, session-backends/sqlite-node, protocol, client, server, coding-agent
+- packages\coding-agent\dist\bundle produced (55 files, 8.2 MiB)
+- 1400 tool-capable models, 1130 reasoning-capable models
+
+## Gate C — `bun run check`
+
+Exit: 0
+
+All sub-checks green:
+- biome (1148 files, fixed 3)
+- check:pinned-deps
+- check:ts-imports
+- check:shrinkwrap (npm-shrinkwrap.json is up to date)
+- check:install-lock:coding-agent (install-lock is up to date)
+- tsgo --noEmit
+- check:browser-smoke
+
+## Gate D — `bash ./test.sh`
+
+Exit: 1 (FAILED — pre-existing baseline issue)
+
+$ bun run test:scripts && npm test --workspaces --if-present
+$ node --test scripts/*.test.mjs
+TAP version 13
+
+Failing tests (all in scripts/fork-publish-rename.test.mjs):
+- Test 1 "rewrites name, workspace deps, and upstream repository.url" — fails (in-flight.json missing)
+- Test 2 "preserves third-party earendil scope..." — fails (in-flight.json missing)
+- Test 3 "leaves repository.url alone when it is already the fork URL" — fails (in-flight.json missing)
+- Test 4 "handles a package with no deps and no repository" — fails (in-flight.json missing)
+- Test 6 "restores the original package.json even when the child exits non-zero" — fails (expected exit 42, got 1)
+
+Tests 11, pass 6, fail 5
+
+### Root cause
+
+scripts/fork-publish-rename.mjs line 95:
+  const result = spawnSync(cmd[0], cmd.slice(1), {
+      stdio: "inherit",
+      cwd: resolve(pkgDir),
+      shell: process.platform === "win32",
+  });
+
+When cmd[0] = process.execPath = "C:\Program Files\nodejs\node.exe" (contains a space),
+the Windows shell mode of spawnSync joins the executable and args into a single
+command line and hands it to cmd.exe, which splits on the space and reports:
+"'C:\Program' is not recognized as an internal or external command".
+
+Manual reproduction confirms:
+  renamed: ... -> @bramburn/pi-test (deps: 1 rewrite, repo: rewritten)
+  'C:\Program' is not recognized as an internal or external command, operable program or batch file.
+  restored: ...
+  exit: 1
+
+### Why CI doesn't hit this
+
+CI calls `node scripts/fork-publish-rename.mjs <pkg> npm publish ...` where cmd[0]
+= "npm" (no spaces). The Windows shell handles npm.cmd resolution correctly.
+The bug only triggers when the first arg is an absolute path containing spaces
+— which is exactly what the unit tests do (they pass process.execPath).
+
+### Test comment is misleading
+
+fork-publish-rename.test.mjs:11-16 claims:
+  "fork-publish-rename.mjs sets `shell: true` on Windows, but Node's spawnSync
+  still receives the args as an array — it joins them into a single command
+  line only for display, the actual execve still gets the array."
+
+This is incorrect when shell:true on Windows. With shell:true, Node hands
+the command line to cmd.exe, which DOES string-split on spaces.
+
+### Fix plan
+
+CP-0.3: Replace the spawnSync call in fork-publish-rename.mjs to properly
+quote the executable and args when shell:true on Windows.
+
+## Gate K — `bun run --cwd packages/coding-agent build:binary`
+
+Not run at baseline (separate from `bun run build`). Will run as part of
+binary-build verification during CP-2.20.

@@ -14,6 +14,9 @@ export default mergeConfig(
 			unstubEnvs: true,
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
+			// Exclude dist/ so vitest doesn't run copied .test.ts files that
+			// ship in the build output (e.g. examples/extensions/background-tasks).
+			exclude: ["**/dist/**", "**/node_modules/**", "**/.git/**"],
 			server: {
 				deps: {
 					external: [/@silvia-odwyer\/photon-node/],

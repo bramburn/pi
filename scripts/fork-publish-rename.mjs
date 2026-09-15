@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Helper for the publish workflow: rename package.json to @bramburn/* before
 // npm publish, then restore on exit. Also rewrites every workspace dep under
 // the @earendil-works/pi-* scope and the repository.url so the published
@@ -92,11 +92,20 @@ process.stdout.write(
 
 let exitCode = 0;
 try {
-	const result = spawnSync(cmd[0], cmd.slice(1), {
-		stdio: "inherit",
-		cwd: resolve(pkgDir),
-		shell: process.platform === "win32",
-	});
+	let result;
+	if (process.platform === "win32") {
+		// Avoid manual command-string quoting/escaping on Windows. Passing
+		// executable and args separately lets Node handle argument passing.
+		result = spawnSync(cmd[0], cmd.slice(1), {
+			stdio: "inherit",
+			cwd: resolve(pkgDir),
+		});
+	} else {
+		result = spawnSync(cmd[0], cmd.slice(1), {
+			stdio: "inherit",
+			cwd: resolve(pkgDir),
+		});
+	}
 	exitCode = result.status ?? 1;
 } finally {
 	writeFileSync(pkgJsonPath, orig);

@@ -19,7 +19,7 @@
 		"clean": "shx rm -rf dist",
 		"build": "tsgo -p tsconfig.build.json",
 		"test": "vitest --run",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "bun --bun run clean && bun --bun run build"
 	},
 	"keywords": [
 		"pi",
@@ -36,7 +36,8 @@
 		"directory": "packages/protocol"
 	},
 	"engines": {
-		"node": ">=22.19.0"
+		"node": ">=22.19.0",
+		"bun": ">=1.3.14"
 	},
 	"dependencies": {
 		"typebox": "1.3.7"

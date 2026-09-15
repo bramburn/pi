@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // sync-upstream-scheduler.mjs
 //
 // Cross-platform scheduler installer for the upstream-closed-issue sync.

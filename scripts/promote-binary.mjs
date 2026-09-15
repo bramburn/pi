@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Promote the freshly built `dist/pi.exe` from a worktree to the main checkout.
 //
 // Why: the `pi-bun.cmd` wrapper at C:\Users\bramburn\.pi\agent\bin\pi-bun.cmd

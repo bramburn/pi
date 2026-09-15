@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Release script for pi-mono
  *
@@ -145,7 +145,7 @@ function bumpOrSetVersion(target) {
 
 	if (BUMP_TYPES.has(target)) {
 		console.log(`Bumping version (${target})...`);
-		run(`npm run version:${target}`);
+		run(`bun --bun run version:${target}`);
 	} else {
 		if (compareVersions(target, currentVersion) <= 0) {
 			console.error(`Error: explicit version ${target} must be greater than current version ${currentVersion}.`);
@@ -153,15 +153,15 @@ function bumpOrSetVersion(target) {
 		}
 
 		console.log(`Setting explicit version (${target})...`);
-		run(`npm version ${target} --workspaces --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
+		run(`bun scripts/bump-version.mjs ${target} && bun scripts/sync-versions.js && bun install --no-save --ignore-scripts && node -e "require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')"`);
 	}
 
 	// npm version can temporarily install the previous workspace versions before
 	// sync-versions updates inter-package ranges. Remove those stale lock entries,
 	// refresh the lockfile, then hydrate from the final dependency graph.
 	removeStaleWorkspaceLockEntries();
-	run("npm install --package-lock-only --ignore-scripts");
-	run("npm ci --ignore-scripts");
+	run(`bun install --no-save --ignore-scripts && node -e "require('fs').writeFileSync('package-lock.json', JSON.stringify(JSON.parse(require('fs').readFileSync('package-lock.json','utf8')),null,'\\t')+'\\n')"`);
+	run("bun install --frozen-lockfile --ignore-scripts");
 	return getVersion();
 }
 
@@ -236,19 +236,19 @@ console.log();
 
 // 5. Regenerate release artifacts
 console.log("Regenerating release artifacts...");
-run("npm run generate:models");
-run("npm run check:model-data");
-run("npm run shrinkwrap:coding-agent");
-run("npm run install-lock:coding-agent");
+run("bun --bun run generate:models");
+run("bun --bun run check:model-data");
+run("bun --bun run shrinkwrap:coding-agent");
+run("bun --bun run install-lock:coding-agent");
 console.log();
 
 // 6. Run checks and tests
 console.log("Running checks...");
-run("npm run check");
+run("bun --bun run check");
 console.log();
 
 console.log("Building packages for tests...");
-run("npm run build:offline");
+run("bun --bun run build:offline");
 console.log();
 
 console.log("Running tests...");

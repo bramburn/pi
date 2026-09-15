@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * scripts/build-both.mjs
  *
@@ -6,7 +6,7 @@
  * status reporting.
  *
  * - Detects `node` and `bun` on PATH (with version + resolved path).
- * - Builds the Node.js target via `npm run build` (when node is available
+ * - Builds the Node.js target via `bun --bun run build` (when node is available
  *   and the target is not skipped).
  * - Builds the Bun binary target via
  *   `bun run --cwd packages/coding-agent build:binary` (when bun is
@@ -112,7 +112,7 @@ supported, and reports the result with a reason for any skip or
 failure.
 
 Targets:
-  Node  npm run build                         -> dist/ in every workspace package
+  Node  bun --bun run build                   -> dist/ in every workspace package
                                                 -> packages/coding-agent/dist/cli.js
   Bun   bun run --cwd packages/coding-agent   -> packages/coding-agent/dist/pi(.exe)
        build:binary
@@ -241,11 +241,11 @@ function runNodeTarget(runtimes) {
 
 	logSection(`Node target (${node.version})`);
 	if (options.clean) {
-		const status = runCommand("node-clean", "npm", ["run", "clean", "--workspaces"]);
-		if (status !== 0) return { status: "failed", reason: "npm run clean failed" };
+		const status = runCommand("node-clean", "bun", ["--bun", "run", "--if-present", "--filter", "*", "clean"]);
+		if (status !== 0) return { status: "failed", reason: "bun run clean failed" };
 	}
-	const status = runCommand("node-build", "npm", ["run", "build"]);
-	if (status !== 0) return { status: "failed", reason: "npm run build failed" };
+	const status = runCommand("node-build", "bun", ["--bun", "run", "build"]);
+	if (status !== 0) return { status: "failed", reason: "bun run build failed" };
 	if (!existsSync(nodeArtifact)) {
 		return { status: "failed", reason: `expected artifact missing after build: ${nodeArtifact}` };
 	}
@@ -267,13 +267,13 @@ function runBunTarget(runtimes) {
 
 	logSection(`Bun target (${bun.version})`);
 	if (options.clean) {
-		const status = runCommand("bun-clean", "bun", ["run", "clean", "--workspaces"]);
+		const status = runCommand("bun-clean", "bun", ["--bun", "run", "--if-present", "--filter", "*", "clean"]);
 		if (status !== 0) return { status: "failed", reason: "bun run clean failed" };
 	}
 	const status = runCommand(
 		"bun-build",
 		"bun",
-		["run", "--cwd", "packages/coding-agent", "build:binary"],
+		["--bun", "run", "--cwd", "packages/coding-agent", "build:binary"],
 	);
 	if (status !== 0) return { status: "failed", reason: "build:binary failed" };
 	if (!existsSync(bunBinary)) {
