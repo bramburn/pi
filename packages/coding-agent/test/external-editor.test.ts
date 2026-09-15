@@ -31,8 +31,7 @@ function wrapInDoubleQuotesIfHasWhitespace(value: string): string {
 	// paths like `C:\Program Files\...` and CreateProcessW (which `spawn` with
 	// `shell: false` calls directly) would then interpret `\\` as a UNC
 	// prefix, breaking the path.
-	// codeql[js/incomplete-string-escaping] intentional: see comment above
-	const escaped = value.replace(/"/g, '\\"');
+	const escaped = value.replace(/"/g, '\\"'); // lgtm[js/incomplete-string-escaping] intentional: see comment above
 	return `"${escaped}"`;
 }
 
