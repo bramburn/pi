@@ -35,7 +35,8 @@ const bunBinary = process.platform === "win32"
 	? join(codingAgentDir, "dist", "pi.exe")
 	: join(codingAgentDir, "dist", "pi");
 const isWindows = process.platform === "win32";
-const useShell = isWindows;
+
+verifyRepoRoot();
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -43,8 +44,6 @@ if (options.help) {
 	printHelp();
 	process.exit(0);
 }
-
-verifyRepoRoot();
 
 const runtimes = detectRuntimes();
 printRuntimeSection(runtimes);
@@ -126,6 +125,9 @@ Options:
   --quiet         Suppress per-step command lines
   -h, --help      Show this help
 
+Note: when --bun-only is not used, the node build chain runs once via
+the outer script and again via packages/coding-agent's build:binary step.
+
 Exit codes:
   0  all enabled builds succeeded
   1  one or more enabled builds failed
@@ -154,18 +156,30 @@ function logSection(title) {
 }
 
 function detectRuntime(bin) {
-	const result = spawnSync(bin, ["--version"], {
-		encoding: "utf8",
-		shell: useShell,
-		windowsHide: true,
-	});
-	if (result.status !== 0) return { available: false };
-	const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-	const version = stdout.split(/\r?\n/)[0]?.trim() || "(unknown version)";
+	// Resolve the binary path: try the plain name, then Windows .exe and .cmd
+	// variants so we don't depend on the shell's PATHEXT resolution (which
+	// would force shell: true and break on paths containing spaces).
+	const candidates = isWindows ? [bin, `${bin}.exe`, `${bin}.cmd`] : [bin];
+	let version = null;
+	for (const candidate of candidates) {
+		const result = spawnSync(candidate, ["--version"], {
+			encoding: "utf8",
+			shell: false,
+			windowsHide: true,
+		});
+		if (result.status === 0) {
+			const stdout = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+			version = stdout.split(/\r?\n/)[0]?.trim() || "(unknown version)";
+			break;
+		}
+	}
+	if (version === null) return { available: false };
+	// `where.exe` / `which` are themselves shell-resolved on Windows, so they
+	// require shell: true even though we're asking them about a stable binary.
 	const whichCmd = isWindows ? "where.exe" : "which";
 	const whichResult = spawnSync(whichCmd, [bin], {
 		encoding: "utf8",
-		shell: useShell,
+		shell: true,
 		windowsHide: true,
 	});
 	const path = (whichResult.stdout ?? "").trim().split(/\r?\n/)[0] || "";
@@ -173,22 +187,15 @@ function detectRuntime(bin) {
 }
 
 function runCommand(label, command, args) {
-	log(`$ ${label}: ${command} ${args.map(quote).join(" ")}`);
+	log(`$ ${label}: ${command} ${args.join(" ")}`);
 	const result = spawnSync(command, args, {
 		cwd: repoRoot,
 		encoding: "utf8",
 		stdio: "inherit",
-		shell: useShell,
+		shell: false,
 		windowsHide: true,
 	});
 	return result.status ?? 1;
-}
-
-function quote(value) {
-	if (/\s/.test(value)) {
-		return isWindows ? `"${value}"` : `'${value}'`;
-	}
-	return value;
 }
 
 function verifyRepoRoot() {
@@ -266,10 +273,8 @@ function runBunTarget(runtimes) {
 	}
 
 	logSection(`Bun target (${bun.version})`);
-	if (options.clean) {
-		const status = runCommand("bun-clean", "bun", ["--bun", "run", "--if-present", "--filter", "*", "clean"]);
-		if (status !== 0) return { status: "failed", reason: "bun run clean failed" };
-	}
+	// No separate clean step: node-clean above already invoked the same
+	// workspace-wide `clean` script, so dist/ is fresh for the bun build too.
 	const status = runCommand(
 		"bun-build",
 		"bun",
