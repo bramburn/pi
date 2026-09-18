@@ -307,7 +307,8 @@ class SessionList implements Component, Focusable {
 	public onDeleteSession?: (sessionPath: string) => Promise<void>;
 	public onRenameSession?: (sessionPath: string) => void;
 	public onError?: (message: string) => void;
-	private maxVisible: number = 10; // Max sessions visible (one line each)
+	// Floor for maxVisible; recomputed in the constructor from terminalHeight minus chrome.
+	private maxVisible: number = 5;
 
 	// Focusable implementation - propagate to searchInput for IME cursor positioning
 	private _focused = false;
@@ -326,6 +327,7 @@ class SessionList implements Component, Focusable {
 		nameFilter: NameFilter,
 		keybindings: KeybindingsManager,
 		currentSessionFilePath?: string,
+		terminalHeight?: number,
 	) {
 		this.allSessions = sessions;
 		this.filteredSessions = [];
@@ -335,6 +337,12 @@ class SessionList implements Component, Focusable {
 		this.nameFilter = nameFilter;
 		this.keybindings = keybindings;
 		this.currentSessionCanonicalPath = canonicalizePath(currentSessionFilePath);
+		// Chrome reserved by SessionList itself (search input + blank + scroll indicator)
+		// plus outer SessionSelectorComponent chrome (top spacer, border, header ~3 lines,
+		// spacers, bottom border). Floor at 1 so chrome always fits — on very small terminals
+		// we sacrifice visible row count rather than clipping the border/indicator.
+		const chrome = 12;
+		this.maxVisible = Math.max(1, (terminalHeight ?? 24) - chrome);
 		this.filterSessions("");
 
 		// Handle Enter in search input - select current item
@@ -759,6 +767,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			keybindings?: KeybindingsManager;
 		},
 		currentSessionFilePath?: string,
+		terminalHeight?: number,
 	) {
 		super();
 		this.keybindings = options?.keybindings ?? KeybindingsManager.create();
@@ -779,6 +788,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			this.nameFilter,
 			this.keybindings,
 			currentSessionFilePath,
+			terminalHeight,
 		);
 
 		this.buildBaseLayout(this.sessionList);
