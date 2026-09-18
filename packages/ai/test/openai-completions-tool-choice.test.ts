@@ -325,9 +325,9 @@ describe("openai-completions tool_choice", () => {
 				const model = getModel(provider, modelId)!;
 				expect(model.compat?.supportsReasoningEffort).toBe(true);
 				expect(model.thinkingLevelMap).toEqual({
-					off: "none",
+					off: null,
 					minimal: null,
-					low: null,
+					low: "low",
 					medium: null,
 					high: "high",
 					xhigh: null,

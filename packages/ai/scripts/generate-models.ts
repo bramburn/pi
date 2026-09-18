@@ -2245,9 +2245,8 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			const kimiCodingFallback: Array<{
 				id: string;
 				name: string;
-				reasoning: boolean;
 				allowEmptySignature?: boolean;
-				compat?: Record<string, unknown>;
+				thinkingLevelMap?: NonNullable<Model<Api>["thinkingLevelMap"]>;
 				input: ("text" | "image")[];
 				contextWindow: number;
 				maxTokens: number;
@@ -2255,7 +2254,6 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				{
 					id: "kimi-for-coding",
 					name: "Kimi For Coding",
-					reasoning: false,
 					allowEmptySignature: true,
 					input: ["text", "image"],
 					contextWindow: 262144,
@@ -2264,7 +2262,6 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				{
 					id: "kimi-for-coding-highspeed",
 					name: "Kimi For Coding HighSpeed",
-					reasoning: false,
 					input: ["text", "image"],
 					contextWindow: 262144,
 					maxTokens: 32768,
@@ -2272,9 +2269,16 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				{
 					id: "k3",
 					name: "Kimi K3",
-					reasoning: true,
 					allowEmptySignature: true,
-					compat: { thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" } },
+					thinkingLevelMap: {
+						off: null,
+						minimal: null,
+						low: "low",
+						medium: null,
+						high: "high",
+						xhigh: null,
+						max: "max",
+					},
 					input: ["text", "image"],
 					contextWindow: 1048576,
 					maxTokens: 131072,
@@ -2282,8 +2286,15 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				{
 					id: "k3-256k",
 					name: "Kimi K3-256K",
-					reasoning: true,
-					compat: { thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" } },
+					thinkingLevelMap: {
+						off: null,
+						minimal: null,
+						low: "low",
+						medium: null,
+						high: "high",
+						xhigh: null,
+						max: "max",
+					},
 					input: ["text", "image"],
 					contextWindow: 262144,
 					maxTokens: 131072,
@@ -2301,9 +2312,12 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					compat: {
 						...(fallback.allowEmptySignature ? { allowEmptySignature: true } : {}),
 						forceAdaptiveThinking: true,
-						...(fallback.compat ?? {}),
 					},
-					reasoning: fallback.reasoning,
+					// All kimi-coding models are reasoning-capable; the tests in
+					// test/anthropic-force-adaptive-thinking.test.ts rely on
+					// model.reasoning === true to drive adaptive thinking payloads.
+					reasoning: true,
+					...(fallback.thinkingLevelMap ? { thinkingLevelMap: fallback.thinkingLevelMap } : {}),
 					input: fallback.input,
 					cost: {
 						input: impliedCost.input,
