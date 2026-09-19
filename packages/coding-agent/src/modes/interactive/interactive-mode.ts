@@ -250,6 +250,11 @@ function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
 	return images;
 }
 
+/** True when a submit payload has no text and no images worth sending to the model. */
+function isEmptySubmit(payload: { text: string; attachments: PasteAttachment[] }): boolean {
+	return payload.text.trim().length === 0 && !attachmentsToImages(payload.attachments).length;
+}
+
 type CompactionCostNotice = {
 	type: "compaction_cost";
 	kind: "compaction" | "branch_summary";
@@ -3014,10 +3019,10 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
+			if (isEmptySubmit(payload)) return;
 			const images = attachmentsToImages(payload.attachments);
 			let text = payload.text;
 			text = text.trim();
-			if (!text) return;
 
 			// Handle commands
 			if (text === "/settings") {
@@ -4197,7 +4202,7 @@ export class InteractiveMode {
 		const attachments = this.editor.getAttachments?.() ?? [];
 		const images = attachmentsToImages(attachments);
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
-		if (!text) return;
+		if (!text && images.length === 0) return;
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {

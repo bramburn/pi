@@ -195,4 +195,39 @@ describe("InteractiveMode submit image extraction", () => {
 
 		expect(context.pendingUserInputs).toEqual([{ text: "plain prompt", images: [] }]);
 	});
+
+	it("submits an image-only payload when the user clears the text", async () => {
+		const context = createSubmitContext();
+		interactiveModePrototype.setupEditorSubmitHandler.call(context);
+
+		const imageBytes = makeImageBytes();
+		const attachments: PasteAttachment[] = [
+			{ kind: "image", mimeType: "image/png", bytes: imageBytes, fileName: "shot.png" },
+		];
+
+		await context.defaultEditor.onSubmit?.({ text: "", attachments });
+
+		expect(context.pendingUserInputs).toHaveLength(1);
+		expect(context.pendingUserInputs[0]).toEqual({
+			text: "",
+			images: [
+				{
+					type: "image",
+					mimeType: "image/png",
+					data: Buffer.from(imageBytes).toString("base64"),
+				},
+			],
+		});
+	});
+
+	it("skips the submit when text is empty and there are no image attachments", async () => {
+		const context = createSubmitContext();
+		interactiveModePrototype.setupEditorSubmitHandler.call(context);
+
+		await context.defaultEditor.onSubmit?.({ text: "   ", attachments: [] });
+
+		expect(context.pendingUserInputs).toEqual([]);
+		expect(context.session.prompt).not.toHaveBeenCalled();
+		expect(context.editor.addToHistory).not.toHaveBeenCalled();
+	});
 });

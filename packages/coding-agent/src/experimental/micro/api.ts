@@ -1,5 +1,5 @@
 import type { ConversationView, ModelRef } from "@earendil-works/pi-agent-core/experimental/pico3";
-import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
+import type { AuthEvent, AuthPrompt, ImageContent } from "@earendil-works/pi-ai";
 
 export type AuthPromptRequest = AuthPrompt extends infer Prompt
 	? Prompt extends unknown
@@ -73,9 +73,9 @@ export interface MicroViewSource {
 
 /** Local control surface. It deliberately does not expose Pico's Harness or ConversationHandle. */
 export interface MicroController {
-	prompt(text: string): Promise<void>;
-	steer(text: string): Promise<void>;
-	followUp(text: string): Promise<void>;
+	prompt(text: string, images?: ImageContent[]): Promise<void>;
+	steer(text: string, images?: ImageContent[]): Promise<void>;
+	followUp(text: string, images?: ImageContent[]): Promise<void>;
 	compact(instructions?: string): Promise<void>;
 	abort(): Promise<void>;
 	cycleThinking(): Promise<void>;

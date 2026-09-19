@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { AgentLane, Context, HarnessEvent, LaneSnapshot, WatchHandle } from "@earendil-works/pi-agent-core";
-import type { Models } from "@earendil-works/pi-ai";
+import type { ImageContent, Models } from "@earendil-works/pi-ai";
 import type {
 	CommandResult,
 	LaneServiceApi,
@@ -70,16 +70,16 @@ export class LaneService implements LaneServiceApi {
 		this.#watches.delete(subscriptionId);
 	}
 
-	prompt(text: string): Promise<CommandResult> {
-		return this.#command(() => this.#options.lane.prompt(text, undefined, this.#options.context));
+	prompt(text: string, images?: ImageContent[]): Promise<CommandResult> {
+		return this.#command(() => this.#options.lane.prompt(text, images, this.#options.context));
 	}
 
-	steer(text: string): Promise<CommandResult> {
-		return this.#command(() => this.#options.lane.steer(text, undefined, this.#options.context));
+	steer(text: string, images?: ImageContent[]): Promise<CommandResult> {
+		return this.#command(() => this.#options.lane.steer(text, images, this.#options.context));
 	}
 
-	followUp(text: string): Promise<CommandResult> {
-		return this.#command(() => this.#options.lane.followUp(text, undefined, this.#options.context));
+	followUp(text: string, images?: ImageContent[]): Promise<CommandResult> {
+		return this.#command(() => this.#options.lane.followUp(text, images, this.#options.context));
 	}
 
 	compact(): Promise<CommandResult> {

@@ -1,7 +1,7 @@
 /** Service contracts and everything that crosses the wire. */
 
 import type { HarnessEvent, LaneSnapshot } from "@earendil-works/pi-agent-core";
-import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
+import type { AuthEvent, AuthPrompt, ImageContent } from "@earendil-works/pi-ai";
 
 /** Commands answer with data, never exceptions, exactly like a remote call would. */
 export type CommandResult = { ok: true } | { ok: false; error: string };
@@ -104,9 +104,9 @@ export interface LaneServiceApi {
 	/** Begin delivery, draining everything buffered since the snapshot. */
 	start(subscriptionId: string): Promise<void>;
 	unwatch(subscriptionId: string): Promise<void>;
-	prompt(text: string): Promise<CommandResult>;
-	steer(text: string): Promise<CommandResult>;
-	followUp(text: string): Promise<CommandResult>;
+	prompt(text: string, images?: ImageContent[]): Promise<CommandResult>;
+	steer(text: string, images?: ImageContent[]): Promise<CommandResult>;
+	followUp(text: string, images?: ImageContent[]): Promise<CommandResult>;
 	compact(): Promise<CommandResult>;
 	abort(): Promise<CommandResult>;
 	setModel(ref: ModelRef): Promise<CommandResult>;

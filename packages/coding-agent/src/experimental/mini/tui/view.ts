@@ -6,7 +6,7 @@
  */
 
 import type { AgentMessage, Entry, LaneSnapshot } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, AuthEvent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AuthEvent, ImageContent } from "@earendil-works/pi-ai";
 import {
 	type Component,
 	Container,
@@ -14,6 +14,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	type PasteAttachment,
 	ProcessTerminal,
 	ScrollView,
 	type SelectItem,
@@ -128,12 +129,27 @@ class ListSelector extends Container implements Focusable {
 }
 
 interface MiniTuiHandlers {
-	submit(payload: { text: string; attachments: unknown[] }): void;
+	submit(payload: { text: string; attachments: PasteAttachment[] }): void;
 	/** Queue the current editor text as a follow-up instead of steering the active run. */
-	queueFollowUp(text: string): void;
+	queueFollowUp(payload: { text: string; attachments: PasteAttachment[] }): void;
 	interrupt(): void;
 	exit(): void;
 	selectModel(): void;
+}
+
+/** Convert paste-marker image attachments into `ImageContent[]` blocks for the model. */
+function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
+	const images: ImageContent[] = [];
+	for (const attachment of attachments) {
+		if (attachment.kind === "image") {
+			images.push({
+				type: "image",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			});
+		}
+	}
+	return images;
 }
 
 /** Alt-screen chat surface. Rendering is a function of the replicated snapshot. */
@@ -166,10 +182,12 @@ class MiniTui {
 		this.#editor.onAction("app.clear", handlers.exit);
 		this.#editor.onAction("app.model.select", handlers.selectModel);
 		this.#editor.onAction("app.message.followUp", () => {
+			const attachments = this.#editor.getAttachments?.() ?? [];
+			const images = attachmentsToImages(attachments);
 			const text = this.#editor.getText().trim();
-			if (text.length === 0) return;
+			if (text.length === 0 && images.length === 0) return;
 			this.#editor.setText("");
-			handlers.queueFollowUp(text);
+			handlers.queueFollowUp({ text, attachments });
 		});
 
 		this.#editorContainer.addChild(this.#editor);
@@ -518,7 +536,8 @@ export async function runView(client: AttachedSession): Promise<void> {
 	view = new MiniTui(client.state().cwd, {
 		submit: (payload) => {
 			const trimmed = payload.text.trim();
-			if (trimmed.length === 0) return;
+			const images = attachmentsToImages(payload.attachments);
+			if (trimmed.length === 0 && images.length === 0) return;
 			if (trimmed === "/model") return selectModel();
 			if (trimmed === "/login") return login();
 			if (trimmed === "/compact") {
@@ -527,9 +546,15 @@ export async function runView(client: AttachedSession): Promise<void> {
 			}
 			// A submission during an active run steers it; alt+enter queues a follow-up instead.
 			const busy = client.state().lane.operation !== null;
-			void (busy ? client.lane.steer(trimmed) : client.lane.prompt(trimmed)).then(report);
+			const call = busy
+				? client.lane.steer(trimmed, images.length > 0 ? images : undefined)
+				: client.lane.prompt(trimmed, images.length > 0 ? images : undefined);
+			void call.then(report);
 		},
-		queueFollowUp: (text) => void client.lane.followUp(text).then(report),
+		queueFollowUp: (payload) => {
+			const images = attachmentsToImages(payload.attachments);
+			void client.lane.followUp(payload.text, images.length > 0 ? images : undefined).then(report);
+		},
 		// The worker is authoritative. Never suppress abort from a potentially stale presentation snapshot.
 		interrupt: () => void client.lane.abort().then(report),
 		exit,

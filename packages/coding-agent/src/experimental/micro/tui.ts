@@ -1,4 +1,4 @@
-import type { AssistantMessage, AuthEvent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AuthEvent, ImageContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import {
 	type Component,
 	Container,
@@ -6,6 +6,7 @@ import {
 	fuzzyFilter,
 	getKeybindings,
 	Input,
+	type PasteAttachment,
 	ProcessTerminal,
 	ScrollView,
 	type SelectItem,
@@ -103,12 +104,27 @@ class ListSelector extends Container implements Focusable {
 }
 
 interface TuiHandlers {
-	submit(payload: { text: string; attachments: unknown[] }): void;
-	followUp(text: string): void;
+	submit(payload: { text: string; attachments: PasteAttachment[] }): void;
+	followUp(payload: { text: string; attachments: PasteAttachment[] }): void;
 	abort(): void;
 	exit(): void;
 	selectModel(): void;
 	cycleThinking(): void;
+}
+
+/** Convert paste-marker image attachments into `ImageContent[]` blocks for the model. */
+function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
+	const images: ImageContent[] = [];
+	for (const attachment of attachments) {
+		if (attachment.kind === "image") {
+			images.push({
+				type: "image",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			});
+		}
+	}
+	return images;
 }
 
 class MicroTui {
@@ -143,10 +159,12 @@ class MicroTui {
 		this.#editor.onAction("app.model.select", handlers.selectModel);
 		this.#editor.onAction("app.thinking.cycle", handlers.cycleThinking);
 		this.#editor.onAction("app.message.followUp", () => {
+			const attachments = this.#editor.getAttachments?.() ?? [];
+			const images = attachmentsToImages(attachments);
 			const text = this.#editor.getText().trim();
-			if (!text) return;
+			if (!text && images.length === 0) return;
 			this.#editor.setText("");
-			handlers.followUp(text);
+			handlers.followUp({ text, attachments });
 		});
 
 		this.#editorContainer.addChild(this.#editor);
@@ -483,13 +501,19 @@ export async function runMicroTui(source: MicroViewSource, controller: MicroCont
 	view = new MicroTui(source.current().session.cwd, {
 		submit: (payload) => {
 			const trimmed = payload.text.trim();
-			if (!trimmed) return;
+			const images = attachmentsToImages(payload.attachments);
+			if (!trimmed && images.length === 0) return;
 			if (trimmed === "/model") return selectModel();
 			if (trimmed === "/login") return login();
 			if (trimmed === "/compact") return void controller.compact();
-			void (source.current().conversation.turn ? controller.steer(trimmed) : controller.prompt(trimmed));
+			const imagePayload = images.length > 0 ? images : undefined;
+			const turn = source.current().conversation.turn;
+			void (turn ? controller.steer(trimmed, imagePayload) : controller.prompt(trimmed, imagePayload));
 		},
-		followUp: (text) => void controller.followUp(text),
+		followUp: (payload) => {
+			const images = attachmentsToImages(payload.attachments);
+			void controller.followUp(payload.text, images.length > 0 ? images : undefined);
+		},
 		abort: () => void controller.abort(),
 		exit,
 		selectModel,

@@ -20,7 +20,9 @@ import {
 	type AuthPrompt,
 	clampThinkingLevel,
 	getSupportedThinkingLevels,
+	type ImageContent,
 	type ModelThinkingLevel,
+	type TextContent,
 	type Usage,
 } from "@earendil-works/pi-ai";
 import { findInitialModel } from "../../core/model-resolver.ts";
@@ -40,6 +42,22 @@ import { selectSession } from "./sessions.ts";
 import { createMicroTools } from "./tools.ts";
 
 const DEFAULT_MODEL = { provider: "openai-codex", modelId: "gpt-5.6-sol" } as const;
+
+/**
+ * Build a `SendInput.content` payload from a text prompt and optional images.
+ * When there are no images we keep the wire format as a plain string; otherwise
+ * we emit the structured text + image content array accepted by Pico's `SendInput`.
+ */
+function buildSendContent(
+	text: string,
+	images: ImageContent[] | undefined,
+): string | (TextContent | ImageContent)[] {
+	if (!images || images.length === 0) return text;
+	const blocks: (TextContent | ImageContent)[] = [];
+	if (text.length > 0) blocks.push({ type: "text", text });
+	for (const image of images) blocks.push(image);
+	return blocks;
+}
 
 const SYSTEM_PROMPT = [
 	"You are an expert coding assistant working in a terminal.",
@@ -285,12 +303,27 @@ export async function openMicro(options: OpenMicroOptions = {}): Promise<OpenMic
 		};
 
 		const controller: MicroController = {
-			prompt: (text) =>
-				command(async () => void (await root.send({ content: text, whenBusy: "reject" }, BACKGROUND_CONTEXT))),
-			steer: (text) =>
-				command(async () => void (await root.send({ content: text, whenBusy: "steer" }, BACKGROUND_CONTEXT))),
-			followUp: (text) =>
-				command(async () => void (await root.send({ content: text, whenBusy: "followUp" }, BACKGROUND_CONTEXT))),
+			prompt: (text, images) =>
+				command(async () =>
+					void (await root.send(
+						{ content: buildSendContent(text, images), whenBusy: "reject" },
+						BACKGROUND_CONTEXT,
+					)),
+				),
+			steer: (text, images) =>
+				command(async () =>
+					void (await root.send(
+						{ content: buildSendContent(text, images), whenBusy: "steer" },
+						BACKGROUND_CONTEXT,
+					)),
+				),
+			followUp: (text, images) =>
+				command(async () =>
+					void (await root.send(
+						{ content: buildSendContent(text, images), whenBusy: "followUp" },
+						BACKGROUND_CONTEXT,
+					)),
+				),
 			compact: (instructions) => command(async () => void (await root.collapse(instructions, BACKGROUND_CONTEXT))),
 			abort: () =>
 				command(async () => {
