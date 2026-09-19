@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.85.0-b1] - 2026-09-14
+
 ### Added
 
 - **Analytics instrumentation** (Phase 1): local SQLite logging of run outcomes, tool usage, compaction events, and sub-agent task spans. When `enableAnalytics` is on, `~/.pi/analytics/YYYY-MM.db` is created with four tables (`pi_runs`, `pi_tool_invocations`, `pi_compaction_events`, `pi_subagent_tasks`). Writes are immediate and flushed on `agent_settled`. Guarded by the existing `enableAnalytics` / `trackingId` settings.

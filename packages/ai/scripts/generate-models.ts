@@ -2232,6 +2232,105 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
+		// Hardcoded fallback for kimi-coding models. models.dev does not expose the
+		// subscription-backed kimi-coding provider, so without this block the generator
+		// would skip emitting kimi-coding.models.ts and the build would fail to resolve
+		// the import in packages/ai/src/providers/kimi-coding.ts. Costs come from
+		// KIMI_CODING_IMPLIED_COSTS (subscription rates derived from the equivalent
+		// Moonshot API pricing). Skip any model already emitted above so we don't double-add.
+		{
+			const kimiCodingModelIds = new Set(
+				models.filter((m) => m.provider === "kimi-coding").map((m) => m.id),
+			);
+			const kimiCodingFallback: Array<{
+				id: string;
+				name: string;
+				allowEmptySignature?: boolean;
+				thinkingLevelMap?: NonNullable<Model<Api>["thinkingLevelMap"]>;
+				input: ("text" | "image")[];
+				contextWindow: number;
+				maxTokens: number;
+			}> = [
+				{
+					id: "kimi-for-coding",
+					name: "Kimi For Coding",
+					allowEmptySignature: true,
+					input: ["text", "image"],
+					contextWindow: 262144,
+					maxTokens: 32768,
+				},
+				{
+					id: "kimi-for-coding-highspeed",
+					name: "Kimi For Coding HighSpeed",
+					input: ["text", "image"],
+					contextWindow: 262144,
+					maxTokens: 32768,
+				},
+				{
+					id: "k3",
+					name: "Kimi K3",
+					allowEmptySignature: true,
+					thinkingLevelMap: {
+						off: null,
+						minimal: null,
+						low: "low",
+						medium: null,
+						high: "high",
+						xhigh: null,
+						max: "max",
+					},
+					input: ["text", "image"],
+					contextWindow: 1048576,
+					maxTokens: 131072,
+				},
+				{
+					id: "k3-256k",
+					name: "Kimi K3-256K",
+					thinkingLevelMap: {
+						off: null,
+						minimal: null,
+						low: "low",
+						medium: null,
+						high: "high",
+						xhigh: null,
+						max: "max",
+					},
+					input: ["text", "image"],
+					contextWindow: 262144,
+					maxTokens: 131072,
+				},
+			];
+			for (const fallback of kimiCodingFallback) {
+				if (kimiCodingModelIds.has(fallback.id)) continue;
+				const impliedCost = KIMI_CODING_IMPLIED_COSTS[fallback.id] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+				models.push({
+					id: fallback.id,
+					name: fallback.name,
+					api: "anthropic-messages",
+					provider: "kimi-coding",
+					baseUrl: "https://api.kimi.com/coding",
+					compat: {
+						...(fallback.allowEmptySignature ? { allowEmptySignature: true } : {}),
+						forceAdaptiveThinking: true,
+					},
+					// All kimi-coding models are reasoning-capable; the tests in
+					// test/anthropic-force-adaptive-thinking.test.ts rely on
+					// model.reasoning === true to drive adaptive thinking payloads.
+					reasoning: true,
+					...(fallback.thinkingLevelMap ? { thinkingLevelMap: fallback.thinkingLevelMap } : {}),
+					input: fallback.input,
+					cost: {
+						input: impliedCost.input,
+						output: impliedCost.output,
+						cacheRead: impliedCost.cacheRead,
+						cacheWrite: impliedCost.cacheWrite,
+					},
+					contextWindow: fallback.contextWindow,
+					maxTokens: fallback.maxTokens,
+				});
+			}
+		}
+
 		// Process Moonshot AI models
 		const moonshotVariants = [
 			{ key: "moonshotai", provider: "moonshotai", baseUrl: "https://api.moonshot.ai/v1" },

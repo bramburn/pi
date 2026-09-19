@@ -5328,6 +5328,7 @@ export class InteractiveMode {
 				},
 
 				this.sessionManager.getSessionFile(),
+				this.ui.terminal.rows,
 			);
 			return { component: selector, focus: selector };
 		});
