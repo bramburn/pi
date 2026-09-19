@@ -17,7 +17,7 @@ type ClipboardRequire = (id: string) => unknown;
 // every platform we ship a prebuild for. If a build ever needs to roll
 // back to the JS addon, restore the second probe and the matching
 // optionalDependencies entry.
-const CLIPBOARD_PROBES = ["@bramburn/clipboard-rs"] as const;
+const CLIPBOARD_PROBES = ["@bramburn/clipboard-rs", "@mariozechner/clipboard"] as const;
 
 const moduleRequire = createRequire(import.meta.url);
 const executableDirRequire = createRequire(pathToFileURL(join(dirname(process.execPath), "package.json")).href);
