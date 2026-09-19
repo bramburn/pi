@@ -41,6 +41,7 @@ describe("loadClipboardNative", () => {
 
 		expect(loadClipboardNative([missing])).toBeNull();
 		expect(missing).toHaveBeenCalledWith("@bramburn/clipboard-rs");
-		expect(missing).toHaveBeenCalledTimes(1);
+		expect(missing).toHaveBeenCalledWith("@mariozechner/clipboard");
+		expect(missing).toHaveBeenCalledTimes(2);
 	});
 });
