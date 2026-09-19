@@ -42,8 +42,27 @@ const archMap = {
 
 const platform = platformMap[process.platform];
 const arch = archMap[process.arch];
-const binaryPath =
-	platform && arch ? join(here, "prebuilds", `${platform}-${arch}`, "clipboard-rs.node") : null;
+
+// Prebuild path. The CI matrix in
+// .github/workflows/clipboard-rs-build.yml commits to the
+// `${platform}-${arch}-${abi}` triple (e.g. win32-x64-msvc,
+// linux-arm64-gnu). Older checkouts may use `${platform}-${arch}`
+// without the ABI suffix. Try ABI-suffixed paths first, fall back to
+// the legacy two-segment name.
+function resolveBinaryPath(plat, archName) {
+	const triple = `${plat}-${archName}`;
+	const candidates = [
+		join(here, "prebuilds", `${triple}-msvc`, "clipboard-rs.node"),
+		join(here, "prebuilds", `${triple}-gnu`, "clipboard-rs.node"),
+		join(here, "prebuilds", triple, "clipboard-rs.node"),
+	];
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) return candidate;
+	}
+	return candidates[0];
+}
+
+const binaryPath = platform && arch ? resolveBinaryPath(platform, arch) : null;
 
 // The addon is loaded on the first function call. If the prebuild is
 // missing (e.g. local dev checkout with no committed prebuilds), the

@@ -210,6 +210,49 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
 	}
 }
 
+/**
+ * Native-Windows PowerShell fallback. Used when the native addon path
+ * (`clipboard.hasImage() === false`) does not see an image but the
+ * Windows clipboard actually holds one — for example when arboard's
+ * Windows backend fails to open the clipboard because another
+ * application is holding it. PowerShell can read the clipboard via
+ * `System.Windows.Forms.Clipboard` regardless of arboard's state.
+ *
+ * Emits base64 to avoid Windows stdout encoding bugs that occur when
+ * piping binary PNG bytes through `cmd.exe` / the parent's codepage.
+ */
+function readClipboardImageViaPowerShellBase64(): ClipboardImage | null {
+	const psScript = [
+		"Add-Type -AssemblyName System.Windows.Forms",
+		"Add-Type -AssemblyName System.Drawing",
+		"$img = [System.Windows.Forms.Clipboard]::GetImage()",
+		"if ($img) {",
+		"  $ms = New-Object System.IO.MemoryStream",
+		"  $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)",
+		"  [Convert]::ToBase64String($ms.ToArray())",
+		"}",
+	].join(" ");
+
+	const result = runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
+		timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
+	});
+	if (!result.ok) {
+		return null;
+	}
+
+	const base64 = result.stdout.toString("utf8").trim();
+	if (!base64) {
+		return null;
+	}
+
+	const bytes = Buffer.from(base64, "base64");
+	if (bytes.length === 0) {
+		return null;
+	}
+
+	return { bytes: new Uint8Array(bytes), mimeType: "image/png" };
+}
+
 function readClipboardImageViaXclip(): ClipboardImage | null {
 	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
 		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
@@ -280,7 +323,13 @@ export async function readClipboardImage(options?: {
 			image = (await readClipboardImageViaNativeClipboard()) ?? readClipboardImageViaXclip();
 		}
 	} else {
+		// Native Windows / macOS: try the addon first, then fall back to
+		// PowerShell (Windows only) which can reach the clipboard when
+		// the native addon can't open it.
 		image = await readClipboardImageViaNativeClipboard();
+		if (!image && platform === "win32") {
+			image = readClipboardImageViaPowerShellBase64();
+		}
 	}
 
 	if (!image) {
