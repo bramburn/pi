@@ -100,7 +100,7 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 		// covers the actual contract: "setText does not flip hasImage".
 		await clipboard.setText("reset to known state");
 		assert.equal(
-			clipboard.hasImage(),
+			await clipboard.hasImage(),
 			false,
 			"hasImage must be false after a plain-text write",
 		);
@@ -122,7 +122,11 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 		);
 		// After a text round-trip the clipboard must not suddenly
 		// advertise itself as holding an image.
-		assert.equal(clipboard.hasImage(), false, "hasImage must be false after a plain-text write");
+		assert.equal(
+			await clipboard.hasImage(),
+			false,
+			"hasImage must be false after a plain-text write",
+		);
 	});
 
 	test(`@bramburn/clipboard-rs image read on ${platform}-${arch}`, async (t) => {
@@ -134,7 +138,7 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 
 		// No image on the clipboard to start with. hasImage returns
 		// false and getImageBinary returns an empty array.
-		assert.equal(clipboard.hasImage(), false);
+		assert.equal(await clipboard.hasImage(), false);
 		const empty = await clipboard.getImageBinary();
 		assert.ok(Array.isArray(empty), "getImageBinary must return an array");
 		assert.equal(empty.length, 0, "getImageBinary must be empty when no image is on the clipboard");
@@ -144,7 +148,7 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 		// inline image preview.
 		await clipboard.setText("plain text payload");
 		assert.equal(
-			clipboard.hasImage(),
+			await clipboard.hasImage(),
 			false,
 			"hasImage must stay false after a plain-text write",
 		);
