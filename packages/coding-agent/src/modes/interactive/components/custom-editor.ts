@@ -20,6 +20,7 @@ export class CustomEditor extends Editor {
 	public onEscape?: () => void;
 	public onCtrlD?: () => void;
 	public onPasteImage?: () => void;
+	public onPasteText?: () => void;
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
 
@@ -91,9 +92,14 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Check for clipboard paste keybinding
+		// Check for clipboard paste keybindings (pasteImage wins over pasteText so a
+		// user who binds both to the same key still gets image-or-text behavior).
 		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
 			this.onPasteImage?.();
+			return;
+		}
+		if (this.keybindings.matches(data, "app.clipboard.pasteText")) {
+			this.onPasteText?.();
 			return;
 		}
 

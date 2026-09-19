@@ -1,7 +1,11 @@
+import type { ImageContent } from "@earendil-works/pi-ai/compat";
+import type { PasteAttachment } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
-type SubmitPayload = { text: string; attachments: unknown[] };
+type QueuedUserInput = { text: string; images: ImageContent[] };
+
+type SubmitPayload = { text: string; attachments: PasteAttachment[] };
 
 type SubmitContext = {
 	defaultEditor: { onSubmit?: (payload: SubmitPayload) => void };
@@ -16,13 +20,13 @@ type SubmitContext = {
 		prompt: (text: string, options?: unknown) => Promise<void>;
 	};
 	flushPendingBashComponents: () => void;
-	onInputCallback?: (text: string) => void;
-	pendingUserInputs: string[];
+	onInputCallback?: (input: QueuedUserInput) => void;
+	pendingUserInputs: QueuedUserInput[];
 };
 
 type InputContext = {
-	onInputCallback?: (text: string) => void;
-	pendingUserInputs: string[];
+	onInputCallback?: (input: QueuedUserInput) => void;
+	pendingUserInputs: QueuedUserInput[];
 };
 
 type StartupSubmitContext = {
@@ -33,7 +37,7 @@ type StartupSubmitContext = {
 type InteractiveModePrivate = {
 	handleStartupSubmit(this: StartupSubmitContext, text: string): void;
 	setupEditorSubmitHandler(this: SubmitContext): void;
-	getUserInput(this: InputContext): Promise<string>;
+	getUserInput(this: InputContext): Promise<QueuedUserInput>;
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
@@ -75,17 +79,20 @@ describe("InteractiveMode startup input", () => {
 
 		await context.defaultEditor.onSubmit?.({ text: " early prompt ", attachments: [] });
 
-		expect(context.pendingUserInputs).toEqual(["early prompt"]);
+		expect(context.pendingUserInputs).toEqual([{ text: "early prompt", images: [] }]);
 		expect(context.flushPendingBashComponents).toHaveBeenCalledTimes(1);
 		expect(context.editor.addToHistory).toHaveBeenCalledWith("early prompt");
 	});
 
 	it("returns queued startup input before installing a new input callback", async () => {
 		const context: InputContext = {
-			pendingUserInputs: ["queued prompt"],
+			pendingUserInputs: [{ text: "queued prompt", images: [] }],
 		};
 
-		await expect(interactiveModePrototype.getUserInput.call(context)).resolves.toBe("queued prompt");
+		await expect(interactiveModePrototype.getUserInput.call(context)).resolves.toEqual({
+			text: "queued prompt",
+			images: [],
+		});
 		expect(context.onInputCallback).toBeUndefined();
 		expect(context.pendingUserInputs).toEqual([]);
 	});

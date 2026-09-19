@@ -29,6 +29,7 @@ export interface AppKeybindings {
 	"app.message.followUp": true;
 	"app.message.dequeue": true;
 	"app.clipboard.pasteImage": true;
+	"app.clipboard.pasteText": true;
 	"app.session.new": true;
 	"app.session.tree": true;
 	"app.session.fork": true;
@@ -140,8 +141,12 @@ export const KEYBINDINGS = {
 		description: "Restore queued messages",
 	},
 	"app.clipboard.pasteImage": {
-		defaultKeys: windowsKeybindings ? "alt+v" : "ctrl+v",
-		description: "Paste image from clipboard (text fallback)",
+		defaultKeys: "ctrl+v",
+		description: "Paste image or text from clipboard",
+	},
+	"app.clipboard.pasteText": {
+		defaultKeys: "alt+v",
+		description: "Paste text as collapsed marker regardless of size",
 	},
 	"app.session.new": { defaultKeys: [], description: "Start a new session" },
 	"app.session.tree": { defaultKeys: [], description: "Open session tree" },

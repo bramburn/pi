@@ -19,6 +19,7 @@ import type {
 	MarkdownTheme,
 	OverlayHandle,
 	OverlayOptions,
+	PasteAttachment,
 	SlashCommand,
 	TuiMainScreenRenderState,
 } from "@earendil-works/pi-tui";
@@ -105,6 +106,7 @@ import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
+import { processImage } from "../../utils/image-process.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
@@ -224,7 +226,29 @@ class ExpandableText extends Text implements Expandable {
 type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
+	images: ImageContent[];
 };
+
+/** A user prompt that has been queued via `pendingUserInputs` for the main loop to dispatch. */
+type QueuedUserInput = {
+	text: string;
+	images: ImageContent[];
+};
+
+/** Convert paste-marker image attachments into `ImageContent[]` blocks for the model. */
+function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
+	const images: ImageContent[] = [];
+	for (const attachment of attachments) {
+		if (attachment.kind === "image") {
+			images.push({
+				type: "image",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			});
+		}
+	}
+	return images;
+}
 
 type CompactionCostNotice = {
 	type: "compaction_cost";
@@ -404,8 +428,8 @@ export class InteractiveMode {
 	private keybindings: KeybindingsManager;
 	private version: string;
 	private isInitialized = false;
-	private onInputCallback?: (text: string) => void;
-	private pendingUserInputs: string[] = [];
+	private onInputCallback?: (input: QueuedUserInput) => void;
+	private pendingUserInputs: QueuedUserInput[] = [];
 	private activeStatusIndicator: StatusIndicator | undefined = undefined;
 	private activeWorkingIndicatorEmbedded = false;
 	private readonly idleStatus = new IdleStatus();
@@ -938,7 +962,8 @@ export class InteractiveMode {
 				rawKeyHint("!!", "to run bash (no context)"),
 				hint("app.message.followUp", "to queue follow-up"),
 				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image (with text fallback)"),
+				hint("app.clipboard.pasteImage", "to paste image or text"),
+				hint("app.clipboard.pasteText", "to paste text as marker"),
 				rawKeyHint("drop files", "to attach"),
 			].join("\n");
 			const compactInstructions = [
@@ -1137,7 +1162,8 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput);
+				const promptOptions = userInput.images.length > 0 ? { images: userInput.images } : undefined;
+				await this.session.prompt(userInput.text, promptOptions);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -2915,10 +2941,15 @@ export class InteractiveMode {
 			}
 		};
 
-		// Handle clipboard paste (triggered on Ctrl+V). Images are attached by path;
-		// otherwise, paste plain text from the system clipboard.
+		// Handle clipboard paste (triggered on Ctrl+V). Images are attached via the
+		// editor's image registry; otherwise, paste plain text from the system clipboard.
 		this.defaultEditor.onPasteImage = () => {
 			void this.handleClipboardPaste();
+		};
+		// Force-marker text paste (Alt+V): always wraps the clipboard text in a
+		// `[paste #N chars]` marker, regardless of size.
+		this.defaultEditor.onPasteText = () => {
+			void this.handleClipboardPasteText();
 		};
 	}
 
@@ -2940,20 +2971,35 @@ export class InteractiveMode {
 		try {
 			const image = await readClipboardImage();
 			if (image) {
-				const tmpDir = os.tmpdir();
-				const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-				const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
-				const filePath = path.join(tmpDir, fileName);
-				fs.writeFileSync(filePath, Buffer.from(image.bytes));
-
-				this.editor.insertTextAtCursor?.(filePath);
-				this.ui.requestRender();
-				return;
+				// Process through the existing image pipeline (normalize, resize, base64).
+				const processed = await processImage(image.bytes, image.mimeType, { autoResizeImages: true });
+				if (processed.ok) {
+					const ext = extensionForImageMimeType(processed.mimeType) ?? "png";
+					const fileName = `clipboard-${Date.now()}.${ext}`;
+					// Decode base64 to bytes for the editor registry.
+					const bytes = new Uint8Array(Buffer.from(processed.data, "base64"));
+					this.editor.pasteImage(bytes, processed.mimeType, fileName);
+					this.ui.requestRender();
+					return;
+				}
+				// Fall through to text paste if image processing failed.
 			}
 
 			const text = await readClipboardText();
 			if (text) {
-				this.editor.insertTextAtCursor?.(text);
+				this.editor.pasteText(text);
+				this.ui.requestRender();
+			}
+		} catch {
+			// Silently ignore clipboard errors (may not have permission, etc.)
+		}
+	}
+
+	private async handleClipboardPasteText(): Promise<void> {
+		try {
+			const text = await readClipboardText();
+			if (text) {
+				this.editor.pasteText(text, { forceMarker: true });
 				this.ui.requestRender();
 			}
 		} catch {
@@ -2967,9 +3013,8 @@ export class InteractiveMode {
 	}
 
 	private setupEditorSubmitHandler(): void {
-		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: unknown[] }) => {
-			// PR-B: receive the new {text, attachments} shape; image handling is PR-C.
-			void payload.attachments;
+		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
+			const images = attachmentsToImages(payload.attachments);
 			let text = payload.text;
 			text = text.trim();
 			if (!text) return;
@@ -3133,9 +3178,10 @@ export class InteractiveMode {
 				if (this.isExtensionCommand(text)) {
 					this.editor.addToHistory?.(text);
 					this.editor.setText("");
-					await this.session.prompt(text);
+					const promptOptions = images.length > 0 ? { images } : undefined;
+					await this.session.prompt(text, promptOptions);
 				} else {
-					this.queueCompactionMessage(text, "steer");
+					this.queueCompactionMessage(text, "steer", images);
 				}
 				return;
 			}
@@ -3145,7 +3191,7 @@ export class InteractiveMode {
 			if (this.session.isStreaming) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
+				await this.session.prompt(text, { streamingBehavior: "steer", images });
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
@@ -3156,9 +3202,9 @@ export class InteractiveMode {
 			this.flushPendingBashComponents();
 
 			if (this.onInputCallback) {
-				this.onInputCallback(text);
+				this.onInputCallback({ text, images });
 			} else {
-				this.pendingUserInputs.push(text);
+				this.pendingUserInputs.push({ text, images });
 			}
 			this.editor.addToHistory?.(text);
 		};
@@ -3930,16 +3976,16 @@ export class InteractiveMode {
 		);
 	}
 
-	async getUserInput(): Promise<string> {
+	async getUserInput(): Promise<QueuedUserInput> {
 		const queuedInput = this.pendingUserInputs.shift();
 		if (queuedInput !== undefined) {
 			return queuedInput;
 		}
 
 		return new Promise((resolve) => {
-			this.onInputCallback = (text: string) => {
+			this.onInputCallback = (input: QueuedUserInput) => {
 				this.onInputCallback = undefined;
-				resolve(text);
+				resolve(input);
 			};
 		});
 	}
@@ -4148,6 +4194,8 @@ export class InteractiveMode {
 	}
 
 	private async handleFollowUp(): Promise<void> {
+		const attachments = this.editor.getAttachments?.() ?? [];
+		const images = attachmentsToImages(attachments);
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
 		if (!text) return;
 
@@ -4156,9 +4204,10 @@ export class InteractiveMode {
 			if (this.isExtensionCommand(text)) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text);
+				const promptOptions = images.length > 0 ? { images } : undefined;
+				await this.session.prompt(text, promptOptions);
 			} else {
-				this.queueCompactionMessage(text, "followUp");
+				this.queueCompactionMessage(text, "followUp", images);
 			}
 			return;
 		}
@@ -4168,13 +4217,12 @@ export class InteractiveMode {
 		if (this.session.isStreaming) {
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
+			await this.session.prompt(text, { streamingBehavior: "followUp", images });
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}
 		// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
 		else if (this.editor.onSubmit) {
-			const attachments = this.editor.getAttachments?.() ?? [];
 			this.editor.setText("");
 			this.editor.onSubmit({ text, attachments });
 		}
@@ -4431,8 +4479,8 @@ export class InteractiveMode {
 		return allQueued.length;
 	}
 
-	private queueCompactionMessage(text: string, mode: "steer" | "followUp"): void {
-		this.compactionQueuedMessages.push({ text, mode });
+	private queueCompactionMessage(text: string, mode: "steer" | "followUp", images: ImageContent[] = []): void {
+		this.compactionQueuedMessages.push({ text, mode, images });
 		this.editor.addToHistory?.(text);
 		this.editor.setText("");
 		this.updatePendingMessagesDisplay();
@@ -4476,9 +4524,9 @@ export class InteractiveMode {
 					if (this.isExtensionCommand(message.text)) {
 						await this.session.prompt(message.text);
 					} else if (message.mode === "followUp") {
-						await this.session.followUp(message.text);
+						await this.session.followUp(message.text, message.images);
 					} else {
-						await this.session.steer(message.text);
+						await this.session.steer(message.text, message.images);
 					}
 				}
 				this.updatePendingMessagesDisplay();
@@ -4505,8 +4553,14 @@ export class InteractiveMode {
 			}
 
 			// Start a prompt when idle, or queue it into a run still finishing compaction.
+			const firstPromptOptions: { streamingBehavior: "steer" | "followUp"; images?: ImageContent[] } = {
+				streamingBehavior: firstPrompt.mode,
+			};
+			if (firstPrompt.images && firstPrompt.images.length > 0) {
+				firstPromptOptions.images = firstPrompt.images;
+			}
 			const promptPromise = this.session
-				.prompt(firstPrompt.text, { streamingBehavior: firstPrompt.mode })
+				.prompt(firstPrompt.text, firstPromptOptions)
 				.catch((error) => {
 					restoreQueue(error);
 				});
@@ -4516,9 +4570,9 @@ export class InteractiveMode {
 				if (this.isExtensionCommand(message.text)) {
 					await this.session.prompt(message.text);
 				} else if (message.mode === "followUp") {
-					await this.session.followUp(message.text);
+					await this.session.followUp(message.text, message.images);
 				} else {
-					await this.session.steer(message.text);
+					await this.session.steer(message.text, message.images);
 				}
 			}
 			this.updatePendingMessagesDisplay();
@@ -6381,6 +6435,7 @@ export class InteractiveMode {
 		const followUp = this.getAppKeyDisplay("app.message.followUp");
 		const dequeue = this.getAppKeyDisplay("app.message.dequeue");
 		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
+		const pasteText = this.getAppKeyDisplay("app.clipboard.pasteText");
 
 		let hotkeys = `
 **Navigation**
@@ -6425,6 +6480,7 @@ export class InteractiveMode {
 | \`${followUp}\` | Queue follow-up message |
 | \`${dequeue}\` | Restore queued messages |
 | \`${pasteImage}\` | Paste image or text from clipboard |
+| \`${pasteText}\` | Paste text as collapsed marker regardless of size |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
 | \`!!\` | Run bash command (excluded from context) |

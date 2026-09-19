@@ -59,6 +59,17 @@ export interface EditorComponent extends Component {
 	 */
 	getAttachments?(): PasteAttachment[];
 
+	/**
+	 * Programmatically paste text. Implementations decide whether to store it
+	 * inline or behind a paste marker based on size/options.
+	 */
+	pasteText(text: string, opts?: { forceMarker?: boolean; skipUndoSnapshot?: boolean }): void;
+
+	/**
+	 * Programmatically paste an image. Stores the bytes behind a paste marker.
+	 */
+	pasteImage(bytes: Uint8Array, mimeType: string, fileName: string): void;
+
 	// =========================================================================
 	// Autocomplete support (optional)
 	// =========================================================================
