@@ -3,7 +3,6 @@
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
  */
 
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -108,8 +107,8 @@ import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
-import { processImage } from "../../utils/image-process.ts";
 import { parseGitUrl } from "../../utils/git.ts";
+import { processImage } from "../../utils/image-process.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
 import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
@@ -4495,11 +4494,9 @@ export class InteractiveMode {
 			if (firstPrompt.images && firstPrompt.images.length > 0) {
 				firstPromptOptions.images = firstPrompt.images;
 			}
-			const promptPromise = this.session
-				.prompt(firstPrompt.text, firstPromptOptions)
-				.catch((error) => {
-					restoreQueue(error);
-				});
+			const promptPromise = this.session.prompt(firstPrompt.text, firstPromptOptions).catch((error) => {
+				restoreQueue(error);
+			});
 
 			// Queue remaining messages
 			for (const message of rest) {
