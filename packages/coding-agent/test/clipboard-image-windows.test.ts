@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
 	spawnSync: vi.fn<(command: string, args: string[], options?: unknown) => SpawnSyncReturns<Buffer>>(),
 	clipboard: {
-		hasImage: vi.fn<() => boolean>(),
+		hasImage: vi.fn<() => Promise<boolean>>(),
 		getImageBinary: vi.fn<() => Promise<Array<number> | null>>(),
 	},
 }));
@@ -138,5 +138,53 @@ describe("readClipboardImage Windows PowerShell fallback", () => {
 		const result = await readClipboardImage({ platform: "win32", env: {} });
 		expect(result?.bytes).toEqual(new Uint8Array(nativeBytes));
 		expect(mocks.spawnSync).not.toHaveBeenCalled();
+	});
+
+	test("PowerShell fallback runs when native addon rejects (ClipboardOccupied)", async () => {
+		// arboard on Windows raises ClipboardOccupied when another app
+		// briefly holds the clipboard. The previous behavior was for
+		// this rejection to escape readClipboardImage and abort paste;
+		// the new behavior is to fall through to PowerShell, which reads
+		// the clipboard via System.Windows.Forms.Clipboard independently
+		// of arboard.
+		vi.stubGlobal("process", { ...process, platform: "win32" });
+
+		mocks.clipboard.hasImage.mockRejectedValue(new Error("ClipboardOccupied"));
+
+		mocks.spawnSync.mockImplementation((command) => {
+			if (command === "powershell.exe") {
+				return spawnOk(Buffer.from(PNG_BASE64, "utf8"));
+			}
+			throw new Error(`Unexpected spawnSync call: ${command}`);
+		});
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+		const result = await readClipboardImage({ platform: "win32", env: {} });
+		expect(result).not.toBeNull();
+		expect(result?.mimeType).toBe("image/png");
+		expect(Array.from(result?.bytes ?? [])).toEqual(Array.from(PNG_BYTES));
+	});
+
+	test("PowerShell fallback runs when hasImage is true but getImageBinary throws", async () => {
+		// TOCTOU window: hasImage reads "true" but the clipboard is
+		// released/changed before getImageBinary runs. We must not
+		// surface the rejection to the caller — fall through to
+		// PowerShell instead.
+		vi.stubGlobal("process", { ...process, platform: "win32" });
+
+		mocks.clipboard.hasImage.mockResolvedValue(true);
+		mocks.clipboard.getImageBinary.mockRejectedValue(new Error("ClipboardOccupied"));
+
+		mocks.spawnSync.mockImplementation((command) => {
+			if (command === "powershell.exe") {
+				return spawnOk(Buffer.from(PNG_BASE64, "utf8"));
+			}
+			throw new Error(`Unexpected spawnSync call: ${command}`);
+		});
+
+		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
+		const result = await readClipboardImage({ platform: "win32", env: {} });
+		expect(result).not.toBeNull();
+		expect(Array.from(result?.bytes ?? [])).toEqual(Array.from(PNG_BYTES));
 	});
 });

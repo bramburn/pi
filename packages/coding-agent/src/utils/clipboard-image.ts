@@ -220,21 +220,34 @@ function readClipboardImageViaPowerShell(): ClipboardImage | null {
  *
  * Emits base64 to avoid Windows stdout encoding bugs that occur when
  * piping binary PNG bytes through `cmd.exe` / the parent's codepage.
+ *
+ * Statements inside the `if` block must be separated by `;`, not just
+ * whitespace — PowerShell does not parse line breaks inside a `-Command`
+ * argument as statement terminators, and a bare space causes a parser
+ * error that aborts the entire script (verified locally: `if ($true) {
+ * $x = 1 Write-Output $x` → `Unexpected token 'Write-Output'`).
+ *
+ * `maxBufferBytes` is raised from the default 50 MB because base64
+ * inflates the PNG by ~4/3 and a 4K screenshot can easily exceed that
+ * ceiling. spawnSync aborts with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`
+ * if we hit the cap, and the fallback would return null for a perfectly
+ * valid clipboard payload.
  */
 function readClipboardImageViaPowerShellBase64(): ClipboardImage | null {
 	const psScript = [
-		"Add-Type -AssemblyName System.Windows.Forms",
-		"Add-Type -AssemblyName System.Drawing",
-		"$img = [System.Windows.Forms.Clipboard]::GetImage()",
+		"Add-Type -AssemblyName System.Windows.Forms;",
+		"Add-Type -AssemblyName System.Drawing;",
+		"$img = [System.Windows.Forms.Clipboard]::GetImage();",
 		"if ($img) {",
-		"  $ms = New-Object System.IO.MemoryStream",
-		"  $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)",
-		"  [Convert]::ToBase64String($ms.ToArray())",
+		"  $ms = New-Object System.IO.MemoryStream;",
+		"  $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png);",
+		"  [Convert]::ToBase64String($ms.ToArray());",
 		"}",
 	].join(" ");
 
 	const result = runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
 		timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
+		maxBufferBytes: 256 * 1024 * 1024,
 	});
 	if (!result.ok) {
 		return null;
@@ -280,12 +293,38 @@ function readClipboardImageViaXclip(): ClipboardImage | null {
 	return null;
 }
 
-async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | null> {
-	if (!clipboard || !clipboard.hasImage()) {
+async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | null | "unavailable"> {
+	if (!clipboard) {
 		return null;
 	}
 
-	const imageData = await clipboard.getImageBinary();
+	let hasImage: boolean;
+	try {
+		hasImage = await clipboard.hasImage();
+	} catch {
+		// The native addon's hasImage probe failed (e.g. arboard
+		// ClipboardOccupied on Windows). Surface as "unavailable" so
+		// the caller can try the next backend (PowerShell on Windows)
+		// instead of letting the rejection abort the whole paste.
+		return "unavailable";
+	}
+	if (!hasImage) {
+		return null;
+	}
+
+	let imageData: Array<number> | null;
+	try {
+		imageData = await clipboard.getImageBinary();
+	} catch {
+		// The native addon reports hasImage() === true but the actual
+		// read fails (clipboard briefly held by another app, arboard's
+		// Windows backend raises ClipboardOccupied, etc). Surface this
+		// as "unavailable" so the caller can try the next backend
+		// (PowerShell on Windows) instead of letting the rejection
+		// abort the whole paste.
+		return "unavailable";
+	}
+
 	if (!imageData || imageData.length === 0) {
 		return null;
 	}
@@ -319,16 +358,31 @@ export async function readClipboardImage(options?: {
 			image = readClipboardImageViaPowerShell();
 		}
 
+		// Linux fallback: if Wayland/wl-paste/xclip found nothing, try
+		// the native addon last. The "unavailable" sentinel from the
+		// native path means the read itself failed (e.g. X server hung);
+		// we don't fall back to xclip again because xclip would hit the
+		// same broken state, but we still try once in case it differs.
 		if (!image && !wayland) {
-			image = (await readClipboardImageViaNativeClipboard()) ?? readClipboardImageViaXclip();
+			const native = await readClipboardImageViaNativeClipboard();
+			image = native === "unavailable" ? null : native;
+			image = image ?? readClipboardImageViaXclip();
 		}
 	} else {
-		// Native Windows / macOS: try the addon first, then fall back to
-		// PowerShell (Windows only) which can reach the clipboard when
-		// the native addon can't open it.
-		image = await readClipboardImageViaNativeClipboard();
-		if (!image && platform === "win32") {
+		// Native Windows / macOS: try the addon first. If it returns
+		// null (no image) or "unavailable" (transfer failed), try the
+		// PowerShell base64 fallback on Windows. PowerShell can read the
+		// clipboard via System.Windows.Forms.Clipboard even when arboard
+		// reports a false negative (clipboard held by another app, etc).
+		// macOS has no equivalent fallback — arboard's macOS backend
+		// talks directly to NSPasteboard and either works or doesn't.
+		const native = await readClipboardImageViaNativeClipboard();
+		if (native && typeof native === "object") {
+			image = native;
+		} else if (platform === "win32") {
 			image = readClipboardImageViaPowerShellBase64();
+		} else {
+			image = null;
 		}
 	}
 

@@ -62,12 +62,24 @@ pub async fn set_text(text: String) -> Result<()> {
 /// including `ContentNotAvailable`. The TS-side contract treats both "no
 /// image" and "transfer failed" the same way: try the next clipboard
 /// backend, fall back to PowerShell on Windows, etc.
+///
+/// Marked `async` so the call runs on the napi-rs worker thread pool
+/// rather than the JS thread. The module-level docstring promises that
+/// "all work runs on the napi-rs worker thread pool, so a slow X11
+/// roundtrip never blocks the Node event loop", and a sync `#[napi]`
+/// would run on the JS thread, breaking that contract.
 #[napi]
-pub fn has_image() -> bool {
-    let Ok(mut cb) = Clipboard::new() else {
-        return false;
-    };
-    matches!(cb.get_image(), Ok(img) if img.width > 0 && img.height > 0)
+pub async fn has_image() -> Result<bool> {
+    let mut cb = Clipboard::new().map_err(to_napi)?;
+    match cb.get_image() {
+        Ok(img) => Ok(img.width > 0 && img.height > 0),
+        Err(arboard::Error::ContentNotAvailable) => Ok(false),
+        // Surface any other error so the TS-side "unavailable" path can
+        // decide whether to try the next backend (e.g. PowerShell on
+        // Windows). Returning a bare `false` here used to swallow
+        // ClipboardOccupied and skip the fallback.
+        Err(e) => Err(to_napi(e)),
+    }
 }
 
 /// Bytes of the current clipboard image encoded as PNG, or `[]` if no
@@ -90,8 +102,24 @@ pub async fn get_image_binary() -> Result<Vec<u32>> {
         Err(e) => return Err(to_napi(e)),
     };
 
-    let width = img.width as u32;
-    let height = img.height as u32;
+    // arboard reports dimensions as `usize`. Validate they fit in `u32`
+    // before the cast — `image::ExtendedColorType::Rgba8` (and the PNG
+    // encoder behind it) takes u32, and a silent truncation would let a
+    // pathological clipboard payload (usize > u32::MAX on 64-bit) sneak
+    // through with a confusing "RGBA buffer length mismatch" instead of
+    // a clean dimensions error.
+    let width = u32::try_from(img.width).map_err(|_| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("image width does not fit in u32: {}", img.width),
+        )
+    })?;
+    let height = u32::try_from(img.height).map_err(|_| {
+        napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("image height does not fit in u32: {}", img.height),
+        )
+    })?;
     if width == 0 || height == 0 {
         return Ok(Vec::new());
     }

@@ -86,18 +86,24 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 		assert.equal(typeof clipboard.getImageBinary, "function");
 	});
 
-	test(`@bramburn/clipboard-rs hasImage contract on ${platform}-${arch}`, () => {
+	test(`@bramburn/clipboard-rs hasImage contract on ${platform}-${arch}`, async () => {
 		// hasImage probes the clipboard and returns true only if the
-		// payload is a non-empty image. A clean clipboard returns false;
-		// after setText, hasImage must still be false because plain
-		// text is not an image payload.
-		assert.equal(clipboard.hasImage(), false, "hasImage should be false on a clean clipboard");
-
-		// Re-check after a round-trip setText (text round-trip test
-		// below ensures the clipboard is in a known state). We do not
-		// fail here if hasImage flips during the same tick — different
-		// OSes have different clipboard ownership semantics — only if
-		// it stays true after we've explicitly written text.
+		// payload is a non-empty image. After setText (which the text
+		// round-trip test below performs), hasImage must still be false
+		// because plain text is not an image payload.
+		//
+		// We deliberately do NOT assert hasImage() === false on the
+		// initial read: the test suite starts on a developer's machine
+		// where the user may have left any number of payloads on the
+		// clipboard (image previews, browser screenshots, etc). The
+		// stateful assertion below, after we explicitly write text,
+		// covers the actual contract: "setText does not flip hasImage".
+		await clipboard.setText("reset to known state");
+		assert.equal(
+			clipboard.hasImage(),
+			false,
+			"hasImage must be false after a plain-text write",
+		);
 	});
 
 	test(`@bramburn/clipboard-rs round-trip on ${platform}-${arch}`, async (t) => {

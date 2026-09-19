@@ -104,6 +104,9 @@ export async function setText(text) {
 	return loadAddon().setText(text);
 }
 
+// hasImage is async on the Rust side (runs on the napi-rs worker
+// thread pool). The native binding returns a Promise; we hand it
+// straight through.
 export function hasImage() {
 	return loadAddon().hasImage();
 }

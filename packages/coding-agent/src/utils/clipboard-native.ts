@@ -5,7 +5,7 @@ import { pathToFileURL } from "url";
 export type ClipboardModule = {
 	getText: () => Promise<string>;
 	setText: (text: string) => Promise<void>;
-	hasImage: () => boolean;
+	hasImage: () => Promise<boolean>;
 	getImageBinary: () => Promise<Array<number>>;
 };
 
