@@ -81,7 +81,7 @@ editor.onSubmit = (payload) => {
 		isResponding = true;
 		editor.disableSubmit = true;
 
-		const userMessage = new Markdown(value, 1, 1, defaultMarkdownTheme);
+		const userMessage = new Markdown(value.text, 1, 1, defaultMarkdownTheme);
 
 		const children = tui.children;
 		children.splice(children.length - 1, 0, userMessage);

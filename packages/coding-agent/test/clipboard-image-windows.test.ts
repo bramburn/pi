@@ -55,7 +55,7 @@ describe("readClipboardImage Windows PowerShell fallback", () => {
 
 		// Force the native path to "no image" so the PowerShell fallback
 		// has to pick up the slack.
-		mocks.clipboard.hasImage.mockReturnValue(false);
+		mocks.clipboard.hasImage.mockResolvedValue(false);
 		mocks.clipboard.getImageBinary.mockResolvedValue(null);
 	});
 
@@ -120,7 +120,7 @@ describe("readClipboardImage Windows PowerShell fallback", () => {
 		mocks.spawnSync.mockImplementation(() => {
 			throw new Error("spawnSync must not be called for macOS/Linux");
 		});
-		mocks.clipboard.hasImage.mockReturnValue(false);
+		mocks.clipboard.hasImage.mockResolvedValue(false);
 
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
 		expect(await readClipboardImage({ platform: "darwin", env: {} })).toBeNull();
@@ -131,7 +131,7 @@ describe("readClipboardImage Windows PowerShell fallback", () => {
 		vi.stubGlobal("process", { ...process, platform: "win32" });
 
 		const nativeBytes = [10, 20, 30];
-		mocks.clipboard.hasImage.mockReturnValue(true);
+		mocks.clipboard.hasImage.mockResolvedValue(true);
 		mocks.clipboard.getImageBinary.mockResolvedValue(nativeBytes);
 
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");

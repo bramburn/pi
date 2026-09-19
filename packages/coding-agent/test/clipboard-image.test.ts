@@ -152,7 +152,7 @@ describe("readClipboardImage", () => {
 			);
 		});
 
-		mocks.clipboard.hasImage.mockReturnValue(true);
+		mocks.clipboard.hasImage.mockResolvedValue(true);
 		mocks.clipboard.getImageBinary.mockResolvedValue(new Uint8Array([7]));
 
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
@@ -173,7 +173,7 @@ describe("readClipboardImage", () => {
 			throw new Error(`Unexpected spawnSync call: ${command} ${args.join(" ")}`);
 		});
 
-		mocks.clipboard.hasImage.mockReturnValue(false);
+		mocks.clipboard.hasImage.mockResolvedValue(false);
 
 		const { readClipboardImage } = await import("../src/utils/clipboard-image.ts");
 		const result = await readClipboardImage({ platform: "linux", env: {} });

@@ -6,7 +6,7 @@ type ClipboardRequire = (id: string) => unknown;
 const fakeClipboard: ClipboardModule = {
 	getText: async () => "",
 	setText: async () => {},
-	hasImage: () => true,
+	hasImage: async () => true,
 	getImageBinary: async () => [1, 2, 3],
 };
 
