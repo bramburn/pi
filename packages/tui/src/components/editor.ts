@@ -25,11 +25,21 @@ import { SelectList, type SelectListLayoutOptions, type SelectListTheme } from "
 const graphemeSegmenter = getGraphemeSegmenter();
 const wordSegmenter = getWordSegmenter();
 
-/** Regex matching paste markers like `[paste #1 +123 lines]` or `[paste #2 1234 chars]`. */
-const PASTE_MARKER_REGEX = /\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g;
+/**
+ * Discriminated union of attachments stored behind a paste marker.
+ * - Text attachments store the raw pasted text (existing behavior).
+ * - Image attachments store raw image bytes plus metadata; PR-C will extract
+ *   and forward them on submit.
+ */
+export type PasteAttachment =
+	| { kind: "text"; content: string }
+	| { kind: "image"; mimeType: string; bytes: Uint8Array; fileName: string };
+
+/** Regex matching paste markers like `[paste #1 +123 lines]`, `[paste #2 1234 chars]`, or `[paste #3 image: foo.png]`. */
+const PASTE_MARKER_REGEX = /\[paste #(\d+)( [^\]]+)?\]/g;
 
 /** Non-global version for single-segment testing. */
-const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$/;
+const PASTE_MARKER_SINGLE = /^\[paste #(\d+)( [^\]]+)?\]$/;
 
 /** Check if a segment is a paste marker (i.e. was merged by segmentWithMarkers). */
 function isPasteMarker(segment: string): boolean {
@@ -222,7 +232,7 @@ interface EditorState {
 /** Undo snapshot: editor text state plus the paste registry. */
 interface EditorSnapshot {
 	state: EditorState;
-	pastes: Map<number, string>;
+	pastes: Map<number, PasteAttachment>;
 	pasteCounter: number;
 }
 
@@ -322,7 +332,7 @@ export class Editor implements Component, Focusable {
 	private autocompleteRequestId: number = 0;
 
 	// Paste tracking for large pastes
-	private pastes: Map<number, string> = new Map();
+	private pastes: Map<number, PasteAttachment> = new Map();
 	private pasteCounter: number = 0;
 
 	// Bracketed paste mode buffering
@@ -354,7 +364,7 @@ export class Editor implements Component, Focusable {
 	// Undo support
 	private undoStack = new UndoStack<EditorSnapshot>();
 
-	public onSubmit?: (text: string) => void;
+	public onSubmit?: (payload: { text: string; attachments: PasteAttachment[] }) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
 
@@ -376,6 +386,31 @@ export class Editor implements Component, Focusable {
 	/** Segment text with paste-marker awareness, only merging markers with valid IDs. */
 	private segment(text: string, mode: "word" | "grapheme"): Iterable<Intl.SegmentData> {
 		return segmentWithMarkers(text, mode === "word" ? wordSegmenter : graphemeSegmenter, this.validPasteIds());
+	}
+
+	/**
+	 * Returns a cursor column guaranteed to sit at a paste-marker boundary
+	 * (start or end), never inside one. If `col` falls strictly between the
+	 * start and end of a registered marker, snap to the nearest edge so the
+	 * caller never mutates content that should be treated atomically.
+	 */
+	private ensureCursorNotInsideMarker(line: string, col: number): number {
+		const validIds = this.validPasteIds();
+		if (validIds.size === 0) return col;
+		const matches = [...line.matchAll(PASTE_MARKER_REGEX)];
+		for (const m of matches) {
+			const id = Number.parseInt(m[1]!, 10);
+			if (!validIds.has(id)) continue;
+			const start = m.index ?? 0;
+			const end = start + m[0].length;
+			if (col > start && col < end) {
+				// Snap to the nearer boundary; tie → start (preserves the snappedFromCursorCol heuristic).
+				const distStart = col - start;
+				const distEnd = end - col;
+				return distEnd < distStart ? end : start;
+			}
+		}
+		return col;
 	}
 
 	getPaddingX(): number {
@@ -1076,9 +1111,10 @@ export class Editor implements Component, Focusable {
 
 	private expandPasteMarkers(text: string): string {
 		let result = text;
-		for (const [pasteId, pasteContent] of this.pastes) {
-			const markerRegex = new RegExp(`\\[paste #${pasteId}( (\\+\\d+ lines|\\d+ chars))?\\]`, "g");
-			result = result.replace(markerRegex, () => pasteContent);
+		for (const [pasteId, attachment] of this.pastes) {
+			if (attachment.kind !== "text") continue; // image attachments are handled in PR-C
+			const markerRegex = new RegExp(`\\[paste #${pasteId}( [^\\]]+)?\\]`, "g");
+			result = result.replace(markerRegex, () => attachment.content);
 		}
 		return result;
 	}
@@ -1097,6 +1133,16 @@ export class Editor implements Component, Focusable {
 
 	getCursor(): { line: number; col: number } {
 		return { line: this.state.cursorLine, col: this.state.cursorCol };
+	}
+
+	/**
+	 * Returns the list of attachments (text and image) currently stored behind
+	 * paste markers in the editor. Insertion order is registry order (ascending
+	 * by paste ID), which is also the on-screen order because markers are
+	 * renumbered when earlier ones are deleted.
+	 */
+	getAttachments(): PasteAttachment[] {
+		return Array.from(this.pastes.values());
 	}
 
 	setText(text: string): void {
@@ -1143,6 +1189,14 @@ export class Editor implements Component, Focusable {
 	 */
 	private insertTextAtCursorInternal(text: string): void {
 		if (!text) return;
+
+		// Guard: if cursorCol was somehow left inside a paste marker, snap to a boundary
+		// before splicing so we never mutate marker text atomically.
+		const currentLinePre = this.state.lines[this.state.cursorLine] || "";
+		const safeCol = this.ensureCursorNotInsideMarker(currentLinePre, this.state.cursorCol);
+		if (safeCol !== this.state.cursorCol) {
+			this.state.cursorCol = safeCol;
+		}
 
 		// Normalize line endings and tabs
 		const normalized = this.normalizeText(text);
@@ -1201,6 +1255,12 @@ export class Editor implements Component, Focusable {
 		}
 
 		const line = this.state.lines[this.state.cursorLine] || "";
+
+		// Guard: refuse to splice a single character into the middle of a paste marker.
+		const safeCol = this.ensureCursorNotInsideMarker(line, this.state.cursorCol);
+		if (safeCol !== this.state.cursorCol) {
+			this.state.cursorCol = safeCol;
+		}
 
 		const before = line.slice(0, this.state.cursorCol);
 		const after = line.slice(this.state.cursorCol);
@@ -1283,18 +1343,38 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
-		// Split into lines to check for large paste
-		const pastedLines = filteredText.split("\n");
+		// Delegate the threshold/marker logic to the public pasteText method.
+		// Undo snapshot was already pushed above (atomic for the whole paste).
+		this.pasteText(filteredText, { skipUndoSnapshot: true });
+	}
 
-		// Check if this is a large paste (> 10 lines or > 1000 characters)
-		const totalChars = filteredText.length;
-		if (pastedLines.length > 10 || totalChars > 1000) {
-			// Store the paste and insert a marker
+	/**
+	 * Programmatically paste text. Mirrors {@link handlePaste}'s threshold:
+	 * if `text` exceeds 10 lines or 1000 chars, store it in the paste registry
+	 * and insert a `[paste #N ...]` marker; otherwise insert the text inline.
+	 *
+	 * Pass `{ forceMarker: true }` to always use the marker path (e.g. when
+	 * handing off text from a known-large source).
+	 */
+	public pasteText(text: string, opts?: { forceMarker?: boolean; skipUndoSnapshot?: boolean }): void {
+		if (text === "") return;
+
+		if (!opts?.skipUndoSnapshot) {
+			this.cancelAutocomplete();
+			this.exitHistoryBrowsing();
+			this.lastAction = null;
+			this.pushUndoSnapshot();
+		}
+
+		const pastedLines = text.split("\n");
+		const totalChars = text.length;
+		const shouldMarker = opts?.forceMarker || pastedLines.length > 10 || totalChars > 1000;
+
+		if (shouldMarker) {
 			this.pasteCounter++;
 			const pasteId = this.pasteCounter;
-			this.pastes.set(pasteId, filteredText);
+			this.pastes.set(pasteId, { kind: "text", content: text });
 
-			// Insert marker like "[paste #1 +123 lines]" or "[paste #1 1234 chars]"
 			const marker =
 				pastedLines.length > 10
 					? `[paste #${pasteId} +${pastedLines.length} lines]`
@@ -1303,14 +1383,36 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		if (pastedLines.length === 1) {
-			// Single line - insert atomically (do not trigger autocomplete during paste)
-			this.insertTextAtCursorInternal(filteredText);
-			return;
-		}
+		// Single-line and multi-line inline insertion share the same code path.
+		this.insertTextAtCursorInternal(text);
+	}
 
-		// Multi-line paste - use direct state manipulation
-		this.insertTextAtCursorInternal(filteredText);
+	/**
+	 * Programmatically paste an image. Stores the bytes behind a paste marker
+	 * and inserts `[paste #N image: fileName]`. The undo stack is cleared
+	 * afterwards so undo cannot resurrect the (potentially large) image payload.
+	 */
+	public pasteImage(bytes: Uint8Array, mimeType: string, fileName: string): void {
+		this.cancelAutocomplete();
+		this.exitHistoryBrowsing();
+		this.lastAction = null;
+		this.pushUndoSnapshot();
+
+		this.pasteCounter++;
+		const pasteId = this.pasteCounter;
+		this.pastes.set(pasteId, { kind: "image", mimeType, bytes, fileName });
+
+		const label = fileName.slice(0, 30);
+		const marker = `[paste #${pasteId} image: ${label}]`;
+		this.insertTextAtCursorInternal(marker);
+
+		// Don't retain potentially-large image payloads in the undo history.
+		this.undoStack.clear();
+
+		if (this.onChange) {
+			this.onChange(this.getText());
+		}
+		this.tui.requestRender();
 	}
 
 	private addNewLine(): void {
@@ -1351,7 +1453,10 @@ export class Editor implements Component, Focusable {
 
 	private submitValue(): void {
 		this.cancelAutocomplete();
-		const result = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+		// Snapshot text + attachments before resetting state, since getAttachments
+		// reads from this.pastes which we clear immediately after.
+		const text = this.expandPasteMarkers(this.state.lines.join("\n")).trim();
+		const attachments = Array.from(this.pastes.values());
 
 		this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
 		this.pastes.clear();
@@ -1362,7 +1467,7 @@ export class Editor implements Component, Focusable {
 		this.lastAction = null;
 
 		if (this.onChange) this.onChange("");
-		if (this.onSubmit) this.onSubmit(result);
+		if (this.onSubmit) this.onSubmit({ text, attachments });
 	}
 
 	private handleBackspace(): void {
@@ -1455,7 +1560,11 @@ export class Editor implements Component, Focusable {
 	 * Use this for all non-vertical cursor movements to reset sticky column behavior.
 	 */
 	private setCursorCol(col: number): void {
-		this.state.cursorCol = col;
+		// Defensive: callers occasionally move the cursor directly (e.g. snapshot
+		// restore, paste-image insertion); refuse to leave it inside a marker.
+		const line = this.state.lines[this.state.cursorLine] || "";
+		const safeCol = this.ensureCursorNotInsideMarker(line, col);
+		this.state.cursorCol = safeCol;
 		this.preferredVisualCol = null;
 		this.snappedFromCursorCol = null;
 	}
@@ -1781,8 +1890,36 @@ export class Editor implements Component, Focusable {
 			const firstGrapheme = graphemes[0];
 			const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
 
-			const before = currentLine.slice(0, this.state.cursorCol);
-			const after = currentLine.slice(this.state.cursorCol + graphemeLength);
+			// Paste-marker cleanup (mirrors handleBackspace):
+			// if the segment about to be deleted is a registered paste marker, drop it
+			// from the registry, decrement the counter, and renumber higher IDs.
+			if (firstGrapheme) {
+				const isPastedSegmented = PASTE_MARKER_SINGLE.exec(firstGrapheme.segment);
+				if (isPastedSegmented) {
+					const targetId = Number(isPastedSegmented[1]);
+					this.pastes.delete(targetId);
+					this.pasteCounter--;
+
+					const higherIds = [...this.pastes.keys()].filter((id) => id > targetId).sort((a, b) => a - b);
+					for (const id of higherIds) {
+						this.pastes.set(id - 1, this.pastes.get(id)!);
+						this.pastes.delete(id);
+					}
+
+					this.state.lines = this.state.lines.map((line) =>
+						line.replace(PASTE_MARKER_REGEX, (fullMatch, idGroup, suffixGroup) => {
+							const x = Number(idGroup);
+							if (x <= targetId) return fullMatch;
+							return `[paste #${x - 1}${suffixGroup ?? ""}]`;
+						}),
+					);
+				}
+			}
+
+			// Re-read the line because the renumber step above may have rewritten it.
+			const lineAfterCleanup = this.state.lines[this.state.cursorLine] || "";
+			const before = lineAfterCleanup.slice(0, this.state.cursorCol);
+			const after = lineAfterCleanup.slice(this.state.cursorCol + graphemeLength);
 			this.state.lines[this.state.cursorLine] = before + after;
 		} else if (this.state.cursorLine < this.state.lines.length - 1) {
 			this.pushUndoSnapshot();

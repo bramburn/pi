@@ -103,7 +103,7 @@ class ListSelector extends Container implements Focusable {
 }
 
 interface TuiHandlers {
-	submit(text: string): void;
+	submit(payload: { text: string; attachments: unknown[] }): void;
 	followUp(text: string): void;
 	abort(): void;
 	exit(): void;
@@ -481,8 +481,8 @@ export async function runMicroTui(source: MicroViewSource, controller: MicroCont
 	};
 
 	view = new MicroTui(source.current().session.cwd, {
-		submit: (text) => {
-			const trimmed = text.trim();
+		submit: (payload) => {
+			const trimmed = payload.text.trim();
 			if (!trimmed) return;
 			if (trimmed === "/model") return selectModel();
 			if (trimmed === "/login") return login();

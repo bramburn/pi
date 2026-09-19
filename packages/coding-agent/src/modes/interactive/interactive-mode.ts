@@ -904,7 +904,7 @@ export class InteractiveMode {
 		// Accept text while startup completes, but only enable interrupt, exit, and submission feedback.
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
-		this.defaultEditor.onSubmit = (text) => this.handleStartupSubmit(text);
+		this.defaultEditor.onSubmit = (payload) => this.handleStartupSubmit(payload.text);
 		this.ui.setFocus(this.editor);
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
@@ -2623,7 +2623,7 @@ export class InteractiveMode {
 				prefill,
 				(value) => {
 					this.hideExtensionEditor();
-					resolve(value);
+					resolve(value.text);
 				},
 				() => {
 					this.hideExtensionEditor();
@@ -2967,7 +2967,10 @@ export class InteractiveMode {
 	}
 
 	private setupEditorSubmitHandler(): void {
-		this.defaultEditor.onSubmit = async (text: string) => {
+		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: unknown[] }) => {
+			// PR-B: receive the new {text, attachments} shape; image handling is PR-C.
+			void payload.attachments;
+			let text = payload.text;
 			text = text.trim();
 			if (!text) return;
 
@@ -4171,8 +4174,9 @@ export class InteractiveMode {
 		}
 		// If not streaming, Alt+Enter acts like regular Enter (trigger onSubmit)
 		else if (this.editor.onSubmit) {
+			const attachments = this.editor.getAttachments?.() ?? [];
 			this.editor.setText("");
-			this.editor.onSubmit(text);
+			this.editor.onSubmit({ text, attachments });
 		}
 	}
 

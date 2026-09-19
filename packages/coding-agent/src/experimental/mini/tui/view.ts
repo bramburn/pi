@@ -128,7 +128,7 @@ class ListSelector extends Container implements Focusable {
 }
 
 interface MiniTuiHandlers {
-	submit(text: string): void;
+	submit(payload: { text: string; attachments: unknown[] }): void;
 	/** Queue the current editor text as a follow-up instead of steering the active run. */
 	queueFollowUp(text: string): void;
 	interrupt(): void;
@@ -516,8 +516,8 @@ export async function runView(client: AttachedSession): Promise<void> {
 	};
 
 	view = new MiniTui(client.state().cwd, {
-		submit: (text) => {
-			const trimmed = text.trim();
+		submit: (payload) => {
+			const trimmed = payload.text.trim();
 			if (trimmed.length === 0) return;
 			if (trimmed === "/model") return selectModel();
 			if (trimmed === "/login") return login();

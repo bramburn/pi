@@ -128,7 +128,7 @@ export class ExperimentalClientTui implements Component {
 		this.#sharedFacets = loadedFacets;
 		setKeybindings(this.#keybindings);
 		this.#chatInput = new CustomEditor(ui, getEditorTheme(), this.#keybindings, { paddingX: 1 });
-		this.#chatInput.onSubmit = (message) => void this.#runPrompt(message);
+		this.#chatInput.onSubmit = (payload) => void this.#runPrompt(payload.text);
 		this.#chatInput.onEscape = () => this.#interrupt();
 		this.#chatInput.onCtrlD = finish;
 		this.#chatInput.onAction("app.clear", finish);

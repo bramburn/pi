@@ -1946,7 +1946,7 @@ describe("Editor component", () => {
 		it("clears undo stack on submit", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (text) => {
+			editor.onSubmit = ({ text }) => {
 				submitted = text;
 			};
 
@@ -3737,7 +3737,7 @@ describe("Editor component", () => {
 		it("undo after paste marker deletion restores the paste registry", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3752,7 +3752,7 @@ describe("Editor component", () => {
 		it("undo after deleting the first of two paste markers restores both registry entries", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3771,7 +3771,7 @@ describe("Editor component", () => {
 		it("renumbers the paste registry in ascending id order when markers are out of order in text", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3792,7 +3792,7 @@ describe("Editor component", () => {
 		it("undo after setText restores paste markers and registry", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -4152,7 +4152,7 @@ describe("Editor component", () => {
 				"tokens $1 $2 $& $$ $` $' end",
 			].join("\n");
 			let submitted = "";
-			editor.onSubmit = (text) => {
+			editor.onSubmit = ({ text }) => {
 				submitted = text;
 			};
 

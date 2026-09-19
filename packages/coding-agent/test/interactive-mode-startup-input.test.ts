@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
+type SubmitPayload = { text: string; attachments: unknown[] };
+
 type SubmitContext = {
-	defaultEditor: { onSubmit?: (text: string) => void };
+	defaultEditor: { onSubmit?: (payload: SubmitPayload) => void };
 	editor: {
 		addToHistory?: (text: string) => void;
 		setText: (text: string) => void;
@@ -71,7 +73,7 @@ describe("InteractiveMode startup input", () => {
 		const context = createSubmitContext();
 		interactiveModePrototype.setupEditorSubmitHandler.call(context);
 
-		await context.defaultEditor.onSubmit?.(" early prompt ");
+		await context.defaultEditor.onSubmit?.({ text: " early prompt ", attachments: [] });
 
 		expect(context.pendingUserInputs).toEqual(["early prompt"]);
 		expect(context.flushPendingBashComponents).toHaveBeenCalledTimes(1);

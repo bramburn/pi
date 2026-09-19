@@ -115,7 +115,7 @@ async function startRpcHarness(extension: (pi: ExtensionAPI) => void): Promise<{
 }
 
 type InteractiveBashContext = {
-	defaultEditor: { onSubmit?: (text: string) => Promise<void> | void };
+	defaultEditor: { onSubmit?: (payload: { text: string; attachments: unknown[] }) => Promise<void> | void };
 	editor: { addToHistory?: (text: string) => void };
 	session: Harness["session"];
 	sessionManager: Harness["sessionManager"];
@@ -253,7 +253,7 @@ describe("Interactive user_bash failure handling (#9068)", () => {
 		interactiveModePrototype.setupEditorSubmitHandler.call(context);
 
 		try {
-			await context.defaultEditor.onSubmit?.(input);
+			await context.defaultEditor.onSubmit?.({ text: input, attachments: [] });
 
 			expect(events).toEqual([
 				{
