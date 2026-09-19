@@ -17,6 +17,7 @@ export interface AppKeybindings {
 	"app.exit": true;
 	"app.suspend": true;
 	"app.thinking.cycle": true;
+	"app.thinking.save": true;
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
@@ -28,6 +29,7 @@ export interface AppKeybindings {
 	"app.message.followUp": true;
 	"app.message.dequeue": true;
 	"app.clipboard.pasteImage": true;
+	"app.clipboard.pasteText": true;
 	"app.session.new": true;
 	"app.session.tree": true;
 	"app.session.fork": true;
@@ -100,6 +102,10 @@ export const KEYBINDINGS = {
 		defaultKeys: "shift+tab",
 		description: "Cycle thinking level",
 	},
+	"app.thinking.save": {
+		defaultKeys: "ctrl+s",
+		description: "Save thinking level",
+	},
 	"app.model.cycleForward": {
 		defaultKeys: "ctrl+p",
 		description: "Cycle to next model",
@@ -124,7 +130,7 @@ export const KEYBINDINGS = {
 	},
 	"app.message.copy": {
 		defaultKeys: "ctrl+x",
-		description: "Copy message to clipboard",
+		description: "Copy selection or last assistant message",
 	},
 	"app.message.followUp": {
 		defaultKeys: windowsKeybindings ? "ctrl+q" : "alt+enter",
@@ -135,8 +141,12 @@ export const KEYBINDINGS = {
 		description: "Restore queued messages",
 	},
 	"app.clipboard.pasteImage": {
-		defaultKeys: windowsKeybindings ? "alt+v" : "ctrl+v",
-		description: "Paste image from clipboard (text fallback)",
+		defaultKeys: "ctrl+v",
+		description: "Paste image or text from clipboard",
+	},
+	"app.clipboard.pasteText": {
+		defaultKeys: "alt+v",
+		description: "Paste text as collapsed marker regardless of size",
 	},
 	"app.session.new": { defaultKeys: [], description: "Start a new session" },
 	"app.session.tree": { defaultKeys: [], description: "Open session tree" },

@@ -701,6 +701,19 @@ describe("Editor component", () => {
 	});
 
 	describe("Scroll indicators", () => {
+		it("centers scroll indicators on wide borders", () => {
+			const width = 40;
+			const editor = new Editor(createTestTUI(width), defaultEditorTheme);
+			editor.setText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
+
+			editor.render(width);
+			for (let index = 0; index < 10; index++) editor.handleInput("\x1b[A");
+
+			const lines = editor.render(width);
+			assert.strictEqual(stripVTControlCharacters(lines[0]!), `${"─".repeat(15)} ↑ 9 more ${"─".repeat(15)}`);
+			assert.strictEqual(stripVTControlCharacters(lines.at(-1)!), `${"─".repeat(15)} ↓ 4 more ${"─".repeat(15)}`);
+		});
+
 		it("keeps truncated scroll indicators within width and preserves their color (issue #6962)", () => {
 			const width = 10;
 			const borderColor = (text: string) => `\x1b[35m${text}\x1b[39m`;
@@ -1933,7 +1946,7 @@ describe("Editor component", () => {
 		it("clears undo stack on submit", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (text) => {
+			editor.onSubmit = ({ text }) => {
 				submitted = text;
 			};
 
@@ -3724,7 +3737,7 @@ describe("Editor component", () => {
 		it("undo after paste marker deletion restores the paste registry", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3739,7 +3752,7 @@ describe("Editor component", () => {
 		it("undo after deleting the first of two paste markers restores both registry entries", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3758,7 +3771,7 @@ describe("Editor component", () => {
 		it("renumbers the paste registry in ascending id order when markers are out of order in text", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -3779,7 +3792,7 @@ describe("Editor component", () => {
 		it("undo after setText restores paste markers and registry", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let submitted = "";
-			editor.onSubmit = (t) => {
+			editor.onSubmit = ({ text: t }) => {
 				submitted = t;
 			};
 
@@ -4139,7 +4152,7 @@ describe("Editor component", () => {
 				"tokens $1 $2 $& $$ $` $' end",
 			].join("\n");
 			let submitted = "";
-			editor.onSubmit = (text) => {
+			editor.onSubmit = ({ text }) => {
 				submitted = text;
 			};
 

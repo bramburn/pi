@@ -178,7 +178,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 				// Editor submit callback
 				editor.onSubmit = (value) => {
 					if (!inputQuestionId) return;
-					const trimmed = value.trim() || "(no response)";
+					const trimmed = value.text.trim() || "(no response)";
 					saveAnswer(inputQuestionId, trimmed, trimmed, true);
 					inputMode = false;
 					inputQuestionId = null;
