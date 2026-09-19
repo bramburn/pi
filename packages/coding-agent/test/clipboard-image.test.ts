@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		spawnSync: vi.fn<(command: string, args: string[], options: unknown) => SpawnSyncReturns<Buffer>>(),
 		clipboard: {
-			hasImage: vi.fn<() => boolean>(),
+			hasImage: vi.fn<() => Promise<boolean>>(),
 			getImageBinary: vi.fn<() => Promise<Uint8Array | null>>(),
 		},
 	};

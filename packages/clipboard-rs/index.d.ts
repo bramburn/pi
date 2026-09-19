@@ -8,6 +8,6 @@
 
 export declare function getText(): Promise<string | null>;
 export declare function setText(text: string): Promise<void>;
-export declare function hasImage(): boolean;
+export declare function hasImage(): Promise<boolean>;
 export declare function getImageBinary(): Promise<number[]>;
 export declare function addonMarker(): string;
