@@ -68,7 +68,13 @@ jobs:
       - name: Setup Rust (${{ matrix.target.rust }})
         uses: dtolnay/rust-toolchain@1.86.0
         with:
-          toolchain: stable
+          # Pinned to 1.89.0: napi-build 2.4.x (resolved transitively by
+           # napi 3.0's `^2.2.1` requirement) bumped its `rust-version` to
+           # 1.88; the runner image's default stable at the time of the first
+           # failing CI run was 1.86.0, which is too old. Lock to 1.89.0
+           # (matches the local dev toolchain the PR was tested against) so
+           # the matrix doesn't depend on the runner's default stable.
+          toolchain: 1.89.0
           targets: ${{ matrix.target.rust }}
 
       # Linux arm64 only: add aarch64 cross-compile libs + the
