@@ -455,6 +455,18 @@ Stored credentials remain provider-scoped, so save the key under the provider ID
 
 Amazon Bedrock resolves ambient AWS credentials (`AWS_PROFILE`, access key pairs, `AWS_BEARER_TOKEN_BEDROCK`, ECS task roles, web identity tokens); its provider-owned login flow supports bearer tokens, AWS profiles, and the existing credential chain. Vertex AI resolves either an explicit key or gcloud Application Default Credentials plus project/location, with a provider-owned login flow for API keys, ADC, and service-account files.
 
+### Summariser Override (PI_SUMMARIZER_*)
+
+Three env vars route context summarisation (compaction + branch summary) through a one-off OpenAI-compatible endpoint instead of the main model. All three are required; partial sets warn and fall back. Always active — no flag needed.
+
+| Variable | Description |
+|----------|-------------|
+| `PI_SUMMARIZER_BASE_URL` | OpenAI-compatible base URL (e.g. DeepSeek, OpenRouter, vLLM, llama.cpp). |
+| `PI_SUMMARIZER_MODEL` | Model id at that endpoint (e.g. `deepseek-chat`). |
+| `PI_SUMMARIZER_API_KEY` | API key for the endpoint. |
+
+Consumers (`@earendil-works/pi-coding-agent`) read these via `resolveSummariserEnv()` / `resolveSummariserModel()` from this package and fall back to the main model when the override is unset.
+
 ## Tools
 
 Tools enable LLMs to interact with external systems. This library uses TypeBox schemas for type-safe tool definitions with automatic validation using TypeBox's built-in validator and value conversion utilities. TypeBox schemas can be serialized and deserialized as plain JSON, making them ideal for distributed systems.

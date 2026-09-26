@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+### Added
+
+- Wired the `PI_SUMMARIZER_*` env-var override into context compaction. `_getSummarizationRequestAuth` resolves the override via `resolveSummariserModel()` and, when set, registers a one-off OpenAI-compatible provider on the runtime (`ModelRuntime.registerTransientProvider`) so manual `compact()`, auto-compaction, and the default summarisation path all route through the override model with the env-supplied API key. When the env vars are unset the override falls back to the main agent model with no behaviour change. Decoupled from `--deepseek-harness`; works regardless of the flag.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ### Added

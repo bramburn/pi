@@ -784,4 +784,65 @@ export class ModelRuntime implements Models {
 		this.updateModelSnapshot();
 		void this.refresh({ allowNetwork: false });
 	}
+
+	/**
+	 * Register a transient provider directly on the underlying `MutableModels`
+	 * collection. Used for PI_SUMMARIZER_* overrides (and similar short-lived
+	 * providers) that don't go through the extension config pipeline.
+	 *
+	 * ## Why a separate method?
+	 *
+	 * The extension provider path (`addExtensionProvider`) goes through
+	 * `recomposeProvider`, which composes a builtin + extension overlay and
+	 * calls `updateModelSnapshot()` so all runtime consumers see the change.
+	 * That's the right path for persistent, plugin-contributed providers.
+	 *
+	 * The summariser override is different: it's a one-off provider with an
+	 * internal hardcoded id, no extension context, no config overlay, and
+	 * usually-per-invocation lifecycle. Routing it through the extension
+	 * pipeline would be a square-peg-into-round-hole. This method is the
+	 * short-circuit: register the provider directly on the MutableModels map
+	 * and trust the caller to manage lifecycle.
+	 *
+	 * ## Idempotence
+	 *
+	 * Re-registration with the **same** id replaces the previous provider
+	 * (`MutableModels.setProvider` is an upsert by id). That is the intended
+	 * behaviour — a new summarisation call after the user changed
+	 * `PI_SUMMARIZER_BASE_URL` should pick up the new endpoint, not the old.
+	 *
+	 * ## Built-in collision guard
+	 *
+	 * If `provider.id` collides with a built-in provider, we refuse to
+	 * register and return `false`. Built-ins are real, persisted providers
+	 * and silently clobbering them would break unrelated code paths. The
+	 * caller (`_getSummarizationRequestAuth` in agent-session.ts) interprets
+	 * `false` as "fall back to the main model for this call".
+	 *
+	 * ## Snapshot staleness
+	 *
+	 * This method does NOT call `updateModelSnapshot()`. That is intentional
+	 * and safe for the summariser use case specifically: registration is
+	 * immediately followed by `_modelRuntime.getAuth(model)` which goes
+	 * through `this.models.getProvider(model.provider)` — the new provider is
+	 * visible to that path because it lives on the MutableModels map directly,
+	 * not on the cached `snapshot.all`. If the override ever needs to be
+	 * discoverable via `getModels()` instead of auth-only lookup, add a
+	 * `this.updateModelSnapshot()` call here.
+	 *
+	 * @returns `true` if the provider was registered; `false` if rejected.
+	 */
+	registerTransientProvider(provider: Provider): boolean {
+		if (this.builtins.has(provider.id)) {
+			console.warn(
+				`[pi] PI_SUMMARIZER_* provider id "${provider.id}" collides with a built-in provider. ` +
+					`Pick a unique id (e.g. set PI_SUMMARIZER_PROVIDER to a non-built-in name) or unset ` +
+					`PI_SUMMARIZER_PROVIDER to use the default override id. Falling back to the main model ` +
+					`for context summarisation.`,
+			);
+			return false;
+		}
+		this.models.setProvider(provider);
+		return true;
+	}
 }

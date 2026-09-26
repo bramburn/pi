@@ -25,7 +25,13 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { contentText } from "@earendil-works/pi-ai";
+import {
+	contentText,
+	createProvider,
+	resolveSummariserModel,
+	SUMMARISER_OVERRIDE_PROVIDER_ID,
+} from "@earendil-works/pi-ai";
+import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type {
 	AssistantMessage,
 	AuthResult,
@@ -476,14 +482,77 @@ export class AgentSession {
 		headers?: Record<string, string>;
 		env?: Record<string, string>;
 	}> {
+		// =====================================================================
+		// PI_SUMMARIZER_* env override — route summarisation through a separate
+		// OpenAI-compatible model when configured. See packages/ai/src/summariser-
+		// env.ts + summariser-model.ts for the env-var contract.
+		//
+		// The strategy: rather than adding new branching throughout the rest of
+		// this method, we register a one-off `Provider` on the ModelRuntime that
+		// carries the override model + its env-supplied apiKey. The downstream
+		// `getAuth(effectiveModel)` call then resolves to that provider via
+		// `model.provider` → `MutableModels.getProvider(id)` — no special-case
+		// branches needed after this block.
+		//
+		// `effectiveModel` starts as the caller-supplied main model. If the
+		// env-var override is configured AND `registerTransientProvider` accepts
+		// the provider (no built-in-id collision), we swap to the override model.
+		// Otherwise `effectiveModel` stays as the main model — every code path
+		// below this block runs against `effectiveModel` rather than `model`.
+		// =====================================================================
+		const override = resolveSummariserModel();
+		let effectiveModel = model;
+		if (override) {
+			const overrideProvider = createProvider({
+				// Stable internal id — must match `model.provider` below, otherwise
+				// `ModelRuntime.getAuth()` looks up the wrong provider.
+				id: SUMMARISER_OVERRIDE_PROVIDER_ID,
+				name: "PI Summariser Override",
+				baseUrl: override.model.baseUrl,
+				auth: {
+					// The apiKey is captured by closure here, at call time. If the
+					// user changes `PI_SUMMARIZER_API_KEY` mid-session, a new
+					// summarisation call picks up the new value (next resolveSummariserModel
+					// call reads fresh env). Within a single summarisation call the
+					// captured value is stable.
+					apiKey: {
+						name: "PI_SUMMARIZER_API_KEY",
+						resolve: async () => ({
+							auth: { apiKey: override.apiKey },
+							source: "PI_SUMMARIZER_API_KEY",
+						}),
+					},
+				},
+				// Single-model provider — the override exists for one purpose only.
+				models: [override.model],
+				// openAICompletionsApi() is the universal OpenAI-compatible chat-completions
+				// stream. Same reason summariser-model.ts picks openai-completions:
+				// it's the only API whose request shape is universally emulated.
+				api: openAICompletionsApi(),
+			});
+			// Guarded swap: if a built-in provider already owns this id
+			// (theoretically possible — hardcoded id is uniquely ours, but a
+			// future built-in could conflict), `registerTransientProvider` warns
+			// and returns false. In that case we keep `effectiveModel = model`
+			// and the call falls back to the main agent model.
+			if (this._modelRuntime.registerTransientProvider(overrideProvider)) {
+				// The override is a `Model<"openai-completions">`; the downstream
+				// signatures want `Model<any>`. The cast is sound — generic
+				// parameters are erased at runtime, and `openai-completions`
+				// satisfies the upper-bound any constraint.
+				effectiveModel = override.model as unknown as Model<any>;
+			}
+		}
 		if (this.agent.streamFunction === streamSimple) {
-			return this._getRequiredRequestAuth(model);
+			return this._getRequiredRequestAuth(effectiveModel);
 		}
 
 		try {
-			const result = await this._modelRuntime.getAuth(model);
-			if (!result) return { model };
-			const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
+			const result = await this._modelRuntime.getAuth(effectiveModel);
+			if (!result) return { model: effectiveModel };
+			const requestModel = result.auth.baseUrl
+				? { ...effectiveModel, baseUrl: result.auth.baseUrl }
+				: effectiveModel;
 			return {
 				model: requestModel,
 				apiKey: result.auth.apiKey,
@@ -491,7 +560,7 @@ export class AgentSession {
 				env: result.env,
 			};
 		} catch {
-			return { model };
+			return { model: effectiveModel };
 		}
 	}
 

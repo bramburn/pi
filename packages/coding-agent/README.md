@@ -278,6 +278,8 @@ Long sessions can exhaust context windows. Compaction summarizes older messages 
 
 Compaction is lossy. The full history remains in the JSONL file; use `/tree` to revisit. Customize compaction behavior via [extensions](#extensions). See [docs/compaction.md](docs/compaction.md) for internals.
 
+To route summarisation through a separate (typically cheaper) model, set `PI_SUMMARIZER_BASE_URL`, `PI_SUMMARIZER_MODEL`, and `PI_SUMMARIZER_API_KEY` — see [Summariser Override](docs/compaction.md#summariser-override).
+
 ---
 
 ## Settings
