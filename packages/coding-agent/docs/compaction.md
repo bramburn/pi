@@ -214,6 +214,41 @@ Same as compaction, extensions can store custom data in `details`.
 
 See [`collectEntriesForBranchSummary()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), [`prepareBranchEntries()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), and [`generateBranchSummary()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) for the implementation.
 
+## Summariser Override
+
+By default compaction and branch summarisation call the main agent model. Three `PI_SUMMARIZER_*` env vars route both operations through a separate OpenAI-compatible endpoint instead — useful when you want the main agent on a large model but the summariser on a cheaper / faster one.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PI_SUMMARIZER_BASE_URL` | yes | Base URL of an OpenAI-compatible API (e.g. `https://api.deepseek.com/v1`, `https://openrouter.ai/api/v1`, a vLLM or llama.cpp endpoint). |
+| `PI_SUMMARIZER_MODEL` | yes | Model id passed to that endpoint (e.g. `deepseek-chat`). |
+| `PI_SUMMARIZER_API_KEY` | yes | API key for the endpoint. |
+
+**Semantics**
+
+- All three must be set; partial sets emit `console.warn` and fall back to the main model. Whitespace-only values count as unset.
+- The override is **always active** whenever the three vars are present. It does not require `--deepseek-harness`, `--no-deepseek-harness`, or any other flag.
+- The override is an OpenAI-compatible chat-completions call against the configured base URL. DeepSeek, OpenRouter proxies, vLLM, llama.cpp, and other OpenAI-compatible services work without per-provider plumbing. Reasoning-aware endpoints are not used — the override explicitly disables reasoning.
+- Cost is reported as zero for the override model because the endpoint is unknown to pi's catalog.
+- The override provider is registered on the runtime once per summarisation call with a stable internal id (`pi-summariser-override`). Setting `PI_SUMMARIZER_PROVIDER` is **not** supported — pick a non-built-in value at your own risk; built-in ids are rejected with a warning to avoid clobbering real providers.
+
+**Source**
+
+- [`packages/ai/src/summariser-env.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/summariser-env.ts) — env-var discovery; returns `undefined` when no override.
+- [`packages/ai/src/summariser-model.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/summariser-model.ts) — builds the `Model<"openai-completions">` for the override.
+- [`packages/coding-agent/src/core/agent-session.ts` `_getSummarizationRequestAuth`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/agent-session.ts) — wires the override into manual `/compact`, auto-compaction, and the default summarisation path.
+
+**Example**
+
+```bash
+export PI_SUMMARIZER_BASE_URL="https://api.deepseek.com/v1"
+export PI_SUMMARIZER_MODEL="deepseek-chat"
+export PI_SUMMARIZER_API_KEY="sk-..."
+pi
+```
+
+Now every `/compact` (and the auto-compaction threshold) summarises through DeepSeek while the main agent keeps using whatever model you selected.
+
 ## Summary Format
 
 Both compaction and branch summarization use the same structured format:

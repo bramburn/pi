@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fork-local (bramburn)
+
+### Added
+
+- Added `resolveSummariserEnv()` and `resolveSummariserModel()` to `@earendil-works/pi-ai`. The three `PI_SUMMARIZER_*` env vars (`PI_SUMMARIZER_BASE_URL`, `PI_SUMMARIZER_MODEL`, `PI_SUMMARIZER_API_KEY`) — all required — route context summarisation through a one-off OpenAI-compatible model. Both resolvers read `process.env` directly; no `ProviderEnv` parameter is accepted (kept simple so users can flip the override on per shell session). Partial sets log a `console.warn` and fall back to the main model; both functions return `undefined` when no override is configured so callers transparently fall back to the previous behaviour.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ### Added

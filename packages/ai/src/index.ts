@@ -40,6 +40,8 @@ export * from "./models.ts";
 export * from "./models-store.ts";
 export * from "./providers/faux.ts";
 export * from "./session-resources.ts";
+export * from "./summariser-env.ts";
+export * from "./summariser-model.ts";
 export * from "./types.ts";
 export * from "./utils/diagnostics.ts";
 export * from "./utils/event-stream.ts";

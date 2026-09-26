@@ -85,6 +85,9 @@ These variables are read by Pi itself:
 | `PI_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
 | `PI_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
 | `PI_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
+| `PI_SUMMARIZER_BASE_URL` | OpenAI-compatible base URL for context summarisation (compaction + branch summary). Pairs with `PI_SUMMARIZER_MODEL` and `PI_SUMMARIZER_API_KEY`. See [Compaction](compaction.md#summariser-override). |
+| `PI_SUMMARIZER_MODEL` | Model id for the override endpoint (e.g. `deepseek-chat`). Pairs with `PI_SUMMARIZER_BASE_URL` and `PI_SUMMARIZER_API_KEY`. See [Compaction](compaction.md#summariser-override). |
+| `PI_SUMMARIZER_API_KEY` | API key for the override endpoint. Pairs with `PI_SUMMARIZER_BASE_URL` and `PI_SUMMARIZER_MODEL`. See [Compaction](compaction.md#summariser-override). |
 | `PI_SHARE_VIEWER_URL` | Override the base URL used by `/share` |
 | `PI_HARDWARE_CURSOR` | Set to `1` to show the hardware cursor; see [Terminal setup](terminal-setup.md) |
 | `PI_HYPERLINKS` | Override OSC 8 hyperlink detection with `1`, `0`, or `auto` |

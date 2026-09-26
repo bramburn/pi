@@ -41,7 +41,9 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
 		const editorArgs = tokens.slice(1);
 		// Only show the executable, not the full command — the command may include
 		// sensitive args (e.g. SSH key paths, credentials) the user supplied.
-		process.stdout.write(`Launching external editor: ${tokens[0] ?? options.command}\nPi will resume when the editor exits.\n`);
+		process.stdout.write(
+			`Launching external editor: ${tokens[0] ?? options.command}\nPi will resume when the editor exits.\n`,
+		);
 
 		// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
 		// Node/libuv's console input read active after the parent pauses stdin, racing
