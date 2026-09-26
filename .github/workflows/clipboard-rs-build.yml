@@ -68,7 +68,13 @@ jobs:
       - name: Setup Rust (${{ matrix.target.rust }})
         uses: dtolnay/rust-toolchain@1.86.0
         with:
-          toolchain: stable
+          # Pinned to 1.89.0: napi-build 2.4.x (resolved transitively by
+           # napi 3.0's `^2.2.1` requirement) bumped its `rust-version` to
+           # 1.88; the runner image's default stable at the time of the first
+           # failing CI run was 1.86.0, which is too old. Lock to 1.89.0
+           # (matches the local dev toolchain the PR was tested against) so
+           # the matrix doesn't depend on the runner's default stable.
+          toolchain: 1.89.0
           targets: ${{ matrix.target.rust }}
 
       # Linux arm64 only: add aarch64 cross-compile libs + the
@@ -116,18 +122,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # `--bin` would select a Cargo `[[bin]]` target, but this
+          # crate ships only a `[lib]` cdylib (see Cargo.toml), so
+          # `--bin` fails with `no bin target named 'clipboard-rs'`.
+          # `--no-js` skips napi-rs's auto-generated JS binding: the
+          # published package uses the committed hand-written shim
+          # (packages/clipboard-rs/index.js), which resolves the .node
+          # via `prebuilds/<triple>/clipboard-rs.node`. The output
+          # `.node` filename (`clipboard-rs.<triple>.node`) comes from
+          # `napi.binaryName` in packages/clipboard-rs/package.json.
           napi build \
             --platform \
             --target ${{ matrix.target.rust }} \
             --release \
             --strip \
-            --bin clipboard-rs \
-            --js index.js \
-            --dts index.d.ts \
+            --no-js \
             --output-dir ../clipboard-rs-dist
           ls -la ../clipboard-rs-dist
           mkdir -p prebuilds/${{ matrix.target.os }}
-          cp ../clipboard-rs-dist/${{ matrix.target.os }}/clipboard-rs.node \
+          # napi-rs with `--platform` writes the .node flat at
+          # `<outputDir>/clipboard-rs.<triple>.node` (no per-platform
+          # subdir). The CI places it under
+          # `prebuilds/<matrix.target.os>/` so the committed shim can
+          # find it via its `prebuilds/<plat>-<arch>[-<abi>]/`
+          # candidate list.
+          cp ../clipboard-rs-dist/clipboard-rs.${{ matrix.target.os }}.node \
              prebuilds/${{ matrix.target.os }}/clipboard-rs.node
           ls -la prebuilds/${{ matrix.target.os }}
 
@@ -135,9 +154,13 @@ jobs:
         working-directory: packages/clipboard-rs
         shell: bash
         run: |
-          # The build emits dist/ with index.js + index.d.ts; copy them
-          # alongside the prebuild so the test loader can find them.
-          cp ../clipboard-rs-dist/index.js ../clipboard-rs-dist/index.d.ts .
+          # The hand-written shim at packages/clipboard-rs/index.js
+          # (committed in the repo) lazy-loads
+          # `prebuilds/<triple>/clipboard-rs.node`; the build step above
+          # already placed the fresh .node there. Do NOT copy
+          # napi-rs-generated index.js / index.d.ts into the cwd — they
+          # look for the .node next to themselves and would shadow the
+          # committed shim, breaking the test.
           node --test test/round-trip.test.mjs
 
       - name: Upload prebuild artifact

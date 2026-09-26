@@ -21,7 +21,7 @@ import { keyHint } from "./keybinding-hints.ts";
 
 export class ExtensionEditorComponent extends Container implements Focusable {
 	private editor: Editor;
-	private onSubmitCallback: (value: string) => void;
+	private onSubmitCallback: (value: { text: string; attachments: unknown[] }) => void;
 	private onCancelCallback: () => void;
 	private tui: TUI;
 	private keybindings: KeybindingsManager;
@@ -41,7 +41,7 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 		keybindings: KeybindingsManager,
 		title: string,
 		prefill: string | undefined,
-		onSubmit: (value: string) => void,
+		onSubmit: (value: { text: string; attachments: unknown[] }) => void,
 		onCancel: () => void,
 		options?: EditorOptions,
 		externalEditorCommand?: string,
@@ -72,8 +72,8 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			this.editor.setText(prefill);
 		}
 		// Wire up Enter to submit (Shift+Enter for newlines, like the main editor)
-		this.editor.onSubmit = (text: string) => {
-			this.onSubmitCallback(text);
+		this.editor.onSubmit = (payload) => {
+			this.onSubmitCallback(payload);
 		};
 		this.addChild(this.editor);
 

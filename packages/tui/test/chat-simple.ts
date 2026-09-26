@@ -46,13 +46,13 @@ tui.setFocus(editor);
 let isResponding = false;
 
 // Handle message submission
-editor.onSubmit = (value: string) => {
+editor.onSubmit = (payload) => {
 	// Prevent submission if already responding
 	if (isResponding) {
 		return;
 	}
 
-	const trimmed = value.trim();
+	const trimmed = payload.text.trim();
 
 	// Handle slash commands
 	if (trimmed === "/delete") {
@@ -81,7 +81,7 @@ editor.onSubmit = (value: string) => {
 		isResponding = true;
 		editor.disableSubmit = true;
 
-		const userMessage = new Markdown(value, 1, 1, defaultMarkdownTheme);
+		const userMessage = new Markdown(payload.text, 1, 1, defaultMarkdownTheme);
 
 		const children = tui.children;
 		children.splice(children.length - 1, 0, userMessage);

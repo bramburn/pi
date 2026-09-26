@@ -1,4 +1,5 @@
 import type { AutocompleteProvider } from "./autocomplete.ts";
+import type { PasteAttachment } from "./components/editor.ts";
 import type { Component } from "./tui.ts";
 
 /**
@@ -27,7 +28,7 @@ export interface EditorComponent extends Component {
 	// =========================================================================
 
 	/** Called when user submits (e.g., Enter key) */
-	onSubmit?: (text: string) => void;
+	onSubmit?: (payload: { text: string; attachments: PasteAttachment[] }) => void;
 
 	/** Called when text changes */
 	onChange?: (text: string) => void;
@@ -51,6 +52,23 @@ export interface EditorComponent extends Component {
 	 * Falls back to getText() if not implemented.
 	 */
 	getExpandedText?(): string;
+
+	/**
+	 * Get the attachments (text + image) currently behind paste markers.
+	 * Returns an empty array if the implementation doesn't support attachments.
+	 */
+	getAttachments?(): PasteAttachment[];
+
+	/**
+	 * Programmatically paste text. Implementations decide whether to store it
+	 * inline or behind a paste marker based on size/options.
+	 */
+	pasteText(text: string, opts?: { forceMarker?: boolean; skipUndoSnapshot?: boolean }): void;
+
+	/**
+	 * Programmatically paste an image. Stores the bytes behind a paste marker.
+	 */
+	pasteImage(bytes: Uint8Array, mimeType: string, fileName: string): void;
 
 	// =========================================================================
 	// Autocomplete support (optional)

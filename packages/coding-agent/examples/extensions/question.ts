@@ -89,7 +89,7 @@ export default function question(pi: ExtensionAPI) {
 					const editor = new Editor(tui, editorTheme);
 
 					editor.onSubmit = (value) => {
-						const trimmed = value.trim();
+						const trimmed = value.text.trim();
 						if (trimmed) {
 							done({ answer: trimmed, wasCustom: true });
 						} else {
