@@ -232,6 +232,18 @@ Attribution:
 
 5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Code Review Bundles
+
+External LLM code reviews run via the `repomix-code-review` skill. That skill writes four artefacts to `dist/repomix-review/` (gitignored by the top-level `dist/` rule in `.gitignore`, so the bundles stay out of tracked files but persist across sessions for the user to send to the reviewer):
+
+- `agent-context.txt` — architecture summary + goal + soft gaps the agent flagged.
+- `code-review-instruction.txt` — review checklist + the goal context (merged here so it survives repomix 1.18's silent `.md` filter — see the skill's lessons-learned for the work-around).
+- `agent-review-full.xml` — full code for recent changes + dependencies + context (~80k token budget).
+- `agent-review-compressed.xml` — compressed repo context for cross-reference (~40k token budget).
+- `includes-a.txt` / `includes-b.txt` — the repomix `--include` lists; keep them so a re-run is reproducible.
+
+**DO NOT delete these bundles between turns.** The user needs them accessible to forward to the reviewer. If the user explicitly asks to clean up, only delete after confirming the reviewer has acknowledged receipt. The five artefacts regenerate from the skill — never edit them by hand.
+
 ## Forking
 
 When this repo is forked (e.g. `bramburn/pi` from `earendil-works/pi`), the fork needs build-time markers so users can tell at a glance that they are running the fork rather than upstream:

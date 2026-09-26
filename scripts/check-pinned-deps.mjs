@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 const dependencySections = ["dependencies", "devDependencies", "optionalDependencies"];
 const exactVersionPattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-const ignoredDirectories = new Set([".git", ".worktrees", "dist", "node_modules"]);
+// .worktrees (top-level, e.g. .worktrees/feat-*) and worktrees (under
+// .claude/, e.g. .claude/worktrees/agent-*) are skipped so concurrent
+// pi-agent session checkouts don't poison the pin check.
+const ignoredDirectories = new Set([".git", ".worktrees", "worktrees", "dist", "node_modules"]);
 const packageJsonFiles = [];
 
 function collectPackageJsonFiles(directory) {
