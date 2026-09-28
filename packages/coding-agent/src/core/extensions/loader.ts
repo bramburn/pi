@@ -148,9 +148,16 @@ function getAliases(): Record<string, string> {
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
 
-let extensionCacheCwd: string | undefined;
+// Extension factory cache, keyed by extension path, scoped per resolved cwd.
+// Issue #967 (fork): the previous single-cwd slot cleared the whole cache whenever a
+// different cwd attached (pi-web-ui serves multiple projects from one process), so
+// every cross-project attach re-imported all extension modules (~2s each). Slots are
+// bounded (LRU) and entries are revalidated by mtime so edited extension files are
+// re-imported without needing an explicit cache clear.
+const EXTENSION_CACHE_MAX_CWDS = 4;
+const extensionCacheByCwd = new Map<string, Map<string, ExtensionFactory>>();
 let extensionCacheGeneration = 0;
-const extensionCache = new Map<string, ExtensionFactory>();
+const extensionCacheMtime = new Map<string, number>();
 
 interface ExtensionCacheToken {
 	cwd: string;
@@ -158,17 +165,32 @@ interface ExtensionCacheToken {
 }
 
 export function clearExtensionCache(): void {
-	extensionCache.clear();
-	extensionCacheCwd = undefined;
+	for (const slot of extensionCacheByCwd.values()) slot.clear();
+	extensionCacheByCwd.clear();
+	extensionCacheMtime.clear();
 	extensionCacheGeneration++;
 }
 
 function useExtensionCacheCwd(cwd: string): ExtensionCacheToken {
 	const resolvedCwd = resolvePath(cwd);
-	if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
-		clearExtensionCache();
+	if (!extensionCacheByCwd.has(resolvedCwd)) {
+		// LRU bound: evict the least-recently-used slot when inserting would
+		// exceed the bound (i.e. the new key is not already resident).
+		while (extensionCacheByCwd.size >= EXTENSION_CACHE_MAX_CWDS) {
+			const oldest = extensionCacheByCwd.keys().next().value;
+			if (oldest === undefined) break;
+			extensionCacheByCwd.delete(oldest);
+			break; // one eviction is enough to make room (size < bound after)
+		}
+		extensionCacheByCwd.set(resolvedCwd, new Map());
+	} else {
+		// Refresh recency (Map iteration order = insertion order).
+		const slot = extensionCacheByCwd.get(resolvedCwd);
+		if (slot) {
+			extensionCacheByCwd.delete(resolvedCwd);
+			extensionCacheByCwd.set(resolvedCwd, slot);
+		}
 	}
-	extensionCacheCwd = resolvedCwd;
 	return { cwd: resolvedCwd, generation: extensionCacheGeneration };
 }
 
@@ -480,17 +502,33 @@ function createExtensionAPI(
 }
 
 function isCurrentCacheToken(cacheToken: ExtensionCacheToken | undefined): cacheToken is ExtensionCacheToken {
-	return (
-		cacheToken !== undefined &&
-		extensionCacheCwd === cacheToken.cwd &&
-		extensionCacheGeneration === cacheToken.generation
-	);
+	return cacheToken !== undefined && extensionCacheByCwd.has(cacheToken.cwd);
+}
+
+/**
+ * mtime-based revalidation: returns true when the cached module is still valid.
+ * A changed (or deleted-then-recreated) file gets a newer mtime than the cached
+ * read, so edited extensions are re-imported without a global cache clear.
+ */
+function isCachedModuleFresh(extensionPath: string): boolean {
+	const cachedAt = extensionCacheMtime.get(extensionPath);
+	if (cachedAt === undefined) return false;
+	try {
+		const current = fs.statSync(extensionPath).mtimeMs;
+		// Re-arm the stamp on every check so a read during the same ms still passes
+		// on the next check only if the file changed again (mtimeMs equality is rare
+		// but possible on fast filesystems; strict > keeps edited files hot).
+		return current <= cachedAt;
+	} catch {
+		// File vanished: treat as stale so the import path reports a proper error.
+		return false;
+	}
 }
 
 async function loadExtensionModule(extensionPath: string, cacheToken?: ExtensionCacheToken) {
 	if (isCurrentCacheToken(cacheToken)) {
-		const cachedFactory = extensionCache.get(extensionPath);
-		if (cachedFactory) {
+		const cachedFactory = extensionCacheByCwd.get(cacheToken.cwd)?.get(extensionPath);
+		if (cachedFactory && isCachedModuleFresh(extensionPath)) {
 			return cachedFactory;
 		}
 	}
@@ -513,7 +551,12 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 		return undefined;
 	}
 	if (isCurrentCacheToken(cacheToken)) {
-		extensionCache.set(extensionPath, factory);
+		extensionCacheByCwd.get(cacheToken.cwd)?.set(extensionPath, factory);
+		try {
+			extensionCacheMtime.set(extensionPath, fs.statSync(extensionPath).mtimeMs);
+		} catch {
+			extensionCacheMtime.delete(extensionPath);
+		}
 	}
 	return factory;
 }

@@ -35,6 +35,8 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
+	/** Force-clear the extension factory cache instead of relying on mtime revalidation. */
+	forceExtensionCacheClear?: boolean;
 }
 
 export interface ResourceLoader {
@@ -388,7 +390,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
 		resetTimings("extensions");
 
-		if (this.loaded) {
+		// Issue #967 (fork): previously this cleared the whole extension factory
+		// cache on every reload(), so pi-web-ui's per-attach/per-new_chat reloads
+		// re-imported all extension modules every time. Module-level mtime
+		// revalidation (loader.ts) now detects edited extension files, so the
+		// explicit clear is unnecessary; keep it available via option for
+		// force-reload scenarios.
+		if (this.loaded && options?.forceExtensionCacheClear) {
 			clearExtensionCache();
 		}
 

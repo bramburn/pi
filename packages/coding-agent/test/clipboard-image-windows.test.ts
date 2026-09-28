@@ -31,8 +31,7 @@ vi.mock("../src/utils/clipboard-native.ts", () => ({ clipboard: mocks.clipboard 
 // Tiny 1x1 transparent PNG, base64-encoded so PowerShell can emit it
 // as a plain ASCII string (no stdout encoding bugs). Same fixture the
 // `clipboard-rs` integration test uses, just base64-encoded.
-const PNG_BASE64 =
-	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 const PNG_BYTES = new Uint8Array(Buffer.from(PNG_BASE64, "base64"));
 
 function spawnOk(stdout: Buffer): SpawnSyncReturns<Buffer> {

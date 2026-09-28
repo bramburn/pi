@@ -92,11 +92,12 @@ describe("extension factory cache", () => {
 		expect(state().factoryRuns).toBe(2);
 	});
 
-	it("clears the cache on resource loader reload", async () => {
+	it("keeps factory cache across resource loader reloads (mtime-revalidated)", async () => {
 		const { cwd, agentDir } = fixture("reload");
 		const extensionDir = join(agentDir, "extensions");
 		mkdirSync(extensionDir, { recursive: true });
-		writeCountingExtension(join(extensionDir, "counting.ts"));
+		const extPath = join(extensionDir, "counting.ts");
+		writeCountingExtension(extPath);
 		const loader = new DefaultResourceLoader({
 			cwd,
 			agentDir,
@@ -108,8 +109,22 @@ describe("extension factory cache", () => {
 		await loader.reload();
 		await loader.reload();
 
-		expect(state().moduleLoads).toBe(2);
+		// Issue #967 (fork): reload() no longer force-clears the factory cache.
+		// Unchanged files keep their cached module (moduleLoads stays 1) while
+		// factories still re-run (factoryRuns = 2).
+		expect(state().moduleLoads).toBe(1);
 		expect(state().factoryRuns).toBe(2);
+
+		// Editing the extension file busts the cache via mtime revalidation.
+		writeCountingExtension(extPath);
+		// Ensure mtime actually advanced (some filesystems have coarse granularity).
+		const st = await import("node:fs");
+		const prev = st.statSync(extPath);
+		st.utimesSync(extPath, prev.atime, new Date(Date.now() + 10));
+
+		await loader.reload();
+		expect(state().moduleLoads).toBe(2);
+		expect(state().factoryRuns).toBe(3);
 	});
 
 	it("keeps the cache scoped to one cwd", async () => {
@@ -125,7 +140,38 @@ describe("extension factory cache", () => {
 		await loadExtensionsCached([extensionPath], secondCwd);
 		await loadExtensionsCached([extensionPath], secondCwd);
 
+		// Issue #967 (fork): per-cwd slots replace the single-cwd global cache.
+		// Each cwd gets its own slot (first visit to a cwd imports once), but the
+		// crucial part: revisiting secondCwd does NOT clear firstCwd's cache.
 		expect(state().moduleLoads).toBe(2);
 		expect(state().factoryRuns).toBe(3);
+	});
+
+	it("retains cache across alternating cwds up to the slot bound", async () => {
+		const { root } = fixture("alternating-cwd");
+		const cwds = ["a", "b", "c", "d", "e"].map((n) => {
+			const dir = join(root, n);
+			mkdirSync(dir, { recursive: true });
+			return dir;
+		});
+		const extensionPath = join(root, "counting.ts");
+		writeCountingExtension(extensionPath);
+
+		// Each new cwd imports once (its own slot); revisits are cached.
+		await loadExtensionsCached([extensionPath], cwds[0]); // import 1
+		await loadExtensionsCached([extensionPath], cwds[1]); // import 2
+		await loadExtensionsCached([extensionPath], cwds[2]); // import 3
+		await loadExtensionsCached([extensionPath], cwds[3]); // import 4
+		await loadExtensionsCached([extensionPath], cwds[0]); // cached (recent)
+		const loadsAfterWarm = state().moduleLoads ?? 0;
+		// 5th distinct cwd evicts the LRU slot (cwds[1]); cwds[0] survives (recent).
+		await loadExtensionsCached([extensionPath], cwds[4]); // import 5 (new slot)
+		await loadExtensionsCached([extensionPath], cwds[0]); // cached
+		const loadsNoEvictForRecent = state().moduleLoads;
+		await loadExtensionsCached([extensionPath], cwds[1]); // evicted → import 6
+
+		expect(loadsAfterWarm).toBe(4);
+		expect(loadsNoEvictForRecent).toBe(loadsAfterWarm + 1);
+		expect(state().moduleLoads).toBe(loadsAfterWarm + 2);
 	});
 });
