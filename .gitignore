@@ -66,3 +66,67 @@ packages/session-backends/sqlite-node/sqlite-node/
 
 # Sync-upstream script runtime state
 scripts/.upstream-sync-state.json
+
+# --- Pre-PC-reset backup hygiene (2026-09-29) -------------------------------
+# Appended, nothing above was removed. Defensive rules for categories the
+# file did not previously cover, so a future `git add -A` cannot sweep them in.
+# NOTE: no blanket `build/` rule on purpose. The only `build/` directory in
+# this repo is packages/coding-agent/examples/extensions/doom-overlay/doom/build/,
+# which holds a committed Emscripten artefact (doom.js + doom.wasm). Its
+# sources (doomgeneric/*.c) are NOT vendored here and build.sh needs both an
+# emscripten toolchain and a network clone, so the committed files are the
+# captured vendor material the example needs to run. Do not ignore them.
+
+# Environment files (only bare .env was covered above)
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+
+# Private keys, key stores and encoded key material
+*.pem
+*.key
+*.jks
+*.keystore
+*.p12
+*.pfx
+*_b64.txt
+*.b64.txt
+.netrc
+android/local.properties
+
+# Credential / auth payload files
+auth.json
+credentials.json
+*credentials*.json
+*service-account*.json
+*serviceaccount*.json
+.claude/settings.local.json
+
+# Rust (packages/clipboard-rs) build output
+target/
+
+# Caches and tool state
+.eslintcache
+.cache/
+.turbo/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Framework and bundler build output not yet covered above
+out/
+.next/
+.nuxt/
+
+# OS and editor junk
+Thumbs.db
+desktop.ini
+*.orig
+*.bak
+*.rej
+
