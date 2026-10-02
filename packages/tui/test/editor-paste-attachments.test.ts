@@ -135,6 +135,34 @@ describe("Editor PR-B: atomic paste markers & attachments", () => {
 		});
 	});
 
+	describe("pasteVideo", () => {
+		it("inserts a video marker and stores the bytes in the registry", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x18]);
+			editor.pasteVideo(bytes, "video/mp4", "clip.mp4");
+
+			assert.match(editor.getText(), /\[paste #1 video: clip\.mp4\]/);
+
+			const att = internals(editor).pastes.get(1);
+			assert.ok(att);
+			assert.strictEqual(att.kind, "video");
+			if (att.kind === "video") {
+				assert.strictEqual(att.mimeType, "video/mp4");
+				assert.strictEqual(att.fileName, "clip.mp4");
+				assert.deepStrictEqual(Array.from(att.bytes), [0x00, 0x00, 0x00, 0x18]);
+			}
+		});
+
+		it("clears the undo stack after a video paste so undo cannot resurrect video bytes", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.handleInput("prefix ");
+			assert.ok(internals(editor).undoStack.length > 0);
+
+			editor.pasteVideo(new Uint8Array([1, 2, 3]), "video/webm", "clip.webm");
+			assert.strictEqual(internals(editor).undoStack.length, 0);
+		});
+	});
+
 	describe("Forward-delete cleanup", () => {
 		it("removes the registry entry when the next character is a paste marker", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

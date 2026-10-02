@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Ctrl+V paste now reads video payloads from the Wayland/X11 clipboard and attaches them behind `[paste #N video: file]` markers. Video attachments are uploaded only when the active model's API accepts video (Google Gemini/Vertex); otherwise they are dropped with a warning.
+
 ### Fixed
 
 - Fixed `EEXIST: file already exists` crash when switching models before the first assistant message on a new session.

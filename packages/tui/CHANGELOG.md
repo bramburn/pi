@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added video paste attachments: `PasteAttachment` now has a `video` variant and `Editor.pasteVideo()` inserts `[paste #N video: file]` markers.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ## [0.84.4] - 2026-08-28

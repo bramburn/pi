@@ -384,6 +384,12 @@ export interface ImageContent {
 	mimeType: string; // e.g., "image/jpeg", "image/png"
 }
 
+export interface VideoContent {
+	type: "video";
+	data: string; // base64 encoded video data
+	mimeType: string; // e.g., "video/mp4", "video/webm"
+}
+
 export interface ToolCall {
 	type: "toolCall";
 	id: string;

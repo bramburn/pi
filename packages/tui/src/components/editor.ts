@@ -26,12 +26,13 @@ const wordSegmenter = getWordSegmenter();
 /**
  * Discriminated union of attachments stored behind a paste marker.
  * - Text attachments store the raw pasted text (existing behavior).
- * - Image attachments store raw image bytes plus metadata; PR-C will extract
- *   and forward them on submit.
+ * - Image and video attachments store raw bytes plus metadata; the submit
+ * path extracts and forwards them (video only for models that accept it).
  */
 export type PasteAttachment =
 	| { kind: "text"; content: string }
-	| { kind: "image"; mimeType: string; bytes: Uint8Array; fileName: string };
+	| { kind: "image"; mimeType: string; bytes: Uint8Array; fileName: string }
+	| { kind: "video"; mimeType: string; bytes: Uint8Array; fileName: string };
 
 /** Regex matching paste markers like `[paste #1 +123 lines]`, `[paste #2 1234 chars]`, or `[paste #3 image: foo.png]`. */
 const PASTE_MARKER_REGEX = /\[paste #(\d+)( [^\]]+)?\]/g;
@@ -1391,6 +1392,18 @@ export class Editor implements Component, Focusable {
 	 * afterwards so undo cannot resurrect the (potentially large) image payload.
 	 */
 	public pasteImage(bytes: Uint8Array, mimeType: string, fileName: string): void {
+		this.pasteBinaryAttachment("image", bytes, mimeType, fileName);
+	}
+
+	/**
+	 * Programmatically paste a video. Stores the bytes behind a paste marker
+	 * and inserts `[paste #N video: fileName]`.
+	 */
+	public pasteVideo(bytes: Uint8Array, mimeType: string, fileName: string): void {
+		this.pasteBinaryAttachment("video", bytes, mimeType, fileName);
+	}
+
+	private pasteBinaryAttachment(kind: "image" | "video", bytes: Uint8Array, mimeType: string, fileName: string): void {
 		this.cancelAutocomplete();
 		this.exitHistoryBrowsing();
 		this.lastAction = null;
@@ -1398,13 +1411,13 @@ export class Editor implements Component, Focusable {
 
 		this.pasteCounter++;
 		const pasteId = this.pasteCounter;
-		this.pastes.set(pasteId, { kind: "image", mimeType, bytes, fileName });
+		this.pastes.set(pasteId, { kind, mimeType, bytes, fileName });
 
 		const label = fileName.slice(0, 30);
-		const marker = `[paste #${pasteId} image: ${label}]`;
+		const marker = `[paste #${pasteId} ${kind}: ${label}]`;
 		this.insertTextAtCursorInternal(marker);
 
-		// Don't retain potentially-large image payloads in the undo history.
+		// Don't retain potentially-large media payloads in the undo history.
 		this.undoStack.clear();
 
 		if (this.onChange) {

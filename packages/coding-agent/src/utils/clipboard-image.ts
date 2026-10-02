@@ -13,11 +13,15 @@ export type ClipboardImage = {
 };
 
 const SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+const SUPPORTED_VIDEO_MIME_TYPES = ["video/mp4", "video/webm", "video/quicktime"] as const;
 
 const DEFAULT_LIST_TIMEOUT_MS = 1000;
 const DEFAULT_READ_TIMEOUT_MS = 3000;
 const DEFAULT_POWERSHELL_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_BUFFER_BYTES = 50 * 1024 * 1024;
+// Video payloads are much larger than images; raise the stdout ceiling so a
+// moderately large clipboard video is not silently dropped by spawnSync.
+const DEFAULT_VIDEO_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 export function isWaylandSession(env: NodeJS.ProcessEnv = process.env): boolean {
 	return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland";
@@ -42,21 +46,26 @@ export function extensionForImageMimeType(mimeType: string): string | null {
 	}
 }
 
-function selectPreferredImageMimeType(mimeTypes: string[]): string | null {
+export function extensionForVideoMimeType(mimeType: string): string {
+	const subtype = baseMimeType(mimeType).split("/")[1] ?? "video";
+	return subtype === "quicktime" ? "mov" : subtype;
+}
+
+function selectPreferredMimeType(mimeTypes: string[], preferred: readonly string[], anyPrefix: string): string | null {
 	const normalized = mimeTypes
 		.map((t) => t.trim())
 		.filter(Boolean)
 		.map((t) => ({ raw: t, base: baseMimeType(t) }));
 
-	for (const preferred of SUPPORTED_IMAGE_MIME_TYPES) {
-		const match = normalized.find((t) => t.base === preferred);
+	for (const candidate of preferred) {
+		const match = normalized.find((t) => t.base === candidate);
 		if (match) {
 			return match.raw;
 		}
 	}
 
-	const anyImage = normalized.find((t) => t.base.startsWith("image/"));
-	return anyImage?.raw ?? null;
+	const any = normalized.find((t) => t.base.startsWith(anyPrefix));
+	return any?.raw ?? null;
 }
 
 function isSupportedImageMimeType(mimeType: string): boolean {
@@ -127,7 +136,7 @@ function readClipboardImageViaWlPaste(): ClipboardImage | null {
 		.map((t) => t.trim())
 		.filter(Boolean);
 
-	const selectedType = selectPreferredImageMimeType(types);
+	const selectedType = selectPreferredMimeType(types, SUPPORTED_IMAGE_MIME_TYPES, "image/");
 	if (!selectedType) {
 		return null;
 	}
@@ -280,7 +289,8 @@ function readClipboardImageViaXclip(): ClipboardImage | null {
 			.filter(Boolean);
 	}
 
-	const preferred = candidateTypes.length > 0 ? selectPreferredImageMimeType(candidateTypes) : null;
+	const preferred =
+		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, SUPPORTED_IMAGE_MIME_TYPES, "image/") : null;
 	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
 
 	for (const mimeType of tryTypes) {
@@ -400,4 +410,87 @@ export async function readClipboardImage(options?: {
 	}
 
 	return image;
+}
+
+function readClipboardVideoViaWlPaste(): ClipboardImage | null {
+	const list = runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
+	if (!list.ok) {
+		return null;
+	}
+
+	const types = list.stdout
+		.toString("utf-8")
+		.split(/\r?\n/)
+		.map((t) => t.trim())
+		.filter(Boolean);
+
+	const selectedType = selectPreferredMimeType(types, SUPPORTED_VIDEO_MIME_TYPES, "video/");
+	if (!selectedType) {
+		return null;
+	}
+
+	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"], {
+		maxBufferBytes: DEFAULT_VIDEO_MAX_BUFFER_BYTES,
+	});
+	if (!data.ok || data.stdout.length === 0) {
+		return null;
+	}
+
+	return { bytes: data.stdout, mimeType: baseMimeType(selectedType) };
+}
+
+function readClipboardVideoViaXclip(): ClipboardImage | null {
+	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
+		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
+	});
+
+	let candidateTypes: string[] = [];
+	if (targets.ok) {
+		candidateTypes = targets.stdout
+			.toString("utf-8")
+			.split(/\r?\n/)
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+
+	const preferred =
+		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, SUPPORTED_VIDEO_MIME_TYPES, "video/") : null;
+	const tryTypes = preferred ? [preferred, ...SUPPORTED_VIDEO_MIME_TYPES] : [...SUPPORTED_VIDEO_MIME_TYPES];
+
+	for (const mimeType of tryTypes) {
+		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"], {
+			maxBufferBytes: DEFAULT_VIDEO_MAX_BUFFER_BYTES,
+		});
+		if (data.ok && data.stdout.length > 0) {
+			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Read a video payload from the clipboard, if one is present. Only the
+ * Wayland/X11 backends expose video/* clipboard types; the native addon and
+ * the Windows PowerShell fallbacks are image-only, so other platforms return
+ * null and the caller falls back to text paste.
+ */
+export function readClipboardVideo(options?: {
+	env?: NodeJS.ProcessEnv;
+	platform?: NodeJS.Platform;
+}): ClipboardImage | null {
+	const env = options?.env ?? process.env;
+	const platform = options?.platform ?? process.platform;
+
+	if (env.TERMUX_VERSION) {
+		return null;
+	}
+	if (platform !== "linux") {
+		return null;
+	}
+
+	if (isWaylandSession(env) || isWSL(env)) {
+		return readClipboardVideoViaWlPaste() ?? readClipboardVideoViaXclip();
+	}
+	return readClipboardVideoViaXclip();
 }
