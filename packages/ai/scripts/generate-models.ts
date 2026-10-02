@@ -18,6 +18,7 @@ import type {
 	AnthropicMessagesCompat,
 	Api,
 	KnownProvider,
+	MediaType,
 	Model,
 	ModelCost,
 	OpenAICompletionsCompat,
@@ -1038,6 +1039,15 @@ function normalizeNvidiaModelId(modelId: string): string {
 	return modelId.toLowerCase().replaceAll("_", ".");
 }
 
+/** Derive input modalities from a registry modality list (models.dev style). */
+function inputModalities(modalities: readonly string[] | undefined): MediaType[] {
+	const input: MediaType[] = ["text"];
+	for (const modality of ["image", "video", "pdf", "audio"] as const) {
+		if (modalities?.includes(modality)) input.push(modality);
+	}
+	return input;
+}
+
 function roundCost(value: number): number {
 	return Number(value.toFixed(6));
 }
@@ -1107,11 +1117,9 @@ async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 
 			modelKey = model.id; // Keep full ID for OpenRouter
 
-			// Parse input modalities
-			const input: ("text" | "image")[] = ["text"];
-			if (model.architecture?.modality?.includes("image")) {
-				input.push("image");
-			}
+			// Parse input modalities (e.g. "text+image+video->text"; only the
+			// input side counts, output-only modalities must not leak in).
+			const input = inputModalities((model.architecture?.modality ?? "").split("->")[0]?.split("+"));
 
 			// Convert pricing from $/token to $/million tokens
 			const inputCost = roundCost(parseFloat(model.pricing?.prompt || "0") * 1_000_000);
@@ -1174,9 +1182,15 @@ async function fetchAiGatewayModels(): Promise<Model<any>[]> {
 			// Only include models that support tools
 			if (!tags.includes("tool-use")) continue;
 
-			const input: ("text" | "image")[] = ["text"];
+			const input: MediaType[] = ["text"];
 			if (tags.includes("vision")) {
 				input.push("image");
+			}
+			if (tags.includes("video")) {
+				input.push("video");
+			}
+			if (tags.includes("audio")) {
+				input.push("audio");
 			}
 
 			const inputCost = roundCost(toNumber(model.pricing?.input) * 1_000_000);
@@ -1394,9 +1408,7 @@ function processFireworksModels(provider: ModelsDevProvider | undefined): Model<
 	for (const [modelId, model] of Object.entries(provider.models)) {
 		if (model.tool_call !== true) continue;
 
-		const input: ("text" | "image")[] = model.modalities?.input?.includes("image")
-			? ["text", "image"]
-			: ["text"];
+		const input = inputModalities(model.modalities?.input);
 		const common = {
 			id: modelId,
 			name: model.name || modelId,
@@ -1482,7 +1494,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					provider: "amazon-bedrock" as const,
 					baseUrl: getBedrockBaseUrl(id),
 					reasoning: m.reasoning === true,
-					input: (m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+					input: inputModalities(m.modalities?.input),
 					cost: {
 						input: m.cost?.input || 0,
 						output: m.cost?.output || 0,
@@ -2247,7 +2259,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				name: string;
 				allowEmptySignature?: boolean;
 				thinkingLevelMap?: NonNullable<Model<Api>["thinkingLevelMap"]>;
-				input: ("text" | "image")[];
+				input: MediaType[];
 				contextWindow: number;
 				maxTokens: number;
 			}> = [

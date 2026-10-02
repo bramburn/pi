@@ -5,6 +5,8 @@
 ### Added
 
 - Ctrl+V paste now reads video payloads from the Wayland/X11 clipboard and attaches them behind `[paste #N video: file]` markers. Video attachments are uploaded only when the active model's API accepts video (Google Gemini/Vertex); otherwise they are dropped with a warning.
+- Ctrl+V paste now attaches clipboard PDFs (`readClipboardPdf`) behind `[paste #N pdf: file]` markers. Video/PDF uploads are gated per model via `modelSupportsMediaUpload` (registry `input` modality plus API serialization support) instead of an API-name check.
+- `models.json` `input` (custom model definitions and `modelOverrides`) can declare `video`, `pdf`, and `audio` modalities per model.
 
 ### Fixed
 

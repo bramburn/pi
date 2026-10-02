@@ -26,13 +26,15 @@ const wordSegmenter = getWordSegmenter();
 /**
  * Discriminated union of attachments stored behind a paste marker.
  * - Text attachments store the raw pasted text (existing behavior).
- * - Image and video attachments store raw bytes plus metadata; the submit
- * path extracts and forwards them (video only for models that accept it).
+ * - Image, video, and PDF attachments store raw bytes plus metadata; the
+ * submit path extracts and forwards them (video/PDF only for models that
+ * accept them).
  */
 export type PasteAttachment =
 	| { kind: "text"; content: string }
 	| { kind: "image"; mimeType: string; bytes: Uint8Array; fileName: string }
-	| { kind: "video"; mimeType: string; bytes: Uint8Array; fileName: string };
+	| { kind: "video"; mimeType: string; bytes: Uint8Array; fileName: string }
+	| { kind: "pdf"; mimeType: string; bytes: Uint8Array; fileName: string };
 
 /** Regex matching paste markers like `[paste #1 +123 lines]`, `[paste #2 1234 chars]`, or `[paste #3 image: foo.png]`. */
 const PASTE_MARKER_REGEX = /\[paste #(\d+)( [^\]]+)?\]/g;
@@ -1403,7 +1405,20 @@ export class Editor implements Component, Focusable {
 		this.pasteBinaryAttachment("video", bytes, mimeType, fileName);
 	}
 
-	private pasteBinaryAttachment(kind: "image" | "video", bytes: Uint8Array, mimeType: string, fileName: string): void {
+	/**
+	 * Programmatically paste a PDF. Stores the bytes behind a paste marker
+	 * and inserts `[paste #N pdf: fileName]`.
+	 */
+	public pastePdf(bytes: Uint8Array, mimeType: string, fileName: string): void {
+		this.pasteBinaryAttachment("pdf", bytes, mimeType, fileName);
+	}
+
+	private pasteBinaryAttachment(
+		kind: "image" | "video" | "pdf",
+		bytes: Uint8Array,
+		mimeType: string,
+		fileName: string,
+	): void {
 		this.cancelAutocomplete();
 		this.exitHistoryBrowsing();
 		this.lastAction = null;

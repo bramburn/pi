@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `ModelMetadata.input` accepts `video`, `pdf`, and `audio` in addition to `text` and `image`.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ## [0.84.5] - 2026-08-30

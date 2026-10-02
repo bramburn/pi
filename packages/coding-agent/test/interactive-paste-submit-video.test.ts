@@ -17,7 +17,7 @@ type SubmitContext = {
 		isStreaming: boolean;
 		isBashRunning: boolean;
 		prompt: (text: string, options?: unknown) => Promise<void>;
-		model?: { name: string; api: string };
+		model?: { name: string; api: string; input: string[] };
 	};
 	updatePendingMessagesDisplay(): void;
 	ui: { requestRender: () => void };
@@ -35,14 +35,23 @@ type InteractiveModePrivate = {
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
 
-const GOOGLE_MODEL = { name: "Gemini 2.5 Pro", api: "google-generative-ai" };
-const NON_GOOGLE_MODEL = { name: "Claude", api: "anthropic-messages" };
+const GOOGLE_MODEL = { name: "Gemini 2.5 Pro", api: "google-generative-ai", input: ["text", "image"] };
+const NON_GOOGLE_MODEL = { name: "Claude", api: "anthropic-messages", input: ["text", "image"] };
 
 function makeVideoAttachment(): PasteAttachment {
 	return { kind: "video", mimeType: "video/mp4", bytes: new Uint8Array([0, 0, 0, 24]), fileName: "clip.mp4" };
 }
 
-function makeContext(model?: { name: string; api: string }) {
+function makePdfAttachment(): PasteAttachment {
+	return {
+		kind: "pdf",
+		mimeType: "application/pdf",
+		bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+		fileName: "doc.pdf",
+	};
+}
+
+function makeContext(model?: { name: string; api: string; input: string[] }) {
 	const onInputCallback = vi.fn<(input: { text: string; images: ImageContent[] }) => void>();
 	const showWarning = vi.fn<(message: string) => void>();
 	const context: SubmitContext = {
@@ -77,6 +86,14 @@ function videoBlock(): ImageContent {
 		type: "video",
 		mimeType: "video/mp4",
 		data: Buffer.from([0, 0, 0, 24]).toString("base64"),
+	} as unknown as ImageContent;
+}
+
+function pdfBlock(): ImageContent {
+	return {
+		type: "pdf",
+		mimeType: "application/pdf",
+		data: Buffer.from([0x25, 0x50, 0x44, 0x46]).toString("base64"),
 	} as unknown as ImageContent;
 }
 
@@ -157,5 +174,48 @@ describe("InteractiveMode video submits", () => {
 				},
 			],
 		});
+	});
+
+	it("forwards PDF attachments when the model accepts PDFs", async () => {
+		const { context, onInputCallback, showWarning } = makeContext(GOOGLE_MODEL);
+
+		await context.defaultEditor.onSubmit?.({ text: "see attached", attachments: [makePdfAttachment()] });
+
+		expect(onInputCallback).toHaveBeenCalledWith({
+			text: "see attached",
+			images: [pdfBlock()],
+		});
+		expect(showWarning).not.toHaveBeenCalled();
+	});
+
+	it("drops video/pdf with warnings when the registry declares the model text-only", async () => {
+		const textOnlyGemini = { name: "Gemini Lite", api: "google-generative-ai", input: ["text"] };
+		const { context, onInputCallback, showWarning } = makeContext(textOnlyGemini);
+
+		await context.defaultEditor.onSubmit?.({
+			text: "both",
+			attachments: [makeVideoAttachment(), makePdfAttachment()],
+		});
+
+		expect(onInputCallback).toHaveBeenCalledWith({ text: "both", images: [] });
+		expect(showWarning).toHaveBeenCalledWith(
+			'"Gemini Lite" does not support video input; video attachments were not sent.',
+		);
+		expect(showWarning).toHaveBeenCalledWith(
+			'"Gemini Lite" does not support PDF input; PDF attachments were not sent.',
+		);
+	});
+
+	it("does not submit a PDF-only message when the registry declares the model text-only", async () => {
+		const textOnlyGemini = { name: "Gemini Lite", api: "google-generative-ai", input: ["text"] };
+		const { context, onInputCallback, showWarning } = makeContext(textOnlyGemini);
+
+		await context.defaultEditor.onSubmit?.({ text: "", attachments: [makePdfAttachment()] });
+
+		expect(onInputCallback).not.toHaveBeenCalled();
+		expect(context.pendingUserInputs).toHaveLength(0);
+		expect(showWarning).toHaveBeenCalledWith(
+			'"Gemini Lite" does not support PDF input; PDF attachments were not sent.',
+		);
 	});
 });

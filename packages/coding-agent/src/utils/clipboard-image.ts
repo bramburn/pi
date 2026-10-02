@@ -14,14 +14,16 @@ export type ClipboardImage = {
 
 const SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 const SUPPORTED_VIDEO_MIME_TYPES = ["video/mp4", "video/webm", "video/quicktime"] as const;
+const SUPPORTED_PDF_MIME_TYPES = ["application/pdf"] as const;
 
 const DEFAULT_LIST_TIMEOUT_MS = 1000;
 const DEFAULT_READ_TIMEOUT_MS = 3000;
 const DEFAULT_POWERSHELL_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_BUFFER_BYTES = 50 * 1024 * 1024;
-// Video payloads are much larger than images; raise the stdout ceiling so a
-// moderately large clipboard video is not silently dropped by spawnSync.
-const DEFAULT_VIDEO_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
+// Media payloads (video, PDF) are much larger than images; raise the stdout
+// ceiling so a moderately large clipboard payload is not silently dropped by
+// spawnSync.
+const DEFAULT_MEDIA_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 export function isWaylandSession(env: NodeJS.ProcessEnv = process.env): boolean {
 	return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland";
@@ -412,7 +414,7 @@ export async function readClipboardImage(options?: {
 	return image;
 }
 
-function readClipboardVideoViaWlPaste(): ClipboardImage | null {
+function readClipboardMediaViaWlPaste(preferredMimeTypes: readonly string[], anyPrefix: string): ClipboardImage | null {
 	const list = runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
 	if (!list.ok) {
 		return null;
@@ -424,13 +426,13 @@ function readClipboardVideoViaWlPaste(): ClipboardImage | null {
 		.map((t) => t.trim())
 		.filter(Boolean);
 
-	const selectedType = selectPreferredMimeType(types, SUPPORTED_VIDEO_MIME_TYPES, "video/");
+	const selectedType = selectPreferredMimeType(types, preferredMimeTypes, anyPrefix);
 	if (!selectedType) {
 		return null;
 	}
 
 	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"], {
-		maxBufferBytes: DEFAULT_VIDEO_MAX_BUFFER_BYTES,
+		maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
 	});
 	if (!data.ok || data.stdout.length === 0) {
 		return null;
@@ -439,7 +441,7 @@ function readClipboardVideoViaWlPaste(): ClipboardImage | null {
 	return { bytes: data.stdout, mimeType: baseMimeType(selectedType) };
 }
 
-function readClipboardVideoViaXclip(): ClipboardImage | null {
+function readClipboardMediaViaXclip(preferredMimeTypes: readonly string[], anyPrefix: string): ClipboardImage | null {
 	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
 		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
 	});
@@ -454,12 +456,12 @@ function readClipboardVideoViaXclip(): ClipboardImage | null {
 	}
 
 	const preferred =
-		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, SUPPORTED_VIDEO_MIME_TYPES, "video/") : null;
-	const tryTypes = preferred ? [preferred, ...SUPPORTED_VIDEO_MIME_TYPES] : [...SUPPORTED_VIDEO_MIME_TYPES];
+		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, preferredMimeTypes, anyPrefix) : null;
+	const tryTypes = preferred ? [preferred, ...preferredMimeTypes] : [...preferredMimeTypes];
 
 	for (const mimeType of tryTypes) {
 		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"], {
-			maxBufferBytes: DEFAULT_VIDEO_MAX_BUFFER_BYTES,
+			maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
 		});
 		if (data.ok && data.stdout.length > 0) {
 			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
@@ -490,7 +492,38 @@ export function readClipboardVideo(options?: {
 	}
 
 	if (isWaylandSession(env) || isWSL(env)) {
-		return readClipboardVideoViaWlPaste() ?? readClipboardVideoViaXclip();
+		return (
+			readClipboardMediaViaWlPaste(SUPPORTED_VIDEO_MIME_TYPES, "video/") ??
+			readClipboardMediaViaXclip(SUPPORTED_VIDEO_MIME_TYPES, "video/")
+		);
 	}
-	return readClipboardVideoViaXclip();
+	return readClipboardMediaViaXclip(SUPPORTED_VIDEO_MIME_TYPES, "video/");
+}
+
+/**
+ * Read a PDF payload from the clipboard, if one is present. Only the
+ * Wayland/X11 backends expose application/pdf clipboard types; other platforms
+ * return null and the caller falls back to text paste.
+ */
+export function readClipboardPdf(options?: {
+	env?: NodeJS.ProcessEnv;
+	platform?: NodeJS.Platform;
+}): ClipboardImage | null {
+	const env = options?.env ?? process.env;
+	const platform = options?.platform ?? process.platform;
+
+	if (env.TERMUX_VERSION) {
+		return null;
+	}
+	if (platform !== "linux") {
+		return null;
+	}
+
+	if (isWaylandSession(env) || isWSL(env)) {
+		return (
+			readClipboardMediaViaWlPaste(SUPPORTED_PDF_MIME_TYPES, "application/pdf") ??
+			readClipboardMediaViaXclip(SUPPORTED_PDF_MIME_TYPES, "application/pdf")
+		);
+	}
+	return readClipboardMediaViaXclip(SUPPORTED_PDF_MIME_TYPES, "application/pdf");
 }

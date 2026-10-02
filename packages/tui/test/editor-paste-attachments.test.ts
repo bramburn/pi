@@ -163,6 +163,25 @@ describe("Editor PR-B: atomic paste markers & attachments", () => {
 		});
 	});
 
+	describe("pastePdf", () => {
+		it("inserts a pdf marker and stores the bytes in the registry", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+			editor.pastePdf(bytes, "application/pdf", "doc.pdf");
+
+			assert.match(editor.getText(), /\[paste #1 pdf: doc\.pdf\]/);
+
+			const att = internals(editor).pastes.get(1);
+			assert.ok(att);
+			assert.strictEqual(att.kind, "pdf");
+			if (att.kind === "pdf") {
+				assert.strictEqual(att.mimeType, "application/pdf");
+				assert.strictEqual(att.fileName, "doc.pdf");
+				assert.deepStrictEqual(Array.from(att.bytes), [0x25, 0x50, 0x44, 0x46]);
+			}
+		});
+	});
+
 	describe("Forward-delete cleanup", () => {
 		it("removes the registry entry when the next character is a paste marker", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

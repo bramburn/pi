@@ -390,6 +390,15 @@ export interface VideoContent {
 	mimeType: string; // e.g., "video/mp4", "video/webm"
 }
 
+export interface PdfContent {
+	type: "pdf";
+	data: string; // base64 encoded PDF data
+	mimeType: string; // e.g., "application/pdf"
+}
+
+/** Media types a model can accept in its input. */
+export type MediaType = "text" | "image" | "video" | "pdf" | "audio";
+
 export interface ToolCall {
 	type: "toolCall";
 	id: string;
@@ -860,7 +869,7 @@ export interface Model<TApi extends Api> {
 	 * Missing keys use provider defaults. null marks a level as unsupported.
 	 */
 	thinkingLevelMap?: ThinkingLevelMap;
-	input: ("text" | "image")[];
+	input: MediaType[];
 	cost: ModelCost;
 	contextWindow: number;
 	maxTokens: number;
@@ -877,6 +886,36 @@ export interface Model<TApi extends Api> {
 				: TApi extends "bedrock-converse-stream"
 					? BedrockCompat
 					: never;
+}
+
+/**
+ * Uploaded media types (beyond text/images) that pi's request serializers can
+ * attach for a given API. Grows as provider serializers are added; the
+ * coding-agent paste gates use this via {@link modelSupportsMediaUpload}.
+ */
+const API_MEDIA_UPLOAD_SUPPORT: Partial<Record<string, readonly ("video" | "pdf")[]>> = {
+	"google-generative-ai": ["video", "pdf"],
+	"google-vertex": ["video", "pdf"],
+};
+
+/**
+ * Whether a model accepts an uploaded video/pdf end to end: pi must be able to
+ * serialize the block for the model's API, and the model must accept the
+ * modality. Inline-media APIs (Gemini) accept video and PDFs wherever they
+ * accept images, so image-capable models pass until model catalogs declare the
+ * richer modalities explicitly (generated metadata or models.json `input`).
+ *
+ * The parameter is structural so any model-like object (registry `Model`,
+ * extension `ProviderModelConfig`, hand-built fixtures) is accepted.
+ */
+export function modelSupportsMediaUpload(
+	model: { api: string; input: readonly MediaType[] } | undefined,
+	type: "video" | "pdf",
+): boolean {
+	if (!model || !API_MEDIA_UPLOAD_SUPPORT[model.api]?.includes(type)) {
+		return false;
+	}
+	return model.input.includes(type) || model.input.includes("image");
 }
 
 export interface ImagesModel<TApi extends ImagesApi>
