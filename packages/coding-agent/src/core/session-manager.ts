@@ -1031,6 +1031,12 @@ export class SessionManager {
 		} finally {
 			closeSync(fd);
 		}
+		// The file now exists on disk and contains all fileEntries, so the
+		// session is flushed by definition. Without this, a rewrite on a fresh
+		// session (e.g. setSessionDefault at startup) left flushed === false
+		// while the file existed, and the next _persist() crashed with EEXIST
+		// trying to exclusively create it.
+		this.flushed = true;
 	}
 
 	isPersisted(): boolean {

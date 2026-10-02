@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `EEXIST: file already exists` crash when switching models before the first assistant message on a new session.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ### Added
