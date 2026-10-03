@@ -9,10 +9,15 @@
 - Added `resolveSummariserEnv()` and `resolveSummariserModel()` to `@earendil-works/pi-ai`. The three `PI_SUMMARIZER_*` env vars (`PI_SUMMARIZER_BASE_URL`, `PI_SUMMARIZER_MODEL`, `PI_SUMMARIZER_API_KEY`) — all required — route context summarisation through a one-off OpenAI-compatible model. Both resolvers read `process.env` directly; no `ProviderEnv` parameter is accepted (kept simple so users can flip the override on per shell session). Partial sets log a `console.warn` and fall back to the main model; both functions return `undefined` when no override is configured so callers transparently fall back to the previous behaviour.
 - Added a `VideoContent` content type for video paste support. The Google shared serializer forwards video parts as `inlineData` (Gemini accepts video/* MIME types); the shared message unions are unchanged.
 - Added a `MediaType` vocabulary (`text|image|video|pdf|audio`) for `Model.input`, a `PdfContent` content type, and `modelSupportsMediaUpload()` for media-capability checks. Model catalogs derive input modalities from upstream metadata, and `models.json` `input` (custom model definitions and `modelOverrides`) can declare or override modalities per model.
+- Added optional `PI_SUMMARIZER_CONTEXT_WINDOW` to the summariser override: a positive-integer context window threaded from `resolveSummariserEnv()` into `resolveSummariserModel()`'s `contextWindow`. Invalid values (zero, negative, non-integer, non-numeric) are ignored and the 128000 default applies.
 
 ### Changed
 
 - Request builds now downgrade media blocks the current model cannot accept to text placeholders (e.g. after a mid-session model swap to a model without video/PDF support), instead of sending them to the provider. Session history keeps the original blocks, so swapping back restores them.
+
+### Fixed
+
+- Fixed `PI_SUMMARIZER_BASE_URL` values that already end in `/chat/completions` or trailing slashes producing a doubled request path (`/v1/chat/completions/chat/completions`) and 404s against real providers: `resolveSummariserEnv()` now strips trailing slashes and one trailing `/chat/completions` suffix (case-insensitive) before the base URL reaches the OpenAI SDK, which appends the suffix itself.
 
 ## [0.85.0-b1] - 2026-09-14
 

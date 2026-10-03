@@ -35,8 +35,11 @@ describe("MINIMAX_PROFILE", () => {
 		expect(MINIMAX_PROFILE.toolResultTailChars).toBe(1024);
 	});
 
-	it("enables replay-prefix summarisation and byte-budgeted instructions", () => {
-		expect(MINIMAX_PROFILE.replayPrefixSummarisation).toBe(true);
+	it("disables replay-prefix summarisation and enables byte-budgeted instructions", () => {
+		// Replay prefix is off in the profile: the common PI_SUMMARIZER_*
+		// override endpoint is text-only, so the profile defaults to the safe
+		// legacy text-block path. User-level settings still win over the profile.
+		expect(MINIMAX_PROFILE.replayPrefixSummarisation).toBe(false);
 		expect(MINIMAX_PROFILE.budgetedInstructions).toBe(true);
 	});
 

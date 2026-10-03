@@ -981,6 +981,38 @@ export class SettingsManager {
 	}
 
 	/**
+	 * Effective compaction settings for the active model. The legacy
+	 * absolute-token settings are always present; when the DeepSeek
+	 * Harness bundle is enabled the resolved ratio policy is layered on
+	 * top (`thresholdRatio`, `retainRatio` and the derived
+	 * `keepRecentTokens`).
+	 *
+	 * `AgentSession` calls this from every compaction path (manual and
+	 * automatic) so the two cannot diverge.
+	 */
+	getEffectiveCompactionSettings(model?: { provider: string; id: string; contextWindow: number }): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		thresholdRatio?: number;
+		retainRatio?: number;
+	} {
+		const settings = this.getCompactionSettings();
+		const dh = this.getDeepseekHarnessSettings(model);
+		if (!dh.enabled) {
+			return settings;
+		}
+		settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+		settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+		// An unknown window (0) must not collapse `keepRecentTokens` to 0
+		// or NaN: fall back to the legacy absolute value.
+		if (settings.retainRatio !== undefined && model !== undefined && model.contextWindow > 0) {
+			settings.keepRecentTokens = Math.floor(model.contextWindow * settings.retainRatio);
+		}
+		return settings;
+	}
+
+	/**
 	 * Resolved DeepSeek Harness settings. Layers user values on top of
 	 * the built-in `MINIMAX_PROFILE` when the active model is `minimax`
 	 * or `minimax-cn`, then per-model exact override, then

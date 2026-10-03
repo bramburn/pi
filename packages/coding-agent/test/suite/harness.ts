@@ -29,6 +29,25 @@ import {
 	createTestResourceLoader,
 } from "../utilities.ts";
 
+// Test hermeticity: the ambient PI_SUMMARIZER_* override (packages/ai/src/
+// summariser-env.ts) routes context summarisation to a real endpoint with the
+// user's real API key. Suite runs inherit the developer machine's environment,
+// so without this scrub `AgentSession._getSummarizationRequestAuth()` swaps the
+// summarisation model to the override and the call bypasses the faux provider
+// entirely — live network requests from tests (observed: agent-session-
+// compaction.test.ts failing with "Turn prefix summarization failed: 404 ...").
+//
+// Deleted at module load, i.e. before any suite test runs: this module is the
+// common setup path every suite test imports, and vitest.config.ts has no
+// global setup hook. Deliberate per-test stubs are unaffected because they set
+// these vars after this module loads (see test/suite/regressions/
+// 012-summariser-override-replay-gating.test.ts).
+for (const key of Object.keys(process.env)) {
+	if (key.startsWith("PI_SUMMARIZER_")) {
+		delete process.env[key];
+	}
+}
+
 type MessageTextPart = { type: "text"; text: string };
 
 export function getMessageText(message: unknown): string {

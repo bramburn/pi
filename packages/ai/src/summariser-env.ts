@@ -13,7 +13,8 @@
 // (DeepSeek, OpenRouter, vLLM, llama.cpp, ...). All three must be present;
 // partial configs are warned about loudly rather than silently half-applying,
 // because a partial override that defaults to the main model in production is
-// worse than falling back visibly during local dev.
+// worse than falling back visibly during local dev. An optional fourth var,
+// PI_SUMMARIZER_CONTEXT_WINDOW, tunes the override model's context window.
 //
 // `resolveSummariserEnv` is the env-var discovery step. It returns either a
 // fully-populated {@link SummariserEnvOverride} (caller should use it) or
@@ -28,15 +29,54 @@ export const PI_SUMMARIZER_BASE_URL_ENV = "PI_SUMMARIZER_BASE_URL";
 export const PI_SUMMARIZER_MODEL_ENV = "PI_SUMMARIZER_MODEL";
 /** Required: API key for the override endpoint. */
 export const PI_SUMMARIZER_API_KEY_ENV = "PI_SUMMARIZER_API_KEY";
+/** Optional: context window (positive integer) reported for the override model. */
+export const PI_SUMMARIZER_CONTEXT_WINDOW_ENV = "PI_SUMMARIZER_CONTEXT_WINDOW";
 
 /** Resolved env-var override that routes context summarisation to a separate model. */
 export interface SummariserEnvOverride {
 	/** Model identifier passed to the override provider. */
 	model: string;
-	/** Base URL for an OpenAI-compatible API endpoint. */
+	/** Base URL for an OpenAI-compatible API endpoint, normalized (see {@link normalizeSummariserBaseUrl}). */
 	baseUrl: string;
 	/** API key for the override endpoint. */
 	apiKey: string;
+	/**
+	 * Context window from {@link PI_SUMMARIZER_CONTEXT_WINDOW_ENV} when it parses
+	 * as a positive integer. Absent otherwise — the caller applies its own
+	 * default (see `SUMMARISER_DEFAULT_CONTEXT_WINDOW` in summariser-model.ts).
+	 */
+	contextWindow?: number;
+}
+
+/**
+ * Normalize a user-supplied OpenAI-compatible base URL.
+ *
+ * The OpenAI SDK appends `/chat/completions` to `baseURL` itself
+ * (`new OpenAI({ baseURL })` in api/openai-completions.ts), so a base URL that
+ * already ends in that suffix produces a doubled path
+ * (`/v1/chat/completions/chat/completions`) and 404s against real providers.
+ * Users commonly paste the full endpoint URL, so strip trailing slashes and
+ * exactly one trailing `/chat/completions` (case-insensitive) here rather than
+ * failing at request time.
+ */
+function normalizeSummariserBaseUrl(raw: string): string {
+	let url = raw.replace(/\/+$/, "");
+	url = url.replace(/\/chat\/completions$/i, "");
+	url = url.replace(/\/+$/, "");
+	return url;
+}
+
+/**
+ * Parse `PI_SUMMARIZER_CONTEXT_WINDOW`: a positive integer, otherwise ignored.
+ * Invalid values (`"0"`, `"-5"`, `"12.5"`, `"abc"`, empty) return `undefined` so
+ * the caller falls back to its default context window.
+ */
+function parseContextWindow(raw: string | undefined): number | undefined {
+	if (raw === undefined) return undefined;
+	const trimmed = raw.trim();
+	if (!/^\d+$/.test(trimmed)) return undefined;
+	const value = Number(trimmed);
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 /**
@@ -50,7 +90,10 @@ export interface SummariserEnvOverride {
  *
  * Required: `PI_SUMMARIZER_BASE_URL`, `PI_SUMMARIZER_MODEL`, `PI_SUMMARIZER_API_KEY`
  * — all three. Whitespace-only values (e.g. `PI_SUMMARIZER_API_KEY=" "`) are trimmed
- * and treated as missing, on the assumption that the user's intent was empty.
+ * and treated as missing, on the assumption that the user's intent was empty. The
+ * base URL is normalized (trailing slashes and one trailing `/chat/completions`
+ * are stripped) so a pasted full endpoint URL works. `PI_SUMMARIZER_CONTEXT_WINDOW`
+ * is optional and ignored unless it parses as a positive integer.
  *
  * @returns
  *   - `undefined` when no override is configured (silent fallback to the main model).
@@ -64,10 +107,13 @@ export interface SummariserEnvOverride {
  */
 export function resolveSummariserEnv(): SummariserEnvOverride | undefined {
 	// Trim each value first so whitespace-only entries (e.g. accidental shell
-	// export with `" "`) don't sneak through as a valid override.
-	const baseUrl = getProviderEnvValue(PI_SUMMARIZER_BASE_URL_ENV)?.trim();
+	// export with `" "`) don't sneak through as a valid override. The base URL
+	// is additionally normalized so a pasted `/chat/completions` endpoint does
+	// not double up with the suffix the OpenAI SDK appends itself.
+	const baseUrl = normalizeSummariserBaseUrl(getProviderEnvValue(PI_SUMMARIZER_BASE_URL_ENV)?.trim() ?? "");
 	const model = getProviderEnvValue(PI_SUMMARIZER_MODEL_ENV)?.trim();
 	const apiKey = getProviderEnvValue(PI_SUMMARIZER_API_KEY_ENV)?.trim();
+	const contextWindow = parseContextWindow(getProviderEnvValue(PI_SUMMARIZER_CONTEXT_WINDOW_ENV));
 
 	// All three unset → caller falls back to the main model, no warning.
 	// This is the "user didn't ask for an override" path and must be a hot path.
@@ -91,5 +137,9 @@ export function resolveSummariserEnv(): SummariserEnvOverride | undefined {
 	}
 
 	// All three present and non-empty — return the override for the caller to consume.
-	return { model: model, baseUrl: baseUrl, apiKey: apiKey };
+	const override: SummariserEnvOverride = { model: model, baseUrl: baseUrl, apiKey: apiKey };
+	if (contextWindow !== undefined) {
+		override.contextWindow = contextWindow;
+	}
+	return override;
 }

@@ -11,6 +11,9 @@
 ### Fixed
 
 - Fixed `EEXIST: file already exists` crash when switching models before the first assistant message on a new session.
+- Fixed the DeepSeek Harness `thresholdRatio`, `retainRatio`, and tool-result char budgets being resolved but never consumed: `shouldCompact` now honours `thresholdRatio`, every compaction path (manual `/compact`, the context threshold, and auto-compaction) derives `keepRecentTokens` from `retainRatio`, and the tool-result pruner receives `toolResultThresholdChars` / `toolResultHeadChars` / `toolResultTailChars` instead of always running with `DEFAULT_PRUNER_CONFIG`.
+- Fixed replay-prefix summarisation sending structured `toolCall`/`toolResult` blocks to the `PI_SUMMARIZER_*` override model (a text-only OpenAI-compatible completions endpoint): while the override is the request model, summarisation always uses the legacy `<conversation>` text path even when `replayPrefixSummarisation` is on. The built-in `MINIMAX_PROFILE` now also defaults `replayPrefixSummarisation` to `false` (explicit user settings still win over the profile).
+- Fixed the coding-agent test suite inheriting the ambient `PI_SUMMARIZER_*` env vars: suite runs routed summarisation to the developer's real endpoint and real API key (observed as `Turn prefix summarization failed: 404 ...` in `test/suite/agent-session-compaction.test.ts`). `test/suite/harness.ts` now deletes every `PI_SUMMARIZER_*` key before tests run.
 
 ## [0.85.0-b1] - 2026-09-14
 
