@@ -18,6 +18,8 @@
 ### Fixed
 
 - Fixed `PI_SUMMARIZER_BASE_URL` values that already end in `/chat/completions` or trailing slashes producing a doubled request path (`/v1/chat/completions/chat/completions`) and 404s against real providers: `resolveSummariserEnv()` now strips trailing slashes and one trailing `/chat/completions` suffix (case-insensitive) before the base URL reaches the OpenAI SDK, which appends the suffix itself.
+- Fixed OpenRouter context overflow going undetected: when the router drops every candidate endpoint on context length it answers HTTP 404 with a routing funnel ("No endpoints found for X. Every candidate endpoint was removed during routing: Filter by Context Length removed ...") instead of the documented "maximum context length is N tokens" wording, so `isContextOverflow()` returned false and no compaction-and-retry happened. Added a pattern for that shape, anchored on the "Filter by Context Length" funnel step so a genuinely unavailable model (same 404 prefix, no such step) is not misread as an overflow.
+- Live-network test blocks in this package are now gated behind `PI_LIVE_TESTS=1` (`test/live-tests-gate.ts`, registered as a vitest `setupFile`). They previously activated whenever a `*_API_KEY` / `*_OAUTH_TOKEN` / `HF_TOKEN` var was present in the environment, so a direct `vitest` run on a machine with provider keys exported made real billed API calls. Without the flag they skip; `./test.sh` and CI were already immune.
 
 ## [0.85.0-b1] - 2026-09-14
 
