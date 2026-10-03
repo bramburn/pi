@@ -716,8 +716,8 @@ interface ProviderModelConfig {
   /** Maps pi thinking levels to provider/model-specific values; null marks a level unsupported. */
   thinkingLevelMap?: Partial<Record<"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", string | null>>;
 
-  /** Supported input types. */
-  input: ("text" | "image")[];
+  /** Supported input types. Uploaded video/PDF additionally requires an API pi can serialize the media for (currently Google Gemini/Vertex). */
+  input: ("text" | "image" | "video" | "pdf" | "audio")[];
 
   /** Cost per million tokens (for usage tracking). */
   cost: {

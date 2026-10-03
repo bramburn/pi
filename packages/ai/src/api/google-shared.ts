@@ -149,6 +149,11 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 					if (item.type === "text") {
 						return { text: sanitizeSurrogates(item.text) };
 					} else {
+						// ImageContent, plus VideoContent/PdfContent parts arriving
+						// through the coding-agent paste path (attached only for
+						// models whose registry metadata and API accept them), all
+						// serialize as inlineData: Gemini accepts video/* and
+						// application/pdf MIME types natively.
 						return {
 							inlineData: {
 								mimeType: item.mimeType,
