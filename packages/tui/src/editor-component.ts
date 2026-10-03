@@ -70,6 +70,16 @@ export interface EditorComponent extends Component {
 	 */
 	pasteImage(bytes: Uint8Array, mimeType: string, fileName: string): void;
 
+	/**
+	 * Programmatically paste a video. Stores the bytes behind a paste marker.
+	 */
+	pasteVideo(bytes: Uint8Array, mimeType: string, fileName: string): void;
+
+	/**
+	 * Programmatically paste a PDF. Stores the bytes behind a paste marker.
+	 */
+	pastePdf(bytes: Uint8Array, mimeType: string, fileName: string): void;
+
 	// =========================================================================
 	// Autocomplete support (optional)
 	// =========================================================================

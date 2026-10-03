@@ -8,7 +8,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
-import type { AssistantMessage, ImageContent, Message, Model, Usage } from "@earendil-works/pi-ai/compat";
+import {
+	type Api,
+	type AssistantMessage,
+	type ImageContent,
+	type Message,
+	type Model,
+	modelSupportsMediaUpload,
+	type PdfContent,
+	type Usage,
+	type VideoContent,
+} from "@earendil-works/pi-ai/compat";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -106,7 +116,13 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
-import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
+import {
+	extensionForImageMimeType,
+	extensionForVideoMimeType,
+	readClipboardImage,
+	readClipboardPdf,
+	readClipboardVideo,
+} from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
@@ -232,9 +248,64 @@ function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
 	return images;
 }
 
-/** True when a submit payload has no text and no images worth sending to the model. */
+/**
+ * Convert video/PDF paste attachments into content blocks. These blocks ride
+ * the ImageContent channel via a local cast: the shared message union is
+ * image-only, and the Google serializer forwards any non-text part as
+ * inlineData (which accepts video/* and application/pdf). Callers must gate
+ * each kind on modelSupportsMediaUpload so models that cannot receive the
+ * media never see these blocks.
+ */
+function attachmentsToUploadedMedia(
+	attachments: PasteAttachment[],
+): Array<{ kind: "video" | "pdf"; content: ImageContent }> {
+	const media: Array<{ kind: "video" | "pdf"; content: ImageContent }> = [];
+	for (const attachment of attachments) {
+		if (attachment.kind === "video") {
+			const content: VideoContent = {
+				type: "video",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			};
+			media.push({ kind: "video", content: content as unknown as ImageContent });
+		} else if (attachment.kind === "pdf") {
+			const content: PdfContent = {
+				type: "pdf",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			};
+			media.push({ kind: "pdf", content: content as unknown as ImageContent });
+		}
+	}
+	return media;
+}
+
+/** Model-facing media for a submit: images, plus video/PDF blocks the model accepts. */
+function buildMediaContent(
+	attachments: PasteAttachment[],
+	model: Model<Api> | undefined,
+): { images: ImageContent[]; dropped: Array<"video" | "pdf"> } {
+	const images = attachmentsToImages(attachments);
+	const dropped: Array<"video" | "pdf"> = [];
+	for (const { kind, content } of attachmentsToUploadedMedia(attachments)) {
+		if (modelSupportsMediaUpload(model, kind)) {
+			images.push(content);
+		} else if (!dropped.includes(kind)) {
+			dropped.push(kind);
+		}
+	}
+	return { images, dropped };
+}
+
+function mediaNotSupportedMessage(model: { name: string } | undefined, kind: "video" | "pdf"): string {
+	const modelLabel = model ? `"${model.name}"` : "The current model";
+	const label = kind === "pdf" ? "PDF" : "video";
+	return `${modelLabel} does not support ${label} input; ${label} attachments were not sent.`;
+}
+
+/** True when a submit payload has no text and no media worth sending to the model. */
 function isEmptySubmit(payload: { text: string; attachments: PasteAttachment[] }): boolean {
-	return payload.text.trim().length === 0 && !attachmentsToImages(payload.attachments).length;
+	return payload.text.trim().length === 0 && !payload.attachments.some((attachment) => attachment.kind !== "text");
 }
 
 type CompactionCostNotice = {
@@ -2908,7 +2979,24 @@ export class InteractiveMode {
 					this.ui.requestRender();
 					return;
 				}
-				// Fall through to text paste if image processing failed.
+				// Fall through to video/text paste if image processing failed.
+			}
+
+			const video = readClipboardVideo();
+			if (video) {
+				const ext = extensionForVideoMimeType(video.mimeType);
+				const fileName = `clipboard-${Date.now()}.${ext}`;
+				this.editor.pasteVideo(video.bytes, video.mimeType, fileName);
+				this.ui.requestRender();
+				return;
+			}
+
+			const pdf = readClipboardPdf();
+			if (pdf) {
+				const fileName = `clipboard-${Date.now()}.pdf`;
+				this.editor.pastePdf(pdf.bytes, pdf.mimeType, fileName);
+				this.ui.requestRender();
+				return;
 			}
 
 			const text = await readClipboardText();
@@ -2941,9 +3029,16 @@ export class InteractiveMode {
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
 			if (isEmptySubmit(payload)) return;
-			const images = attachmentsToImages(payload.attachments);
+			const media = buildMediaContent(payload.attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
+			}
+			const images = media.images;
 			let text = payload.text;
 			text = text.trim();
+			// Video/PDF-only submits can strip down to nothing when the model
+			// does not accept the media (the warnings are already shown).
+			if (!text && images.length === 0) return;
 
 			// Handle commands
 			if (text === "/settings") {
@@ -4133,17 +4228,23 @@ export class InteractiveMode {
 		const attachments = this.editor.getAttachments?.() ?? [];
 		const images = attachmentsToImages(attachments);
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
-		if (!text && images.length === 0) return;
+		const hasMediaAttachments = attachments.some((attachment) => attachment.kind !== "text");
+		if (!text && images.length === 0 && !hasMediaAttachments) return;
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
+			const media = buildMediaContent(attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
+			}
+			if (!text && media.images.length === 0) return;
 			if (this.isExtensionCommand(text)) {
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				const promptOptions = images.length > 0 ? { images } : undefined;
+				const promptOptions = media.images.length > 0 ? { images: media.images } : undefined;
 				await this.session.prompt(text, promptOptions);
 			} else {
-				this.queueCompactionMessage(text, "followUp", images);
+				this.queueCompactionMessage(text, "followUp", media.images);
 			}
 			return;
 		}
@@ -4151,9 +4252,14 @@ export class InteractiveMode {
 		// Alt+Enter queues a follow-up message (waits until agent finishes)
 		// This handles extension commands (execute immediately), prompt template expansion, and queueing
 		if (this.session.isStreaming) {
+			const media = buildMediaContent(attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
+			}
+			if (!text && media.images.length === 0) return;
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp", images });
+			await this.session.prompt(text, { streamingBehavior: "followUp", images: media.images });
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}
