@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { MediaType } from "../src/types.ts";
 
 export const MODEL_DATA_SCHEMA_VERSION = 3;
 export const MODEL_DATA_MANIFEST_FILE = ".manifest.json";
@@ -16,6 +17,14 @@ export interface ModelDataManifest {
 
 const MODEL_DATA_IMPORT_PATTERN =
 	/^import \{ [A-Z][A-Z0-9_]*_MODELS \} from "\.\/providers\/([^"/]+)\.models\.ts";$/gm;
+
+/**
+ * Runtime mirror of the `MediaType` union. Generated data is validated from
+ * JSON, so this needs a value check rather than a type. The `Set<MediaType>`
+ * annotation keeps a typo in the literal a compile error, and the comment on
+ * `MediaType` is the place to update when the union grows.
+ */
+const MODEL_INPUT_MEDIA_TYPES: ReadonlySet<string> = new Set<MediaType>(["text", "image", "video", "pdf", "audio"]);
 
 function sha256(value: string): string {
 	return createHash("sha256").update(value).digest("hex");
@@ -162,7 +171,7 @@ function validateModelValue(
 	if (
 		!Array.isArray(value.input) ||
 		value.input.length === 0 ||
-		value.input.some((entry) => entry !== "text" && entry !== "image")
+		value.input.some((entry) => !MODEL_INPUT_MEDIA_TYPES.has(entry))
 	) {
 		errors.push(`${label} has invalid input modalities`);
 	}
