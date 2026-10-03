@@ -6,7 +6,14 @@
  */
 
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@earendil-works/pi-ai";
+import {
+	contentText,
+	type RetryCallbacks,
+	type RetryPolicy,
+	retryAssistantCall,
+	SUMMARISER_OVERRIDE_PROVIDER_ID,
+	uuidv7,
+} from "@earendil-works/pi-ai";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai/compat";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm } from "../messages.ts";
@@ -248,6 +255,15 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
+	// `thresholdRatio` (when set) takes precedence over `reserveTokens`.
+	// Both express the same intent (a budget reserved for the response),
+	// but the ratio is per-model-portable while `reserveTokens` is an
+	// absolute token budget. A ratio is only usable when the window is
+	// known (`contextWindow > 0`); otherwise fall back to the legacy
+	// subtraction.
+	if (settings.thresholdRatio !== undefined && settings.thresholdRatio > 0 && contextWindow > 0) {
+		return contextTokens > contextWindow * settings.thresholdRatio;
+	}
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 
@@ -692,10 +708,22 @@ export async function generateSummaryWithUsage(
 	//    sees the conversation as one large string; the entire
 	//    block is a cache-miss. This is the original behaviour and
 	//    is preserved for back-compat.
+	//
+	// The PI_SUMMARIZER_* env override always takes path 2, regardless of
+	// `replayPrefix`: the override model is a generic text-only
+	// OpenAI-compatible completions endpoint (`input: ["text"]` in
+	// summariser-model.ts), so a structured toolCall/toolResult prefix is
+	// not representable there and risks provider errors. This is the single
+	// chokepoint every summarisation call flows through (compact() and any
+	// direct caller), keyed on the request model's provider id — the precise
+	// signal that the text-only override is the request target. When the
+	// override is configured but registration falls back to the main model,
+	// the cached replay prefix stays enabled.
+	const replay = replayPrefix && model.provider !== SUMMARISER_OVERRIDE_PROVIDER_ID;
 	let summarizationMessages:
 		| ReturnType<typeof convertToLlm>
 		| { role: "user"; content: { type: "text"; text: string }[]; timestamp: number }[];
-	if (replayPrefix) {
+	if (replay) {
 		const llmMessages = convertToLlm(currentMessages);
 		summarizationMessages = [
 			...llmMessages,

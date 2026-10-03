@@ -2,12 +2,7 @@ import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocompl
 import { getKeybindings } from "../keybindings.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
-import {
-	type Component,
-	CURSOR_MARKER,
-	type Focusable,
-	type TUI,
-} from "../tui.ts";
+import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.ts";
 import { UndoStack } from "../undo-stack.ts";
 import {
 	cjkBreakRegex,

@@ -26,6 +26,12 @@ export const MINIMAX_PROFILE: Partial<DeepseekHarnessSettings> = {
 	toolResultHeadChars: 4096,
 	toolResultTailChars: 1024,
 	toolResultThresholdChars: 8192,
-	replayPrefixSummarisation: true,
+	// Off: summarisation on this provider family commonly routes through a
+	// text-only PI_SUMMARIZER_* override endpoint, where a structured
+	// toolCall/toolResult replay prefix is unrepresentable (see the gate in
+	// compaction.ts generateSummaryWithUsage). The legacy text-block path is
+	// always safe here; user-level `replayPrefixSummarisation: true` still
+	// wins over this profile default if the user wants the cached prefix.
+	replayPrefixSummarisation: false,
 	budgetedInstructions: true,
 };

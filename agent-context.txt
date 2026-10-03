@@ -1,0 +1,175 @@
+# Agent Context & Architecture Summary
+
+> Auto-generated for the summariser-env-config code review. Not committed.
+
+## Agent Goal / Task
+
+- **Primary goal**: Add a `PI_SUMMARIZER_*` env-var override that routes context
+  summarisation (manual `/compact`, auto-compaction, branch summary) through a
+  separate OpenAI-compatible endpoint instead of the main agent model. Always
+  active when all three vars are present; partial sets warn and fall back.
+- **Acceptance criteria** (inferred from CHANGELOGs / docs):
+  - Manual `/compact` summarisation uses the override when configured.
+  - Auto-compaction summarisation uses the override when configured.
+  - Branch-summary generation uses the override when configured.
+  - Unset / partial config silently falls back to the main model (warn on partial).
+  - Override works independently of `--deepseek-harness`.
+- **Known constraints**:
+  - Only an OpenAI-compatible chat-completions API is supported (not Anthropic-style
+    messages, not Google generative-ai).
+  - Override must not silently clobber built-in providers.
+  - No new transitive deps; only existing `@earendil-works/pi-ai` + `@earendil-works/pi-agent-core`.
+
+## Repository Overview
+
+bramburn/pi is a fork of earendil-works/pi — a monorepo of TypeScript packages
+that power an interactive coding-agent CLI / TUI. The relevant packages:
+
+- `packages/ai` (`@earendil-works/pi-ai`) — provider-agnostic LLM abstraction;
+  defines `Model<TApi>`, `Provider`, `MutableModels`, `createProvider`. Lazy
+  imports keep the core side-effect-free.
+- `packages/agent` (`@earendil-works/pi-agent-core`) — agent loop primitives.
+- `packages/coding-agent` (`@earendil-works/pi-coding-agent`) — the CLI / TUI
+  host. Owns `AgentSession` and `ModelRuntime`.
+- `packages/tui`, `packages/protocol`, `packages/client`, `packages/server` — UI
+  / IPC layers (not touched by this goal).
+
+Two remotes: `fork` (bramburn/pi, writable) and `origin` (earendil-works/pi,
+read-only). Pushes go to `fork` only.
+
+## Folder Structure (relevant slice)
+
+```
+packages/
+  ai/
+    src/
+      api/                  # Provider APIs (lazy-loaded)
+        lazy.ts
+        openai-completions.lazy.ts
+      models.ts             # Models / MutableModels / createProvider / Provider
+      models-store.ts       # Persistent catalog storage
+      providers/            # Built-in provider factories
+      types.ts              # Model / Provider / ProviderEnv
+      utils/provider-env.ts # getProviderEnvValue (env + ProviderEnv object)
+      summariser-env.ts     # NEW: resolveSummariserEnv()
+      summariser-model.ts   # NEW: resolveSummariserModel()
+      index.ts              # Public re-exports
+    test/
+      summariser-env.test.ts    # NEW
+      summariser-model.test.ts  # NEW
+  coding-agent/
+    src/
+      core/
+        agent-session.ts    # AgentSession._getSummarizationRequestAuth
+        model-runtime.ts    # ModelRuntime.registerTransientProvider (NEW)
+      modes/interactive/
+        external-editor.ts  # Unrelated formatting change
+    test/
+      tools.test.ts         # Unrelated formatting changes
+    docs/
+      compaction.md         # Added "Summariser Override" section
+      environment-variables.md # Added 3 PI_SUMMARIZER_* rows
+```
+
+## Opinionated Architecture
+
+- **Architecture pattern**: Layered monorepo. `ai` is the leaf, `coding-agent`
+  is the application. Provider integration flows through `Models`/`MutableModels`.
+- **Key layers**: `api/` (request shaping), `providers/` (catalogs), `Models`
+  (registry + auth resolution), `ModelRuntime` (host-side wrapper that adds
+  builtin providers + extension overrides), `AgentSession` (consumer).
+- **State management**: `MutableModels` (in-memory `Map<string, Provider>` +
+  optional `ModelsStore` for persistence). `ModelRuntime` layers a `builtins`
+  map on top of extension-provided providers.
+- **Dependency injection**: manual; constructor args + factory functions.
+  `createProvider({ id, baseUrl, auth, models, api })` is the canonical pattern.
+- **API / transport layer**: per-API `ProviderStreams` returned by lazy
+  loaders (`openAICompletionsApi`, `anthropicMessagesApi`, …).
+- **Data layer**: `ModelsStore` (default `InMemoryModelsStore`); persisted
+  catalogs loaded via `loadProvidersFromModelsStore`.
+
+## Recent Changes (the agent's work)
+
+### New files (4)
+
+| Path | Purpose |
+|------|---------|
+| `packages/ai/src/summariser-env.ts` | `resolveSummariserEnv()` — reads PI_SUMMARIZER_* via `getProviderEnvValue`, trims, validates all-three-or-none, warns on partial. |
+| `packages/ai/src/summariser-model.ts` | `resolveSummariserModel()` — builds a `Model<"openai-completions">` (provider id `pi-summariser-override`, contextWindow 128k, maxTokens 8192, zero cost, reasoning disabled). |
+| `packages/ai/test/summariser-env.test.ts` | 7 vitest cases: unset, partial, whitespace, all-set, trim, ProviderEnv object injection, console.warn assertions. |
+| `packages/ai/test/summariser-model.test.ts` | 4 vitest cases: unset, partial, all-set shape, idempotence (same provider id across calls). |
+
+### Modified files (12)
+
+**Summariser-relevant (8):**
+
+| Path | Change |
+|------|--------|
+| `packages/ai/src/index.ts` | Re-export `summariser-env` + `summariser-model`. |
+| `packages/coding-agent/src/core/agent-session.ts` | `_getSummarizationRequestAuth` resolves the override, registers a one-off provider via `createProvider` + `ModelRuntime.registerTransientProvider`, then runs the existing auth path with `effectiveModel`. Three callers (manual `/compact`, auto-compaction, default summarisation) all flow through this method. |
+| `packages/coding-agent/src/core/model-runtime.ts` | New `registerTransientProvider(provider)`: rejects built-in-id collisions with `console.warn`, otherwise calls `this.models.setProvider(provider)`. Returns boolean. |
+| `packages/agent/CHANGELOG.md` | New "Fork-local (bramburn) / Added" entry under `[Unreleased]`. |
+| `packages/agent/docs/harness.md` | One paragraph added above the compaction/navigation axes table describing the env override. |
+| `packages/ai/CHANGELOG.md` | Mirror entry under `[Unreleased] / Fork-local / Added`. |
+| `packages/ai/README.md` | New "Summariser Override (PI_SUMMARIZER_*)" section. |
+| `packages/coding-agent/docs/compaction.md` | New "Summariser Override" section with table, semantics, example. |
+| `packages/coding-agent/docs/environment-variables.md` | Three new rows in the env-var table. |
+| `packages/coding-agent/README.md` | One-line pointer to the new section. |
+
+**Unrelated formatting (2):**
+
+| Path | Change |
+|------|--------|
+| `packages/coding-agent/src/modes/interactive/external-editor.ts` | Single `process.stdout.write(...)` call reformatted across multiple lines (prettier). No behaviour change. |
+| `packages/coding-agent/test/tools.test.ts` | 142 lines reformatted — `it.skipIf(...)(...)` bodies split across lines. No behaviour change. |
+
+**Untracked / suspicious (3):**
+
+| Path | Note |
+|------|------|
+| `packages/ai/pnpm-lock.yaml` | **pnpm lockfile** in a package that's part of an npm-managed workspace. Looks like an accidental `pnpm install` was run. |
+| `packages/ai/pnpm-workspace.yaml` | **pnpm workspace declaration** in the same package — would convert packages/ai to a pnpm sub-workspace if committed. |
+| `.pi/harvest/*.jsonl` | Outside the goal's scope — likely SFT harvest data, untracked. |
+
+## Tests
+
+- 11 new vitest cases across `summariser-env.test.ts` and `summariser-model.test.ts`.
+- **No new tests for the integration path**: `_getSummarizationRequestAuth`
+  override registration, `ModelRuntime.registerTransientProvider`'s built-in
+  collision rejection, and the `auth.resolve` closure capturing the
+  env-supplied apiKey are all untested.
+- No `bun run check` output captured yet — reviewer should run it locally.
+
+## Open Questions / Risks
+
+1. **`registerTransientProvider`'s warning message references a non-existent
+   env var.** It tells the user to "set PI_SUMMARIZER_PROVIDER to a
+   non-built-in name", but `summariser-env.ts` does not read
+   `PI_SUMMARIZER_PROVIDER` — the provider id is hardcoded as
+   `pi-summariser-override`. The message is misleading.
+2. **Provider is registered on every `_getSummarizationRequestAuth` call.**
+   The id is stable so `setProvider` overwrites cleanly, but it's still N
+   registrations per session. Worth confirming this is intentional.
+3. **`as unknown as Model<any>` cast** in `_getSummarizationRequestAuth` —
+   bypasses type safety on the `effectiveModel` assignment.
+4. **Override apiKey captured by closure** at registration time. If the env
+   var changes between registration and the next request, the override uses
+   the old key.
+5. **`packages/ai/pnpm-lock.yaml` + `pnpm-workspace.yaml`** — accidentally
+   created? Need to confirm before any commit.
+6. **tools.test.ts + external-editor.ts formatting changes** — these belong in
+   a separate commit, not bundled with the summariser goal. AGENTS.md says
+   "Only commit files YOU changed in THIS session" — does the user want
+   them included?
+7. **No integration test** for `ModelRuntime.registerTransientProvider`'s
+   built-in collision warning path.
+
+## Architecture pointers (for cross-reference)
+
+- `packages/ai/src/models.ts:225-269` — `MutableModels` + `ModelsImpl.setProvider`
+- `packages/ai/src/models.ts:735-762` — `createModels` + `createProvider`
+- `packages/ai/src/types.ts:113,140` — `ProviderEnv`
+- `packages/ai/src/utils/provider-env.ts:45-52` — `getProviderEnvValue`
+- `packages/coding-agent/src/core/model-runtime.ts:134` — `private readonly builtins`
+- `packages/coding-agent/src/core/agent-session.ts:479-531` — the modified method
+- `packages/coding-agent/src/core/agent-session.ts:2046,2344,3304` — three call sites

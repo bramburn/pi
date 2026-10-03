@@ -75,6 +75,14 @@ for name in CI GITHUB_ACTIONS; do
 	[[ -z "$value" ]] || test_env+=("$name=$value")
 done
 
+# Live-network tests stay off unless explicitly requested. Without this the
+# empty environment alone keeps them off, and with it the provider test files
+# gate their live blocks on ambient credentials again (see
+# packages/ai/test/live-tests-gate.ts).
+if [[ "${PI_LIVE_TESTS-}" == "1" ]]; then
+	test_env+=("PI_LIVE_TESTS=1")
+fi
+
 echo "Running tests without API keys in isolated home: $test_root/home"
 # Phase 1: route the test invocation through bun's runtime but keep the
 # existing vitest + node --test orchestration (the `test` script in the

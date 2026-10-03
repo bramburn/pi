@@ -33,6 +33,8 @@ const SUMMARISER_DEFAULT_PROVIDER = "pi-summariser-override";
  * realistic summarisation workload (compaction never consumes more than the
  * agent's full context, which is usually 128k–1M). When in doubt, over-report
  * rather than under-report so /token-budget gauges don't prematurely bail.
+ * Override per endpoint with `PI_SUMMARIZER_CONTEXT_WINDOW`
+ * (see `resolveSummariserEnv`).
  */
 const SUMMARISER_DEFAULT_CONTEXT_WINDOW = 128000;
 
@@ -110,7 +112,9 @@ export function resolveSummariserModel(): SummariserModelOverride | undefined {
 		// (so /usage doesn't over-report spend on the override model); the user
 		// understands the cost is invisible to pi's accounting.
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: SUMMARISER_DEFAULT_CONTEXT_WINDOW,
+		// PI_SUMMARIZER_CONTEXT_WINDOW when it parsed as a positive integer,
+		// otherwise the 128k fallback above.
+		contextWindow: override.contextWindow ?? SUMMARISER_DEFAULT_CONTEXT_WINDOW,
 		maxTokens: SUMMARISER_DEFAULT_MAX_TOKENS,
 	};
 	return { model, apiKey: override.apiKey };

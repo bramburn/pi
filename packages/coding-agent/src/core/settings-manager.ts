@@ -34,7 +34,14 @@ export interface DeepseekHarnessSettings {
 	enabled?: boolean;
 	/** Compact when context > contextWindow * thresholdRatio. Default 0.8. */
 	thresholdRatio?: number;
-	/** Keep the most recent contextWindow * retainRatio verbatim. Default 0.16. */
+	/**
+	 * Keep the most recent contextWindow * retainRatio verbatim. Default 0.16.
+	 * Precedence note: when the bundle is enabled and the model's context window
+	 * is known, the derived floor(contextWindow * retainRatio) overrides an
+	 * explicitly configured `compaction.keepRecentTokens` (this mirrors the
+	 * pre-existing manual-/compact behaviour; the absolute setting remains the
+	 * fallback for unknown windows and when the bundle is off).
+	 */
 	retainRatio?: number;
 	/** Max overflow recovery attempts before surfacing an error. Default 2. */
 	maxOverflowRetries?: number;
@@ -978,6 +985,38 @@ export class SettingsManager {
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
 		};
+	}
+
+	/**
+	 * Effective compaction settings for the active model. The legacy
+	 * absolute-token settings are always present; when the DeepSeek
+	 * Harness bundle is enabled the resolved ratio policy is layered on
+	 * top (`thresholdRatio`, `retainRatio` and the derived
+	 * `keepRecentTokens`).
+	 *
+	 * `AgentSession` calls this from every compaction path (manual and
+	 * automatic) so the two cannot diverge.
+	 */
+	getEffectiveCompactionSettings(model?: { provider: string; id: string; contextWindow: number }): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		thresholdRatio?: number;
+		retainRatio?: number;
+	} {
+		const settings = this.getCompactionSettings();
+		const dh = this.getDeepseekHarnessSettings(model);
+		if (!dh.enabled) {
+			return settings;
+		}
+		settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+		settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+		// An unknown window (0) must not collapse `keepRecentTokens` to 0
+		// or NaN: fall back to the legacy absolute value.
+		if (settings.retainRatio !== undefined && model !== undefined && model.contextWindow > 0) {
+			settings.keepRecentTokens = Math.floor(model.contextWindow * settings.retainRatio);
+		}
+		return settings;
 	}
 
 	/**

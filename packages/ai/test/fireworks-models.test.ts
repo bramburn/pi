@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 describe("Fireworks models", () => {
-	it("registers the default Kimi K2.6 model via Anthropic-compatible Messages API", () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
+	it("registers the default Kimi router model via Anthropic-compatible Messages API", () => {
+		const model = getModel("fireworks", "accounts/fireworks/routers/kimi-latest");
 
 		expect(model).toBeDefined();
 		expect(model.api).toBe("anthropic-messages");
@@ -27,12 +27,12 @@ describe("Fireworks models", () => {
 		expect(model.baseUrl).toBe("https://api.fireworks.ai/inference");
 		expect(model.reasoning).toBe(true);
 		expect(model.input).toEqual(["text", "image"]);
-		expect(model.contextWindow).toBe(262000);
-		expect(model.maxTokens).toBe(262000);
+		expect(model.contextWindow).toBe(1048576);
+		expect(model.maxTokens).toBe(131072);
 		expect(model.cost).toEqual({
-			input: 0.95,
-			output: 4,
-			cacheRead: 0.16,
+			input: 3,
+			output: 15,
+			cacheRead: 0.3,
 			cacheWrite: 0,
 		});
 	});
@@ -49,9 +49,9 @@ describe("Fireworks models", () => {
 		expect(model).toBeUndefined();
 	});
 
-	it("aligns GLM 5.2 Fast with GLM 5.2's OpenAI-compatible config", () => {
-		const base = getModel("fireworks", "accounts/fireworks/models/glm-5p2");
-		const fast = getModel("fireworks", "accounts/fireworks/routers/glm-5p2-fast");
+	it("aligns GLM 5.3 Fast with GLM 5.3's OpenAI-compatible config", () => {
+		const base = getModel("fireworks", "accounts/fireworks/models/glm-5p3");
+		const fast = getModel("fireworks", "accounts/fireworks/routers/glm-5p3-fast");
 
 		expect(fast.api).toBe(base.api);
 		expect(fast.baseUrl).toBe(base.baseUrl);
@@ -59,7 +59,7 @@ describe("Fireworks models", () => {
 		expect(fast.thinkingLevelMap).toEqual(base.thinkingLevelMap);
 	});
 
-	it.each(["accounts/fireworks/models/glm-5p2", "accounts/fireworks/routers/glm-5p2-fast"] as const)(
+	it.each(["accounts/fireworks/models/glm-5p3", "accounts/fireworks/routers/glm-5p3-fast"] as const)(
 		"omits unsupported long cache retention for %s",
 		async (modelId) => {
 			const model = getModel("fireworks", modelId);
@@ -141,13 +141,15 @@ describe("Fireworks models", () => {
 	});
 
 	it("sets Fireworks-specific compat for session affinity and unsupported tool fields", () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
+		const model = getModel("fireworks", "accounts/fireworks/routers/kimi-latest");
+		expect(model.api).toBe("anthropic-messages");
+		const compat: Model<"anthropic-messages">["compat"] = model.compat;
 
-		expect(model.compat).toBeDefined();
-		expect(model.compat?.sendSessionAffinityHeaders).toBe(true);
-		expect(model.compat?.supportsEagerToolInputStreaming).toBe(false);
-		expect(model.compat?.supportsCacheControlOnTools).toBe(false);
-		expect(model.compat?.supportsLongCacheRetention).toBe(false);
+		expect(compat).toBeDefined();
+		expect(compat?.sendSessionAffinityHeaders).toBe(true);
+		expect(compat?.supportsEagerToolInputStreaming).toBe(false);
+		expect(compat?.supportsCacheControlOnTools).toBe(false);
+		expect(compat?.supportsLongCacheRetention).toBe(false);
 	});
 });
 
@@ -175,16 +177,16 @@ function createFireworksModel(
 	compat: Model<"anthropic-messages">["compat"] = FIREWORKS_ANTHROPIC_COMPAT,
 ): Model<"anthropic-messages"> {
 	return {
-		id: "accounts/fireworks/models/kimi-k2p6",
-		name: "Kimi K2.6",
+		id: "accounts/fireworks/routers/kimi-latest",
+		name: "Kimi Latest",
 		api: "anthropic-messages",
 		provider: "fireworks",
 		baseUrl: "http://127.0.0.1:0", // overridden by captureAnthropicRequest
 		reasoning: true,
 		input: ["text", "image"],
-		cost: { input: 0.95, output: 4, cacheRead: 0.16, cacheWrite: 0 },
-		contextWindow: 262000,
-		maxTokens: 262000,
+		cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+		contextWindow: 1048576,
+		maxTokens: 131072,
 		compat,
 	};
 }

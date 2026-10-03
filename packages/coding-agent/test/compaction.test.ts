@@ -292,6 +292,41 @@ describe("shouldCompact", () => {
 
 		expect(shouldCompact(95000, 100000, settings)).toBe(false);
 	});
+
+	it("should use thresholdRatio over reserveTokens when set", () => {
+		const settings: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+		};
+
+		// reserveTokens rule: trigger above 100000 - 10000 = 90000.
+		expect(shouldCompact(89000, 100000, settings)).toBe(false);
+		expect(shouldCompact(91000, 100000, settings)).toBe(true);
+
+		// thresholdRatio rule: trigger above 100000 * 0.8 = 80000.
+		// 89000 is below the reserveTokens trigger but above the ratio
+		// trigger, so the two rules disagree and the ratio wins.
+		const ratioSettings: CompactionSettings = { ...settings, thresholdRatio: 0.8 };
+		expect(shouldCompact(89000, 100000, ratioSettings)).toBe(true);
+		expect(shouldCompact(79000, 100000, ratioSettings)).toBe(false);
+	});
+
+	it("should keep the reserveTokens rule when the ratio is unusable", () => {
+		const base: CompactionSettings = {
+			enabled: true,
+			reserveTokens: 10000,
+			keepRecentTokens: 20000,
+		};
+
+		// Unknown context window: the ratio cannot be applied, so the
+		// absolute subtraction is still used (trigger above -10000).
+		expect(shouldCompact(91000, 0, { ...base, thresholdRatio: 0.8 })).toBe(true);
+		expect(shouldCompact(-20000, 0, { ...base, thresholdRatio: 0.8 })).toBe(false);
+
+		// A ratio of 0 is meaningless and falls back to the subtraction.
+		expect(shouldCompact(89000, 100000, { ...base, thresholdRatio: 0 })).toBe(false);
+	});
 });
 
 describe("findCutPoint", () => {
@@ -372,6 +407,136 @@ describe("findCutPoint", () => {
 		expect(customFitsBudget.firstKeptEntryIndex).toBe(2);
 		expect(customFitsBudget.isSplitTurn).toBe(false);
 		expect(customFitsBudget.turnStartIndex).toBe(-1);
+	});
+});
+
+// ============================================================================
+// Cut-point tool-pair integrity (regression proof)
+// ============================================================================
+
+function entryMessages(entries: SessionEntry[]): AgentMessage[] {
+	return entries.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+}
+
+function toolCallIds(messages: AgentMessage[]): string[] {
+	const ids: string[] = [];
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		for (const block of message.content) {
+			if (block.type === "toolCall") ids.push(block.id);
+		}
+	}
+	return ids;
+}
+
+function toolResultCallIds(messages: AgentMessage[]): string[] {
+	const ids: string[] = [];
+	for (const message of messages) {
+		if (message.role === "toolResult") ids.push(message.toolCallId);
+	}
+	return ids;
+}
+
+function createToolCallAssistant(toolArguments: Record<string, unknown>): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "toolCall", id: "call-1", name: "probe_tool", arguments: toolArguments }],
+		usage: createMockUsage(10, 10),
+		stopReason: "toolUse",
+		timestamp: Date.now(),
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "claude-sonnet-4-5",
+	};
+}
+
+function createToolResultMessage(text: string): AgentMessage {
+	return {
+		role: "toolResult",
+		toolCallId: "call-1",
+		toolName: "probe_tool",
+		content: [{ type: "text", text }],
+		isError: false,
+		timestamp: Date.now(),
+	};
+}
+
+/**
+ * A cut can never split an assistant toolCall from its toolResults:
+ * toolResult entries are not cut points, so a cut either lands on the
+ * assistant entry (call + results stay together on the kept side) or
+ * after the results (the whole pair moves to the dropped side). These
+ * tests force the keep-recent boundary to each edge of the pair and
+ * assert no side ever holds a toolResult without its toolCall.
+ */
+describe("cut-point tool-pair integrity", () => {
+	it("keeps a toolCall entry and its toolResult together when the cut lands on the toolCall entry", () => {
+		// The toolCall entry carries a large arguments blob (≈1000 tokens)
+		// so the backwards walk crosses the 100-token budget exactly there.
+		const entries: SessionEntry[] = [
+			createMessageEntry(createUserMessage("old question")), // 0
+			createMessageEntry(createAssistantMessage("old answer")), // 1
+			createMessageEntry(createUserMessage("do the thing")), // 2
+			createMessageEntry(createToolCallAssistant({ payload: "x".repeat(4000) })), // 3 — forced cut point
+			createMessageEntry(createToolResultMessage("tool output ok")), // 4
+			createMessageEntry(createUserMessage("continue")), // 5
+			createMessageEntry(createAssistantMessage("final answer")), // 6
+		];
+
+		const result = findCutPoint(entries, 0, entries.length, 100);
+		expect(result.firstKeptEntryIndex).toBe(3);
+		expect(result.isSplitTurn).toBe(true);
+		expect(result.turnStartIndex).toBe(2);
+
+		const preparation = prepareCompaction(entries, { enabled: true, reserveTokens: 0, keepRecentTokens: 100 });
+		if (!preparation) throw new Error("expected a compaction preparation");
+
+		// Kept side (from the cut): the assistant toolCall AND its toolResult.
+		const kept = entryMessages(entries.slice(result.firstKeptEntryIndex));
+		expect(toolCallIds(kept)).toContain("call-1");
+		expect(toolResultCallIds(kept)).toEqual(["call-1"]);
+
+		// Dropped side (summarised history + turn prefix): no toolResult at
+		// all, so none can dangle without its call.
+		const dropped = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
+		expect(toolResultCallIds(dropped)).toEqual([]);
+
+		// General invariant: every toolResult keeps its toolCall on the same side.
+		for (const callId of toolResultCallIds(kept)) expect(toolCallIds(kept)).toContain(callId);
+		for (const callId of toolResultCallIds(dropped)) expect(toolCallIds(dropped)).toContain(callId);
+	});
+
+	it("moves the whole pair to the dropped side when the budget is crossed at the toolResult entry", () => {
+		// The toolResult carries the large blob (≈1000 tokens) so the walk
+		// crosses the budget at the toolResult entry; the cut then skips
+		// forward to the next valid cut point (the following user message).
+		const entries: SessionEntry[] = [
+			createMessageEntry(createUserMessage("old question")), // 0
+			createMessageEntry(createAssistantMessage("old answer")), // 1
+			createMessageEntry(createUserMessage("do the thing")), // 2
+			createMessageEntry(createToolCallAssistant({})), // 3
+			createMessageEntry(createToolResultMessage("x".repeat(4000))), // 4 — forced budget crossing
+			createMessageEntry(createUserMessage("continue")), // 5 — next valid cut point
+			createMessageEntry(createAssistantMessage("final answer")), // 6
+		];
+
+		const result = findCutPoint(entries, 0, entries.length, 100);
+		expect(result.firstKeptEntryIndex).toBe(5);
+
+		const preparation = prepareCompaction(entries, { enabled: true, reserveTokens: 0, keepRecentTokens: 100 });
+		if (!preparation) throw new Error("expected a compaction preparation");
+
+		// Dropped side: the toolResult together with its toolCall — the pair
+		// is dropped whole, never split.
+		const dropped = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
+		expect(toolResultCallIds(dropped)).toEqual(["call-1"]);
+		expect(toolCallIds(dropped)).toContain("call-1");
+
+		// Kept side: no toolResult at all, hence none without its call.
+		const kept = entryMessages(entries.slice(result.firstKeptEntryIndex));
+		expect(toolResultCallIds(kept)).toEqual([]);
+
+		for (const callId of toolResultCallIds(dropped)) expect(toolCallIds(dropped)).toContain(callId);
 	});
 });
 

@@ -63,6 +63,25 @@ describe("isContextOverflow", () => {
 		expect(isContextOverflow(message, 131072)).toBe(true);
 	});
 
+	it("detects OpenRouter routing-funnel context length errors", () => {
+		// When every candidate endpoint is filtered out on context length, the
+		// router never sends a request, so OpenRouter answers HTTP 404 with a
+		// routing funnel instead of any "maximum context length" wording.
+		const message = createErrorMessage(
+			'404 {"error":{"message":"No endpoints found for meta-llama/llama-4-scout. Every candidate endpoint was removed during routing: Filter by Context Length removed deepinfra/fp8, novita/bf16; Add BYOK Endpoints removed google-vertex/us-east5 (the Google endpoint is BYOK-only and you have no Google key that can serve meta-llama/llama-4-scout-17b-16e-instruct).","code":404}}',
+		);
+		expect(isContextOverflow(message, 327680)).toBe(true);
+	});
+
+	it("does not treat an unavailable OpenRouter model as a context overflow", () => {
+		// Same 404 prefix, but the funnel has no "Filter by Context Length" step -
+		// the model is simply gone. Compacting and retrying would never succeed.
+		const message = createErrorMessage(
+			'404 {"error":{"message":"No endpoints found for meta-llama/retired-model. Every candidate endpoint was removed during routing.","code":404}}',
+		);
+		expect(isContextOverflow(message, 327680)).toBe(false);
+	});
+
 	it("detects DS4 configured context size errors", () => {
 		const message = createErrorMessage(
 			"400 Prompt has 256468 tokens, but the configured context size is 256000 tokens",

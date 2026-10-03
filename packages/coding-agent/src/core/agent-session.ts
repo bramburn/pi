@@ -62,6 +62,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
 	type CompactionResult,
+	type CompactionSettings,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
@@ -630,7 +631,7 @@ export class AgentSession {
 
 	private async _compactBeforeNextAssistantResponse(context: AgentContext): Promise<AgentContext> {
 		const model = this.model;
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 
 		if (
 			!model ||
@@ -1242,7 +1243,12 @@ export class AgentSession {
 			if (this._prunerLastRunTurn >= dh.toolResultPruneEveryN) {
 				this._prunerLastRunTurn = 0;
 				const before = this.agent.state.messages.length;
-				const pruned = pruneSession(this.agent.state.messages, DEFAULT_PRUNER_CONFIG);
+				const pruned = pruneSession(this.agent.state.messages, {
+					...DEFAULT_PRUNER_CONFIG,
+					thresholdChars: dh.toolResultThresholdChars,
+					headChars: dh.toolResultHeadChars,
+					tailChars: dh.toolResultTailChars,
+				});
 				if (pruned.length === before) {
 					this.agent.state.messages = pruned;
 				}
@@ -2062,6 +2068,22 @@ export class AgentSession {
 	// =========================================================================
 
 	/**
+	 * Effective compaction settings for the active model. Layers the
+	 * DeepSeek Harness ratio policy on top of the legacy absolute-token
+	 * settings (see `SettingsManager.getEffectiveCompactionSettings`).
+	 *
+	 * Every compaction path — manual `/compact`, the threshold check and
+	 * auto-compaction — reads settings through this helper so the manual
+	 * and automatic paths cannot diverge.
+	 */
+	private _effectiveCompactionSettings(): CompactionSettings {
+		const model = this.model;
+		return this.settingsManager.getEffectiveCompactionSettings(
+			model ? { provider: model.provider, id: model.id, contextWindow: model.contextWindow } : undefined,
+		);
+	}
+
+	/**
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
 	 * @param customInstructions Optional instructions for the compaction summary
@@ -2079,20 +2101,7 @@ export class AgentSession {
 			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
-			const settings = this.settingsManager.getCompactionSettings();
-
-			// When the DeepSeek Harness bundle is enabled, layer the
-			// ratio-based policy on top of the legacy absolute-token
-			// settings. The harness module's `shouldCompact` and
-			// `findCutPoint` use whichever values are present.
-			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
-			if (dh.enabled) {
-				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
-				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
-				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
-					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
-				}
-			}
+			const settings = this._effectiveCompactionSettings();
 
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
@@ -2252,7 +2261,7 @@ export class AgentSession {
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 		if (!settings.enabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
@@ -2365,7 +2374,7 @@ export class AgentSession {
 	 * Internal: Run auto-compaction with events.
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = this._effectiveCompactionSettings();
 		let started = false;
 		let fromExtension = false;
 

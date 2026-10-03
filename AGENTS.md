@@ -34,9 +34,10 @@
 
 - After code changes (not docs): `bun run check` (full output, no tail). Fix all errors, warnings, and infos before committing. Does not run tests. `npm run check` still works (calls the same scripts); use `bun run` so the run is consistent with CI.
 - Never run `bun run build` or `bun test` directly unless requested by the user; CI and `./test.sh` orchestrate the full build → check → test sequence.
-- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root:
+- Never run the full vitest suite directly: it includes e2e tests. Those live blocks used to activate whenever a provider key was present in the environment, which made a plain `vitest` run make real billed API calls; they are now gated behind `PI_LIVE_TESTS=1` (`packages/ai/test/live-tests-gate.ts`, `packages/coding-agent/test/live-tests-gate.ts`), so without that flag they skip no matter what is exported. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root:
   - Vitest: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts"`
   - `packages/tui` (`node:test`): `node --test test/specific.test.ts`
+- Set `PI_LIVE_TESTS=1` only when the user explicitly asks for live provider tests. It is allowlisted in `test.sh`, so `PI_LIVE_TESTS=1 ./test.sh` runs the whole suite live; that spends real money and can fail for credential reasons alone (e.g. an expired or wrong-scope key), so never enable it on your own initiative.
 - If you create or modify a test file, run it and iterate on test or implementation until it passes.
 - For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
 - When regressions tests for fixing a github issue, add a comment with the github issue number next to the test.
