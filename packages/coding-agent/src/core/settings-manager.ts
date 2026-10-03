@@ -34,7 +34,14 @@ export interface DeepseekHarnessSettings {
 	enabled?: boolean;
 	/** Compact when context > contextWindow * thresholdRatio. Default 0.8. */
 	thresholdRatio?: number;
-	/** Keep the most recent contextWindow * retainRatio verbatim. Default 0.16. */
+	/**
+	 * Keep the most recent contextWindow * retainRatio verbatim. Default 0.16.
+	 * Precedence note: when the bundle is enabled and the model's context window
+	 * is known, the derived floor(contextWindow * retainRatio) overrides an
+	 * explicitly configured `compaction.keepRecentTokens` (this mirrors the
+	 * pre-existing manual-/compact behaviour; the absolute setting remains the
+	 * fallback for unknown windows and when the bundle is off).
+	 */
 	retainRatio?: number;
 	/** Max overflow recovery attempts before surfacing an error. Default 2. */
 	maxOverflowRetries?: number;

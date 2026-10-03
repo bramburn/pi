@@ -501,17 +501,12 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			MODELS.opencode["kimi-k2.5"],
 			MODELS.opencode["kimi-k2.6"],
 			MODELS.opencode["minimax-m2.7"],
-			MODELS["opencode-go"]["kimi-k3"],
 		] as const)("should omit long cache retention for $provider/$id", async (metadata) => {
 			const model = metadata as Model<"openai-completions">;
-			const localModel: Model<"openai-completions"> = {
-				...model,
-				compat: { ...model.compat, supportsLongCacheRetention: false },
-			};
 			let capturedPayload: OpenAICompletionsCachePayload | undefined;
 
 			try {
-				const s = streamOpenAICompletions(localModel, context, {
+				const s = streamOpenAICompletions(model, context, {
 					apiKey: "fake-key",
 					cacheRetention: "long",
 					sessionId: "session-opencode-long-cache-unsupported",
@@ -527,7 +522,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 				// Expected to fail
 			}
 
-			expect(localModel.compat?.supportsLongCacheRetention).toBe(false);
+			expect(model.compat?.supportsLongCacheRetention).toBe(false);
 			expect(capturedPayload).toBeDefined();
 			expect(capturedPayload?.prompt_cache_key).toBeUndefined();
 			expect(capturedPayload?.prompt_cache_retention).toBeUndefined();

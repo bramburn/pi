@@ -397,7 +397,7 @@ describe.skipIf(!hasAnyApiKey())("Cross-Provider Handoff", () => {
 		console.log(`\n=== ${availablePairs.length}/${PROVIDER_MODEL_PAIRS.length} contexts available ===\n`);
 	}, 300000);
 
-	it.skipIf(!hasAnyApiKey())("should have at least 2 fixtures to test handoffs", () => {
+	it.skipIf(!hasAnyApiKey())("should generate the expected number of fixtures for this environment", () => {
 		expect(Object.keys(contexts).length).toBeGreaterThanOrEqual(fixtureThreshold());
 	});
 
