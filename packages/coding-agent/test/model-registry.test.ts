@@ -714,6 +714,44 @@ describe("ModelRegistry", () => {
 			expect(opus?.name).not.toBe("Custom Sonnet Name");
 		});
 
+		test("model override replaces input modalities (media capability)", async () => {
+			writeRawModelsJson({
+				openrouter: {
+					modelOverrides: {
+						"anthropic/claude-sonnet-4": {
+							input: ["text", "image", "video", "pdf"],
+						},
+					},
+				},
+			});
+
+			const registry = await createModelRegistry(authStorage, modelsJsonPath);
+			const models = getModelsForProvider(registry, "openrouter");
+
+			const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-4");
+			expect(sonnet?.input).toEqual(["text", "image", "video", "pdf"]);
+		});
+
+		test("custom model input modalities include video, pdf, and audio", async () => {
+			writeRawModelsJson({
+				"my-provider": {
+					baseUrl: "https://api.example.invalid/v1",
+					api: "openai-completions",
+					models: [
+						{
+							id: "mimo-v2.6-pro",
+							name: "MiMo v2.6 Pro",
+							input: ["text", "image", "video", "pdf", "audio"],
+						},
+					],
+				},
+			});
+
+			const registry = await createModelRegistry(authStorage, modelsJsonPath);
+			const model = registry.find("my-provider", "mimo-v2.6-pro");
+			expect(model?.input).toEqual(["text", "image", "video", "pdf", "audio"]);
+		});
+
 		test("custom model and model override carry sampling params", async () => {
 			writeRawModelsJson({
 				openrouter: {

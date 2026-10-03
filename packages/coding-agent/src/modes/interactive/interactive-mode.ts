@@ -8,7 +8,17 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AuthEvent, AuthPrompt } from "@earendil-works/pi-ai";
-import type { AssistantMessage, ImageContent, Message, Model, Usage, VideoContent } from "@earendil-works/pi-ai/compat";
+import {
+	type Api,
+	type AssistantMessage,
+	type ImageContent,
+	type Message,
+	type Model,
+	modelSupportsMediaUpload,
+	type PdfContent,
+	type Usage,
+	type VideoContent,
+} from "@earendil-works/pi-ai/compat";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -110,6 +120,7 @@ import {
 	extensionForImageMimeType,
 	extensionForVideoMimeType,
 	readClipboardImage,
+	readClipboardPdf,
 	readClipboardVideo,
 } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
@@ -238,14 +249,17 @@ function attachmentsToImages(attachments: PasteAttachment[]): ImageContent[] {
 }
 
 /**
- * Convert video paste attachments into content blocks. Video blocks ride the
- * ImageContent channel via a local cast: the shared message union is
+ * Convert video/PDF paste attachments into content blocks. These blocks ride
+ * the ImageContent channel via a local cast: the shared message union is
  * image-only, and the Google serializer forwards any non-text part as
- * inlineData, which accepts video/* MIME types. Callers must gate on
- * isVideoCapableApi so non-Google models never receive these.
+ * inlineData (which accepts video/* and application/pdf). Callers must gate
+ * each kind on modelSupportsMediaUpload so models that cannot receive the
+ * media never see these blocks.
  */
-function attachmentsToVideos(attachments: PasteAttachment[]): ImageContent[] {
-	const videos: ImageContent[] = [];
+function attachmentsToUploadedMedia(
+	attachments: PasteAttachment[],
+): Array<{ kind: "video" | "pdf"; content: ImageContent }> {
+	const media: Array<{ kind: "video" | "pdf"; content: ImageContent }> = [];
 	for (const attachment of attachments) {
 		if (attachment.kind === "video") {
 			const content: VideoContent = {
@@ -253,45 +267,45 @@ function attachmentsToVideos(attachments: PasteAttachment[]): ImageContent[] {
 				data: Buffer.from(attachment.bytes).toString("base64"),
 				mimeType: attachment.mimeType,
 			};
-			videos.push(content as unknown as ImageContent);
+			media.push({ kind: "video", content: content as unknown as ImageContent });
+		} else if (attachment.kind === "pdf") {
+			const content: PdfContent = {
+				type: "pdf",
+				data: Buffer.from(attachment.bytes).toString("base64"),
+				mimeType: attachment.mimeType,
+			};
+			media.push({ kind: "pdf", content: content as unknown as ImageContent });
 		}
 	}
-	return videos;
+	return media;
 }
 
-/** True when the model's API consumes video content blocks (Google models). */
-function isVideoCapableApi(api: string | undefined): boolean {
-	return api === "google-generative-ai" || api === "google-vertex";
-}
-
-/** Model-facing media for a submit: images, plus videos when the API accepts video. */
+/** Model-facing media for a submit: images, plus video/PDF blocks the model accepts. */
 function buildMediaContent(
 	attachments: PasteAttachment[],
-	api: string | undefined,
-): { images: ImageContent[]; droppedVideos: number } {
+	model: Model<Api> | undefined,
+): { images: ImageContent[]; dropped: Array<"video" | "pdf"> } {
 	const images = attachmentsToImages(attachments);
-	const videos = attachmentsToVideos(attachments);
-	if (videos.length === 0) {
-		return { images, droppedVideos: 0 };
+	const dropped: Array<"video" | "pdf"> = [];
+	for (const { kind, content } of attachmentsToUploadedMedia(attachments)) {
+		if (modelSupportsMediaUpload(model, kind)) {
+			images.push(content);
+		} else if (!dropped.includes(kind)) {
+			dropped.push(kind);
+		}
 	}
-	if (isVideoCapableApi(api)) {
-		return { images: [...images, ...videos], droppedVideos: 0 };
-	}
-	return { images, droppedVideos: videos.length };
+	return { images, dropped };
 }
 
-function videoNotSupportedMessage(model: { name: string } | undefined): string {
+function mediaNotSupportedMessage(model: { name: string } | undefined, kind: "video" | "pdf"): string {
 	const modelLabel = model ? `"${model.name}"` : "The current model";
-	return `${modelLabel} does not support video input; video attachments were not sent.`;
+	const label = kind === "pdf" ? "PDF" : "video";
+	return `${modelLabel} does not support ${label} input; ${label} attachments were not sent.`;
 }
 
 /** True when a submit payload has no text and no media worth sending to the model. */
 function isEmptySubmit(payload: { text: string; attachments: PasteAttachment[] }): boolean {
-	return (
-		payload.text.trim().length === 0 &&
-		!attachmentsToImages(payload.attachments).length &&
-		!payload.attachments.some((attachment) => attachment.kind === "video")
-	);
+	return payload.text.trim().length === 0 && !payload.attachments.some((attachment) => attachment.kind !== "text");
 }
 
 type CompactionCostNotice = {
@@ -2977,6 +2991,14 @@ export class InteractiveMode {
 				return;
 			}
 
+			const pdf = readClipboardPdf();
+			if (pdf) {
+				const fileName = `clipboard-${Date.now()}.pdf`;
+				this.editor.pastePdf(pdf.bytes, pdf.mimeType, fileName);
+				this.ui.requestRender();
+				return;
+			}
+
 			const text = await readClipboardText();
 			if (text) {
 				this.editor.pasteText(text);
@@ -3007,15 +3029,15 @@ export class InteractiveMode {
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
 			if (isEmptySubmit(payload)) return;
-			const media = buildMediaContent(payload.attachments, this.session.model?.api);
-			if (media.droppedVideos > 0) {
-				this.showWarning(videoNotSupportedMessage(this.session.model));
+			const media = buildMediaContent(payload.attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
 			}
 			const images = media.images;
 			let text = payload.text;
 			text = text.trim();
-			// Video-only submits can strip down to nothing when the model
-			// does not support video input (the warning is already shown).
+			// Video/PDF-only submits can strip down to nothing when the model
+			// does not accept the media (the warnings are already shown).
 			if (!text && images.length === 0) return;
 
 			// Handle commands
@@ -4206,14 +4228,14 @@ export class InteractiveMode {
 		const attachments = this.editor.getAttachments?.() ?? [];
 		const images = attachmentsToImages(attachments);
 		const text = (this.editor.getExpandedText?.() ?? this.editor.getText()).trim();
-		const hasVideoAttachments = attachments.some((attachment) => attachment.kind === "video");
-		if (!text && images.length === 0 && !hasVideoAttachments) return;
+		const hasMediaAttachments = attachments.some((attachment) => attachment.kind !== "text");
+		if (!text && images.length === 0 && !hasMediaAttachments) return;
 
 		// Queue input during compaction (extension commands execute immediately)
 		if (this.session.isCompacting) {
-			const media = buildMediaContent(attachments, this.session.model?.api);
-			if (media.droppedVideos > 0) {
-				this.showWarning(videoNotSupportedMessage(this.session.model));
+			const media = buildMediaContent(attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
 			}
 			if (!text && media.images.length === 0) return;
 			if (this.isExtensionCommand(text)) {
@@ -4230,9 +4252,9 @@ export class InteractiveMode {
 		// Alt+Enter queues a follow-up message (waits until agent finishes)
 		// This handles extension commands (execute immediately), prompt template expansion, and queueing
 		if (this.session.isStreaming) {
-			const media = buildMediaContent(attachments, this.session.model?.api);
-			if (media.droppedVideos > 0) {
-				this.showWarning(videoNotSupportedMessage(this.session.model));
+			const media = buildMediaContent(attachments, this.session.model);
+			for (const kind of media.dropped) {
+				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
 			}
 			if (!text && media.images.length === 0) return;
 			this.editor.addToHistory?.(text);

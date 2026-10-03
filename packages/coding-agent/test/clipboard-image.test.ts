@@ -256,3 +256,58 @@ describe("readClipboardVideo", () => {
 		expect(readClipboardVideo({ platform: "win32", env: {} })).toBeNull();
 	});
 });
+
+describe("readClipboardPdf", () => {
+	beforeEach(() => {
+		vi.resetModules();
+		mocks.spawnSync.mockReset();
+	});
+
+	test("Wayland: reads a PDF payload via wl-paste", async () => {
+		const pdfBytes = Buffer.from("%PDF-1.7", "utf-8");
+		mocks.spawnSync.mockImplementation((command, args, _options) => {
+			if (command === "wl-paste" && args[0] === "--list-types") {
+				return spawnOk(Buffer.from("text/plain\napplication/pdf\n", "utf-8"));
+			}
+			if (command === "wl-paste" && args[0] === "--type") {
+				expect(args).toContain("application/pdf");
+				return spawnOk(pdfBytes);
+			}
+			throw new Error(`Unexpected spawnSync call: ${command} ${args.join(" ")}`);
+		});
+
+		const { readClipboardPdf } = await import("../src/utils/clipboard-image.ts");
+		const result = readClipboardPdf({ platform: "linux", env: { WAYLAND_DISPLAY: "1" } });
+		expect(result).not.toBeNull();
+		expect(result?.mimeType).toBe("application/pdf");
+		expect(Array.from(result?.bytes ?? [])).toEqual(Array.from(pdfBytes));
+	});
+
+	test("returns null when the clipboard holds no PDF", async () => {
+		mocks.spawnSync.mockImplementation((command, args, _options) => {
+			if (command === "wl-paste" && args[0] === "--list-types") {
+				return spawnOk(Buffer.from("text/plain\nimage/png\n", "utf-8"));
+			}
+			if (command === "wl-paste" && args[0] === "--type") {
+				return spawnOk(Buffer.alloc(0));
+			}
+			if (command === "xclip") {
+				return spawnOk(Buffer.alloc(0));
+			}
+			throw new Error(`Unexpected spawnSync call: ${command} ${args.join(" ")}`);
+		});
+
+		const { readClipboardPdf } = await import("../src/utils/clipboard-image.ts");
+		expect(readClipboardPdf({ platform: "linux", env: { WAYLAND_DISPLAY: "1" } })).toBeNull();
+	});
+
+	test("non-Linux platforms return null without spawning", async () => {
+		mocks.spawnSync.mockImplementation(() => {
+			throw new Error("spawnSync should not be called on non-Linux platforms");
+		});
+
+		const { readClipboardPdf } = await import("../src/utils/clipboard-image.ts");
+		expect(readClipboardPdf({ platform: "darwin", env: {} })).toBeNull();
+		expect(readClipboardPdf({ platform: "win32", env: {} })).toBeNull();
+	});
+});

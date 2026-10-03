@@ -1,41 +1,84 @@
-import type {
-	Api,
-	AssistantMessage,
-	Context,
-	ImageContent,
-	Message,
-	Model,
-	TextContent,
-	ToolCall,
-	ToolResultMessage,
+import {
+	type Api,
+	type AssistantMessage,
+	type Context,
+	type ImageContent,
+	type Message,
+	type Model,
+	modelSupportsMediaUpload,
+	type TextContent,
+	type ToolCall,
+	type ToolResultMessage,
 } from "../types.ts";
 import { sanitizeRequestText } from "../utils/sanitize-text.ts";
 
-const NON_VISION_USER_IMAGE_PLACEHOLDER = "(image omitted: model does not support images)";
-const NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support images)";
+type MediaBlockKind = "image" | "video" | "pdf";
 
-function replaceImagesWithPlaceholder(content: (TextContent | ImageContent)[], placeholder: string): TextContent[] {
-	const result: TextContent[] = [];
-	let previousWasPlaceholder = false;
+const MEDIA_PLACEHOLDERS: Record<"user" | "tool", Record<MediaBlockKind, string>> = {
+	user: {
+		image: "(image omitted: model does not support images)",
+		video: "(video omitted: model does not support video)",
+		pdf: "(pdf omitted: model does not support PDFs)",
+	},
+	tool: {
+		image: "(tool image omitted: model does not support images)",
+		video: "(tool video omitted: model does not support video)",
+		pdf: "(tool pdf omitted: model does not support PDFs)",
+	},
+};
+
+/**
+ * Detect the media kind of a content block. Video/PDF blocks reach the
+ * message union through the coding-agent paste path's local cast (the shared
+ * union is text/image only), so this narrows by runtime discriminant.
+ */
+function mediaBlockKind(block: TextContent | ImageContent): MediaBlockKind | undefined {
+	const type = (block as { type: string }).type;
+	return type === "image" || type === "video" || type === "pdf" ? type : undefined;
+}
+
+function isMediaKindSupported<TApi extends Api>(model: Model<TApi>, kind: MediaBlockKind): boolean {
+	return kind === "image" ? model.input.includes("image") : modelSupportsMediaUpload(model, kind);
+}
+
+/**
+ * Replace media blocks the model cannot receive with text placeholders. Runs
+ * on every request build, so media attached while one model was active
+ * degrades to placeholders after a swap to a model lacking the modality — the
+ * session history keeps the original blocks, only the request is reduced.
+ */
+function downgradeUnsupportedMediaBlocks<TApi extends Api>(
+	content: (TextContent | ImageContent)[],
+	model: Model<TApi>,
+	scope: "user" | "tool",
+): (TextContent | ImageContent)[] {
+	const result: (TextContent | ImageContent)[] = [];
+	let previousPlaceholderKind: MediaBlockKind | undefined;
 
 	for (const block of content) {
-		if (block.type === "image") {
-			if (!previousWasPlaceholder) {
-				result.push({ type: "text", text: placeholder });
+		const kind = mediaBlockKind(block);
+		if (kind !== undefined && !isMediaKindSupported(model, kind)) {
+			// Collapse consecutive drops of the same kind into one placeholder.
+			if (previousPlaceholderKind !== kind) {
+				result.push({ type: "text", text: MEDIA_PLACEHOLDERS[scope][kind] });
 			}
-			previousWasPlaceholder = true;
+			previousPlaceholderKind = kind;
 			continue;
 		}
 
 		result.push(block);
-		previousWasPlaceholder = block.text === placeholder;
+		previousPlaceholderKind = undefined;
 	}
 
 	return result;
 }
 
-function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model: Model<TApi>): Message[] {
-	if (model.input.includes("image")) {
+function downgradeUnsupportedMedia<TApi extends Api>(messages: Message[], model: Model<TApi>): Message[] {
+	const allMediaSupported =
+		model.input.includes("image") &&
+		modelSupportsMediaUpload(model, "video") &&
+		modelSupportsMediaUpload(model, "pdf");
+	if (allMediaSupported) {
 		return messages;
 	}
 
@@ -43,14 +86,14 @@ function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model
 		if (msg.role === "user" && Array.isArray(msg.content)) {
 			return {
 				...msg,
-				content: replaceImagesWithPlaceholder(msg.content, NON_VISION_USER_IMAGE_PLACEHOLDER),
+				content: downgradeUnsupportedMediaBlocks(msg.content, model, "user"),
 			};
 		}
 
 		if (msg.role === "toolResult") {
 			return {
 				...msg,
-				content: replaceImagesWithPlaceholder(msg.content, NON_VISION_TOOL_IMAGE_PLACEHOLDER),
+				content: downgradeUnsupportedMediaBlocks(msg.content, model, "tool"),
 			};
 		}
 
@@ -145,12 +188,12 @@ export function transformMessages<TApi extends Api>(
 	const normalizedMessages = messages.map((msg) => (msg.content == null ? { ...msg, content: [] } : msg));
 	// Strip characters that some providers (e.g. MiniMax) reject with 400 "invalid params":
 	// unpaired UTF-16 surrogates and the U+FFFD replacement character. Runs before
-	// image downgrade so all downstream text is provider-safe.
+	// media downgrade so all downstream text is provider-safe.
 	const sanitizedMessages = normalizedMessages.map(sanitizeMessageText);
-	const imageAwareMessages = downgradeUnsupportedImages(sanitizedMessages, model);
+	const mediaAwareMessages = downgradeUnsupportedMedia(sanitizedMessages, model);
 
-	// First pass: transform messages (unsupported image downgrade, thinking blocks, tool call ID normalization)
-	const transformed = imageAwareMessages.map((msg) => {
+	// First pass: transform messages (unsupported media downgrade, thinking blocks, tool call ID normalization)
+	const transformed = mediaAwareMessages.map((msg) => {
 		// User messages pass through unchanged
 		if (msg.role === "user") {
 			return msg;

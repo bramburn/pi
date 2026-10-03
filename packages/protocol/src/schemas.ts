@@ -63,7 +63,15 @@ export const ModelMetadataSchema = StrictObject({
 	name: Type.String({ minLength: 1 }),
 	api: IdSchema,
 	reasoning: Type.Boolean(),
-	input: Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")])),
+	input: Type.Array(
+		Type.Union([
+			Type.Literal("text"),
+			Type.Literal("image"),
+			Type.Literal("video"),
+			Type.Literal("pdf"),
+			Type.Literal("audio"),
+		]),
+	),
 	contextWindow: Type.Integer({ minimum: 1 }),
 	maxTokens: Type.Integer({ minimum: 1 }),
 	cost: ModelCostSchema,
