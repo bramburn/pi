@@ -12,6 +12,10 @@ export default mergeConfig(
 			// Tests run offline by default; opt in with allowNetwork() from test/test-network-env.ts.
 			env: { PI_OFFLINE: "1" },
 			unstubEnvs: true,
+			// Live-network blocks are gated behind PI_LIVE_TESTS=1; without it the
+			// gate scrubs ambient provider credentials before test modules load.
+			// See test/live-tests-gate.ts.
+			setupFiles: ["./test/live-tests-gate.ts"],
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
 			// Exclude dist/ so vitest doesn't run copied .test.ts files that
