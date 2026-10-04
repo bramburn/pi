@@ -105,6 +105,7 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
+import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -112,6 +113,8 @@ import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager 
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
+import { BG_CUSTOM_MESSAGE_TYPE } from "./subagent/background.ts";
+import { isFailedSubagentResult } from "./subagent/types.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -380,6 +383,7 @@ export class AgentSession {
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
+	private _subagentToolCollisionWarned = false;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -2811,6 +2815,20 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+
+		// Coexistence guard (plan 5.3): a user-symlinked `subagent` extension
+		// silently shadows the native tool (extension tools win in the merged
+		// registry). Warn once per session and change nothing else.
+		if (!this._subagentToolCollisionWarned && this._baseToolDefinitions.has("subagent")) {
+			const collides = registeredTools.some((tool) => tool.definition.name === "subagent");
+			if (collides) {
+				this._subagentToolCollisionWarned = true;
+				console.warn(
+					'A user extension registers a tool named "subagent" while the native subagent tool is enabled. Remove the symlinked extension (e.g. ~/.pi/agent/extensions/subagent/) to use the native one.',
+				);
+			}
+		}
+
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
@@ -2913,6 +2931,61 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					subagent: {
+						settings: {
+							get: (key: string) => {
+								switch (key) {
+									case "subagent.enabled":
+										return this.settingsManager.getSubagentEnabled();
+									case "subagent.enableExperiments":
+										return this.settingsManager.getSubagentEnableExperiments();
+									default:
+										return undefined;
+								}
+							},
+						},
+						maxConcurrent: this.settingsManager.getSubagentMaxConcurrent(),
+						maxParallelTasks: this.settingsManager.getSubagentMaxParallelTasks(),
+						worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
+						getParentContext: () => ({
+							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
+							thinkingLevel: this.thinkingLevel,
+						}),
+						resolveModel: (modelId) => {
+							const match = findExactModelReferenceMatch(modelId, [...this._modelRuntime.getModels()]);
+							return match ? `${match.provider}/${match.id}` : undefined;
+						},
+						onBackgroundSettled: (taskId, result) => {
+							const failed = isFailedSubagentResult(result);
+							const output = result.finalOutput || result.errorMessage || "(no output)";
+							const text = failed
+								? `Background task ${taskId} (${result.role}) failed${
+										result.errorMessage ? `: ${result.errorMessage}` : ` with exit code ${result.exitCode}`
+									}.\n\n${output}`
+								: `Background task ${taskId} (${result.role}) completed.\n\n${output}`;
+							void this.sendCustomMessage(
+								{
+									customType: BG_CUSTOM_MESSAGE_TYPE,
+									content: [{ type: "text", text }],
+									display: true,
+									details: {
+										taskId,
+										status: failed ? "failed" : "completed",
+										role: result.role,
+										exitCode: result.exitCode,
+										finalOutput: output,
+									},
+								},
+								{ triggerTurn: true, deliverAs: "nextTurn" },
+							).catch((err: unknown) => {
+								this._extensionRunner.emitError({
+									extensionPath: "<subagent>",
+									event: "background_result",
+									error: err instanceof Error ? err.message : String(err),
+								});
+							});
+						},
+					},
 				});
 
 		this._baseToolDefinitions = new Map(
