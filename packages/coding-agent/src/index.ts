@@ -29,6 +29,12 @@ export {
 	newTaskSpanId,
 	startSubagentTask,
 } from "./core/analytics-store.ts";
+// Native subagents (experiments/registry/worktree helpers stay at the core barrel)
+export type {
+	SubagentEvent,
+	SubagentRunner,
+	SubagentSpec,
+} from "./core/subagent/index.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {

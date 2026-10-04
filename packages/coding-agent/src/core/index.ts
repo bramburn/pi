@@ -78,3 +78,5 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+// Native subagents (full surface; package root promotes only the three core types)
+export * from "./subagent/index.ts";

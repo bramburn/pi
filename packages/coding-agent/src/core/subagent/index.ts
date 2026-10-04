@@ -3,12 +3,18 @@
  *
  * The orchestrator defines each subagent inline (role + instructions, optional
  * model and tool allowlist) and dispatches it through the `subagent` tool.
- * This module owns the types, the runner seam, and the supporting stores.
+ * This module owns the types, the runner seam, the supporting stores, and the
+ * (flag-gated) experiments surface.
  *
  * Everything runtime-specific is confined to `runtime.ts` and
  * `bun-process-runner.ts` so the `SubagentRunner` interface can be
  * reimplemented against an in-process `AgentSession` without touching the tool
  * surface. This module is Bun-only: no `node:child_process`, no Node fallback.
+ *
+ * Public-API tiers (Q4): `SubagentSpec` / `SubagentRunner` / `SubagentEvent`
+ * are promoted to the package root. The experiments/registry/worktree helpers
+ * stay at this level — importable by other code, but not committed as
+ * package-level API yet.
  */
 
 export type {
@@ -18,16 +24,68 @@ export type {
 	BackgroundUsage,
 	TaskStatus,
 } from "./background.ts";
-export { _resetBackgroundRegistryForTests, getBackgroundRegistry, RegistryLockError } from "./background.ts";
+export { BG_CUSTOM_MESSAGE_TYPE, _resetBackgroundRegistryForTests, getBackgroundRegistry, RegistryLockError, startBackgroundSubagent } from "./background.ts";
 export type { BunProcessRunnerOptions } from "./bun-process-runner.ts";
 export { createBunProcessRunner, getPiInvocation } from "./bun-process-runner.ts";
+export {
+	appendExperimentLogEvent,
+	addExperiment,
+	ExperimentRegistryLockError,
+	experimentDir,
+	experimentsDir,
+	ensureExperimentLog,
+	type ExperimentResult,
+	type ExperimentRow,
+	type ExperimentStatus,
+	getExperiment,
+	listExperiments,
+	logPath,
+	makeExperimentId,
+	readRegistry,
+	type RegistryFile,
+	REGISTRY_VERSION,
+	updateExperiment,
+	withWriteLock,
+	writeRegistry,
+} from "./experiment-registry.ts";
+export {
+	createExperimentToolDefinitions,
+	createExperimentTools,
+	EXPERIMENT_TOOL_NAMES,
+	type ExperimentToolName,
+	shouldRegisterExperimentTools,
+} from "./experiment-tools.ts";
+export {
+	clearDashboard,
+	type ExperimentsUi,
+	renderBackgroundPill,
+	renderDashboardLines,
+	renderExperimentsStatusPill,
+	showDashboard,
+	UI_KEYS,
+} from "./experiments-dashboard.ts";
+export { type ResearchModeOptions, ResearchModeTracker } from "./research-mode.ts";
 export { getBun, isBunRuntime } from "./runtime.ts";
 export type { BunApi, BunReadableStream, BunShell, BunShellResult, BunSpawnOptions, BunSubprocess } from "./runtime.ts";
+export { formatTokens, formatUsageStats, getDisplayItems, renderSubagentCall, renderSubagentResult } from "./render.ts";
+export type { DisplayItem } from "./render.ts";
 export type { ShellOptions, ShellResult } from "./shell.ts";
 export { runGit, runShell, runShellLine } from "./shell.ts";
+export { buildStatusInjection } from "./status-injector.ts";
 export { collectStream, createStreamPump } from "./stream.ts";
 export type { CollectedStream, StreamPump } from "./stream.ts";
-export { buildStatusInjection } from "./status-injector.ts";
+export {
+	createSubagentTool,
+	createSubagentToolDefinition,
+	PER_TASK_OUTPUT_CAP,
+	resolveModelOverrides,
+	shouldRegisterSubagentTool,
+	subagentSchema,
+	type SubagentSettingsReader,
+	type SubagentToolDetails,
+	type SubagentToolInput,
+	type SubagentToolOptions,
+} from "./subagent-tool.ts";
 export type {
 	SubagentEvent,
 	SubagentEventListener,
@@ -39,3 +97,19 @@ export type {
 	SubagentUsage,
 } from "./types.ts";
 export { createEmptyUsage, getSubagentResultOutput, isFailedSubagentResult } from "./types.ts";
+export type {
+	GitResult,
+	WorktreeCreateResult,
+	WorktreeDiffResult,
+} from "./worktree.ts";
+export {
+	cherryPickFromBranch,
+	createWorktree,
+	currentHead,
+	diffVsParent,
+	isGitRepo,
+	listWorktrees,
+	pruneWorktrees,
+	removeWorktree,
+	squashSinceParent,
+} from "./worktree.ts";
