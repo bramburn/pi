@@ -99,7 +99,7 @@ The registry lives at `<repo>/.pi-experiments/registry.json` (format version 1).
 
 Research Mode is a suggestion, never an automatic action: when the same tool error (normalised to ignore line numbers and timestamps) repeats `subagent.researchModeTriggerCount` times in a row (default 3), the tracker notifies that a minimal repro in a fresh scratch worktree may be worth trying and appends a `RESEARCH_MODE_TRIGGERED` event to the active experiment's log. It never spawns worktrees on its own.
 
-> **Wiring status:** the research-mode tracker and the experiments dashboard (keybinding `app.subagent.experimentsDashboard`, default `Ctrl+E`) ship as UI-seam modules; their interactive wiring (the tool-result watcher and the keybinding dispatch) is not enabled yet. The settings and the keybinding are reserved for them.
+> **Interactive wiring:** with `subagent.enableExperiments` on, `Ctrl+E` (`app.subagent.experimentsDashboard`) toggles the dashboard below the editor (`Esc` closes it), and the footer shows an experiments pill and a background-task pill as related tools run. The research-mode watcher runs in every session with the flag on: the suggestion is a warning notification plus the `RESEARCH_MODE_TRIGGERED` log event.
 
 ## Coexistence with the example extension
 

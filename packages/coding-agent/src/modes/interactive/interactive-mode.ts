@@ -110,6 +110,15 @@ import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../cor
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
+import { getBackgroundRegistry } from "../../core/subagent/background.ts";
+import {
+	clearDashboard,
+	type ExperimentsUi,
+	renderBackgroundPill,
+	renderExperimentsStatusPill,
+	showDashboard,
+	UI_KEYS,
+} from "../../core/subagent/experiments-dashboard.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
@@ -620,6 +629,9 @@ export class InteractiveMode {
 
 	// Auto-compaction state
 	private autoCompactionEscapeHandler?: () => void;
+	// Experiments dashboard (subagent.enableExperiments, plan 4.6)
+	private experimentsDashboardOpen = false;
+	private experimentsDashboardEscapeHandler?: () => void;
 
 	// Auto-retry state
 	private retryEscapeHandler?: () => void;
@@ -2929,6 +2941,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.subagent.experimentsDashboard", () => this.toggleExperimentsDashboard());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -3470,6 +3483,9 @@ export class InteractiveMode {
 					component.updateResult({ ...event.result, isError: event.isError });
 					this.pendingTools.delete(event.toolCallId);
 					this.ui.requestRender();
+				}
+				if (event.toolName === "subagent" || event.toolName.startsWith("experiment_")) {
+					this.updateSubagentStatusPills();
 				}
 				break;
 			}
@@ -4356,6 +4372,69 @@ export class InteractiveMode {
 		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
 		this.updateThinkingBlockVisibility();
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
+	}
+
+	// =========================================================================
+	// Experiments dashboard and status pills (subagent.enableExperiments)
+	// =========================================================================
+
+	/** `ExperimentsUi` adapter over the extension UI surface (plan 4.6). */
+	private createExperimentsUi(): ExperimentsUi {
+		return {
+			mode: "tui",
+			setWidget: (key, lines, options) =>
+				this.setExtensionWidget(
+					key,
+					lines,
+					options?.placement === "belowEditor" ? { placement: "belowEditor" } : undefined,
+				),
+			setStatus: (key, text) => this.setExtensionStatus(key, text),
+			notify: (message, type) => this.showExtensionNotify(message, type),
+		};
+	}
+
+	private toggleExperimentsDashboard(): void {
+		if (!this.settingsManager.getSubagentEnableExperiments()) {
+			this.showStatus("Experiments dashboard is off. Set subagent.enableExperiments to true.");
+			return;
+		}
+		if (this.experimentsDashboardOpen) {
+			this.closeExperimentsDashboard();
+			return;
+		}
+		showDashboard(this.createExperimentsUi(), theme, this.sessionManager.getCwd());
+		this.experimentsDashboardOpen = true;
+		this.experimentsDashboardEscapeHandler = this.defaultEditor.onEscape;
+		this.defaultEditor.onEscape = () => this.closeExperimentsDashboard();
+	}
+
+	private closeExperimentsDashboard(): void {
+		if (!this.experimentsDashboardOpen) return;
+		this.experimentsDashboardOpen = false;
+		clearDashboard(this.createExperimentsUi());
+		if (this.experimentsDashboardEscapeHandler) {
+			this.defaultEditor.onEscape = this.experimentsDashboardEscapeHandler;
+			this.experimentsDashboardEscapeHandler = undefined;
+		}
+	}
+
+	/** Footer pills for experiments and background tasks (plan 4.6 surface). */
+	private updateSubagentStatusPills(): void {
+		if (this.settingsManager.getSubagentEnableExperiments()) {
+			this.setExtensionStatus(
+				UI_KEYS.STATUS_KEY,
+				renderExperimentsStatusPill(theme, this.sessionManager.getCwd(), true),
+			);
+		}
+		const tasks = getBackgroundRegistry().snapshot().tasks;
+		this.setExtensionStatus(
+			UI_KEYS.BG_STATUS_KEY,
+			renderBackgroundPill(
+				theme,
+				tasks.filter((t) => t.status === "running" || t.status === "pending").length,
+				tasks.length,
+			),
+		);
 	}
 
 	private async handleOpenExternalEditor(): Promise<void> {

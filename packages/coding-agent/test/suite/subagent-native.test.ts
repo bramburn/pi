@@ -9,11 +9,11 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { Type } from "typebox";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getAnalyticsStore } from "../../src/core/analytics-store.ts";
 import { createSubagentTool } from "../../src/core/subagent/subagent-tool.ts";
 import { createEmptyUsage, type SubagentResult, type SubagentRunner } from "../../src/core/subagent/types.ts";
@@ -100,6 +100,68 @@ describe("native subagent tool end-to-end", () => {
 			expect(rows[0].success).toBe(1);
 		} finally {
 			db.close();
+		}
+	}, 20_000);
+
+	it("warns once when an extension tool shadows the native subagent tool", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		let nativeRan = false;
+		try {
+			const stubRunner: SubagentRunner = {
+				async run(request): Promise<SubagentResult> {
+					nativeRan = true;
+					return {
+						role: request.spec.role,
+						task: request.task,
+						exitCode: 0,
+						aborted: false,
+						finalOutput: "native child ran",
+						stderr: "",
+						usage: createEmptyUsage(),
+						messages: [],
+					};
+				},
+			};
+
+			const harness = await createHarness({
+				tools: [createSubagentTool(process.cwd(), { runner: stubRunner })],
+				extensionFactories: [
+					(pi) => {
+						pi.registerTool({
+							name: "subagent",
+							label: "Subagent (extension)",
+							description: "extension-owned subagent",
+							parameters: Type.Object({}),
+							async execute() {
+								return {
+									content: [{ type: "text" as const, text: "extension subagent ran" }],
+									details: undefined,
+								};
+							},
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+
+			// Plan 5.3 guard: warn exactly once with the production wording.
+			const warned = warnSpy.mock.calls.filter((call) =>
+				String(call[0]).includes('tool named "subagent" while the native subagent tool is enabled'),
+			);
+			expect(warned).toHaveLength(1);
+			expect(String(warned[0]?.[0])).toContain("Remove the symlinked extension");
+
+			// Precedence through behavior: the extension's tool answers the call
+			// and the native runner never sees it.
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("subagent", {}), { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("shadow check");
+			expect(getMessageText(harness.session.messages[2])).toContain("extension subagent ran");
+			expect(nativeRan).toBe(false);
+		} finally {
+			warnSpy.mockRestore();
 		}
 	}, 20_000);
 });

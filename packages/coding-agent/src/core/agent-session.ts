@@ -113,9 +113,11 @@ import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager 
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
-import { BG_CUSTOM_MESSAGE_TYPE } from "./subagent/background.ts";
-import { isFailedSubagentResult } from "./subagent/types.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import { BG_CUSTOM_MESSAGE_TYPE } from "./subagent/background.ts";
+import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
+import { ResearchModeTracker } from "./subagent/research-mode.ts";
+import { isFailedSubagentResult } from "./subagent/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -384,6 +386,7 @@ export class AgentSession {
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _subagentToolCollisionWarned = false;
+	private _researchMode?: ResearchModeTracker;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -2886,6 +2889,14 @@ export class AgentSession {
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
 			toolRegistry.set(tool.name, tool);
 		}
+		// Research Mode watcher (plan 4.3): observe every tool outcome so a
+		// repeated identical error can trigger the suggestion. Telemetry-like —
+		// never alters the result or the throw.
+		if (this._researchMode) {
+			for (const tool of [...toolRegistry.values()]) {
+				toolRegistry.set(tool.name, this._wrapWithResearchModeWatcher(tool));
+			}
+		}
 		this._toolRegistry = toolRegistry;
 
 		const nextActiveToolNames = (
@@ -2911,6 +2922,43 @@ export class AgentSession {
 		}
 
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
+	}
+
+	/**
+	 * Research Mode watcher (plan 4.3): feed tool outcomes to the tracker so
+	 * `subagent.researchModeTriggerCount` consecutive identical errors trigger
+	 * the suggestion. Telemetry-like: never alters the result or the throw.
+	 */
+	private _wrapWithResearchModeWatcher(tool: AgentTool): AgentTool {
+		const tracker = this._researchMode;
+		if (!tracker) return tool;
+		return {
+			...tool,
+			execute: async (...args: Parameters<AgentTool["execute"]>) => {
+				try {
+					const result = await tool.execute(...args);
+					this._feedResearchMode(tool.name, false, undefined, tracker);
+					return result;
+				} catch (error) {
+					this._feedResearchMode(tool.name, true, error instanceof Error ? error.message : String(error), tracker);
+					throw error;
+				}
+			},
+		};
+	}
+
+	private _feedResearchMode(
+		toolName: string,
+		isError: boolean,
+		errorText: string | undefined,
+		tracker: ResearchModeTracker,
+	): void {
+		try {
+			const experimentLogPath = getActiveExperimentLogPath(this._cwd);
+			tracker.recordToolResult(this.sessionManager.getSessionId(), toolName, isError, errorText, experimentLogPath);
+		} catch {
+			// Watcher failures must never affect tool execution.
+		}
 	}
 
 	private _buildRuntime(options: {
@@ -2991,6 +3039,16 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+
+		// Research Mode watcher (plan 4.3): built before the tool registry so
+		// `_refreshToolRegistry` can decorate tool results with it. Gated on the
+		// experiments flag like the rest of the surface.
+		this._researchMode = this.settingsManager.getSubagentEnableExperiments()
+			? new ResearchModeTracker({
+					threshold: this.settingsManager.getSubagentResearchModeTriggerCount(),
+					notify: (message, type) => this._extensionUIContext?.notify(message, type),
+				})
+			: undefined;
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {

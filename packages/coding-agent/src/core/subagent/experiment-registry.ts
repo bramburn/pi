@@ -234,6 +234,17 @@ export function listExperiments(repoRoot: string, status?: ExperimentStatus | "a
 	return reg.experiments.filter((r) => r.status === status);
 }
 
+/**
+ * The experiment a Research Mode trigger logs against: the newest row still
+ * in flight (scaffolded or running). Undefined when nothing is active.
+ */
+export function getActiveExperimentLogPath(repoRoot: string): string | undefined {
+	const active = listExperiments(repoRoot, "all").filter((r) => r.status === "scaffolded" || r.status === "running");
+	if (active.length === 0) return undefined;
+	const newest = active.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b));
+	return logPath(repoRoot, newest.id);
+}
+
 export function makeExperimentId(approach: string, now: Date = new Date()): string {
 	const stamp = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
 	const slug = approach
