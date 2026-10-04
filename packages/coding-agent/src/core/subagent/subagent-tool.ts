@@ -143,6 +143,13 @@ export interface SubagentToolOptions {
 	/** Parent session model + thinking level, read at dispatch time for inheritance. */
 	getParentContext?: () => { model?: string; thinkingLevel?: ThinkingLevel };
 	/**
+	 * Resolve a requested model id to its canonical `provider/model` form.
+	 * Return undefined for unknown ids — the call then fails with a tool error
+	 * naming the model instead of dispatching a doomed child. Wired from
+	 * `findExactModelReferenceMatch` in `model-resolver.ts` at the harness.
+	 */
+	resolveModel?: (modelId: string) => string | undefined;
+	/**
 	 * Called once per background subagent when it settles. The harness wires this
 	 * to session result injection; without it the result still lands in the
 	 * registry and the task log.
@@ -302,6 +309,42 @@ function specFromInput(input: {
 	};
 }
 
+/**
+ * Validate and canonicalize `model` overrides before anything dispatches.
+ *
+ * Every spec position is checked (single fields, `tasks`, `chain`), and the
+ * first unknown model aborts the whole call with an error naming it so the
+ * orchestrator can retry with a valid id. Resolved specs carry the canonical
+ * `provider/model` form.
+ */
+export function resolveModelOverrides(
+	input: SubagentToolInput,
+	resolveModel: (modelId: string) => string | undefined,
+): { input: SubagentToolInput; error?: string } {
+	const next: SubagentToolInput = {
+		...input,
+		...(input.tasks ? { tasks: input.tasks.map((t) => ({ ...t })) } : {}),
+		...(input.chain ? { chain: input.chain.map((s) => ({ ...s })) } : {}),
+	};
+	const specs: Array<{ role?: string; model?: string }> = [];
+	if (next.role !== undefined) specs.push(next);
+	for (const task of next.tasks ?? []) specs.push(task);
+	for (const step of next.chain ?? []) specs.push(step);
+
+	for (const spec of specs) {
+		if (spec.model === undefined) continue;
+		const canonical = resolveModel(spec.model);
+		if (canonical === undefined) {
+			return {
+				input,
+				error: `Unknown model "${spec.model}" for subagent "${spec.role ?? "subagent"}". Omit \`model\` to inherit this session's model, or pass a registered model id (run pi --list-models to see them).`,
+			};
+		}
+		spec.model = canonical;
+	}
+	return { input: next };
+}
+
 export function createSubagentToolDefinition(
 	cwd: string,
 	options?: SubagentToolOptions,
@@ -333,9 +376,19 @@ export function createSubagentToolDefinition(
 			return renderSubagentResult(result, options, theme);
 		},
 
-		async execute(_toolCallId, params, signal, onUpdate) {
+		async execute(_toolCallId, rawParams, signal, onUpdate) {
 			const parent = options?.getParentContext?.() ?? {};
 			const runner = getRunner();
+
+			const resolution = options?.resolveModel ? resolveModelOverrides(rawParams, options.resolveModel) : { input: rawParams };
+			if (resolution.error !== undefined) {
+				return {
+					content: [{ type: "text", text: resolution.error }],
+					details: { mode: "single", results: [] },
+					isError: true,
+				};
+			}
+			const params = resolution.input;
 
 			const singleSpec = params.role && params.instructions?.trim() ? specFromInput({ ...params, role: params.role, instructions: params.instructions }) : undefined;
 			const tasks = params.tasks ?? [];

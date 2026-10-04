@@ -6,6 +6,20 @@ import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 import { renderWorkspaceContext } from "./system-prompt-render.ts";
 
+/**
+ * Orchestration guidance for the native `subagent` tool (plan Q5).
+ *
+ * Rendered into the system prompt only while the tool is active — it teaches
+ * when to delegate, how to author self-contained instructions, and how to pick
+ * modes and models.
+ */
+export const SUBAGENT_USAGE = `- Delegate verbose, self-contained work to subagents: codebase-wide searches, test runs, multi-file reviews. Keep short or conversation-dependent work yourself.
+- A subagent runs with a fresh context and never sees this conversation. \`instructions\` must carry everything it needs: paths, constraints, and a clear definition of done.
+- Give each subagent a short \`role\` label (e.g. "code-reviewer", "scout") and the full task in \`instructions\`.
+- Use \`tasks: [...]\` for independent investigations that can run in parallel. Use \`chain: [...]\` for dependent steps: \`{previous}\` in a step's instructions is replaced with the previous step's output, and the chain stops at the first failure.
+- Omit \`model\` to inherit this session's model; choose a cheaper model for mechanical sweeps and a stronger one for review or reasoning-heavy work.
+- Pass \`background: true\` when the work should keep running while you stay responsive; the result is delivered when it settles.`;
+
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
@@ -134,13 +148,20 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
+	// Subagent orchestration guidance only while the native tool is active.
+	// Leading and trailing newlines join cleanly with the surrounding blank
+	// lines; empty keeps the prompt byte-identical to the pre-subagent text.
+	const subagentSection = tools.includes("subagent")
+		? `\nSubagent delegation (the \`subagent\` tool):\n${SUBAGENT_USAGE}\n`
+		: "";
+
 	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
 Available tools:
 ${toolsList}
 
 In addition to the tools above, you may have access to other custom tools depending on the project.
-
+${subagentSection}
 Guidelines:
 ${guidelines}
 
