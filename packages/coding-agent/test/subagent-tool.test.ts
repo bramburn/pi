@@ -70,7 +70,13 @@ describe("subagent tool model validation", () => {
 	it("returns a tool error naming the model instead of throwing", async () => {
 		const capture = { models: [] as string[] };
 		const tool = createSubagentToolDefinition(process.cwd(), { runner: stubRunner(capture), resolveModel });
-		const result = await tool.execute("tc1", { role: "scout", instructions: "x", model: "nope-9" }, undefined, undefined, undefined as never);
+		const result = await tool.execute(
+			"tc1",
+			{ role: "scout", instructions: "x", model: "nope-9" },
+			undefined,
+			undefined,
+			undefined as never,
+		);
 		expect((result as { isError?: boolean }).isError).toBe(true);
 		expect(result.content[0]).toMatchObject({ type: "text" });
 		expect((result.content[0] as { text: string }).text).toContain('Unknown model "nope-9"');
@@ -80,7 +86,13 @@ describe("subagent tool model validation", () => {
 	it("passes the canonical model to the runner", async () => {
 		const capture = { models: [] as string[] };
 		const tool = createSubagentToolDefinition(process.cwd(), { runner: stubRunner(capture), resolveModel });
-		await tool.execute("tc2", { role: "scout", instructions: "x", model: "cheap-1" }, undefined, undefined, undefined as never);
+		await tool.execute(
+			"tc2",
+			{ role: "scout", instructions: "x", model: "cheap-1" },
+			undefined,
+			undefined,
+			undefined as never,
+		);
 		expect(capture.models).toEqual(["prov/cheap-1.0"]);
 	});
 });
@@ -206,7 +218,12 @@ describe("subagent dispatch modes", () => {
 		const tool = createSubagentToolDefinition(process.cwd(), { runner });
 		const result = await tool.execute(
 			"t4",
-			{ chain: [{ role: "s1", instructions: "a" }, { role: "s2", instructions: "b" }] },
+			{
+				chain: [
+					{ role: "s1", instructions: "a" },
+					{ role: "s2", instructions: "b" },
+				],
+			},
 			undefined,
 			undefined,
 			undefined as never,
@@ -266,7 +283,12 @@ describe("subagent dispatch modes", () => {
 		const tool = createSubagentToolDefinition(process.cwd(), { runner });
 		const result = await tool.execute(
 			"t6",
-			{ tasks: [{ role: "good", instructions: "1" }, { role: "bad", instructions: "2" }] },
+			{
+				tasks: [
+					{ role: "good", instructions: "1" },
+					{ role: "bad", instructions: "2" },
+				],
+			},
 			undefined,
 			undefined,
 			undefined as never,

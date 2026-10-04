@@ -19,18 +19,18 @@
  */
 
 import { join } from "node:path";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { DEFAULT_SUBAGENT_SETTINGS } from "../defaults.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
 import {
 	addExperiment,
 	appendExperimentLogEvent,
-	ensureExperimentLog,
 	type ExperimentRow,
 	type ExperimentStatus,
+	ensureExperimentLog,
 	getExperiment,
 	listExperiments,
 	logPath,
@@ -38,8 +38,8 @@ import {
 	updateExperiment,
 } from "./experiment-registry.ts";
 import { getBun } from "./runtime.ts";
-import type { SubagentToolOptions } from "./subagent-tool.ts";
 import { runShell, runShellLine, type ShellResult } from "./shell.ts";
+import type { SubagentToolOptions } from "./subagent-tool.ts";
 import {
 	cherryPickFromBranch,
 	createWorktree,
@@ -299,7 +299,9 @@ export function createExperimentToolDefinitions(
 			try {
 				parentCommit = params.parent_commit ?? (await currentHead(cwd));
 			} catch (err) {
-				return errorToolResult(`Could not resolve parent commit: ${err instanceof Error ? err.message : String(err)}`);
+				return errorToolResult(
+					`Could not resolve parent commit: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 			const id = makeExperimentId(params.approach_name);
 			const work = await createWorktree(cwd, params.approach_name, parentCommit, worktreeBase);
@@ -344,14 +346,19 @@ export function createExperimentToolDefinitions(
 	const experiment_run: ToolDefinition = {
 		name: "experiment_run",
 		label: "Experiment Run",
-		description: "Run a shell command inside the experiment's worktree. Output is captured to log.jsonl and returned.",
+		description:
+			"Run a shell command inside the experiment's worktree. Output is captured to log.jsonl and returned.",
 		parameters: RunParams,
 		async execute(_id, params: Static<typeof RunParams>, signal, _onUpdate) {
 			const row = getExperiment(cwd, params.experiment_id);
 			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
 			const logFile = logPath(cwd, row.id);
 			ensureExperimentLog(logFile);
-			appendExperimentLogEvent(logFile, { type: "RUN_STARTED", command: params.command, timeoutMs: params.timeout_ms });
+			appendExperimentLogEvent(logFile, {
+				type: "RUN_STARTED",
+				command: params.command,
+				timeoutMs: params.timeout_ms,
+			});
 			const result = await runCommand(params.command, {
 				cwd: row.worktreePath,
 				...(params.timeout_ms === undefined ? {} : { timeoutMs: params.timeout_ms }),
@@ -392,7 +399,9 @@ export function createExperimentToolDefinitions(
 			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
 			const detector = await detectTestRunner(row.worktreePath);
 			if (!detector) {
-				return errorToolResult("Could not detect a test runner. Pass an explicit command via experiment_run instead.");
+				return errorToolResult(
+					"Could not detect a test runner. Pass an explicit command via experiment_run instead.",
+				);
 			}
 			const command = params.filter
 				? `${detector.command} ${detector.filterFlag} ${`'${params.filter.replace(/'/g, "'\\''")}'`}`
@@ -442,7 +451,8 @@ export function createExperimentToolDefinitions(
 					`git diff failed (exit ${diff.raw.exitCode}): ${diff.raw.stderr.trim() || diff.raw.stdout.trim()}`,
 				);
 			}
-			const commitList = diff.commits.map((c) => `${c.sha.slice(0, 7)} ${c.subject}`).join("\n") || "(no commits yet)";
+			const commitList =
+				diff.commits.map((c) => `${c.sha.slice(0, 7)} ${c.subject}`).join("\n") || "(no commits yet)";
 			return successToolResult(
 				`files changed: ${diff.filesChanged}\ninsertions: ${diff.insertions}\ndeletions: ${diff.deletions}\ncommits:\n${commitList}\n\n--- diff (truncated) ---\n${tailOf(diff.diff, 80)}`,
 				{
@@ -485,10 +495,14 @@ export function createExperimentToolDefinitions(
 				}
 				const pick = await cherryPickFromBranch(cwd, row.branch, head.stdout.trim());
 				if (pick.exitCode !== 0) {
-					return errorToolResult(`Cherry-pick failed (exit ${pick.exitCode}): ${pick.stderr.trim() || pick.stdout.trim()}`);
+					return errorToolResult(
+						`Cherry-pick failed (exit ${pick.exitCode}): ${pick.stderr.trim() || pick.stdout.trim()}`,
+					);
 				}
 				await finalizeExperimentMerge(cwd, row, "cherry-pick", pick.newCommit, onRegistryChanged);
-				return successToolResult(`Cherry-picked ${row.branch} into main as ${pick.newCommit?.slice(0, 7) ?? "(no commit)"}`);
+				return successToolResult(
+					`Cherry-picked ${row.branch} into main as ${pick.newCommit?.slice(0, 7) ?? "(no commit)"}`,
+				);
 			}
 
 			if (params.strategy === "squash") {
@@ -500,10 +514,14 @@ export function createExperimentToolDefinitions(
 					return errorToolResult(`Squash failed (exit ${sq.exitCode}): ${sq.stderr.trim() || sq.stdout.trim()}`);
 				}
 				if (sq.wasNoOp) {
-					return errorToolResult("No commits to squash. The experiment worktree has no commits beyond the parent.");
+					return errorToolResult(
+						"No commits to squash. The experiment worktree has no commits beyond the parent.",
+					);
 				}
 				await finalizeExperimentMerge(cwd, row, "squash", sq.newCommit, onRegistryChanged);
-				return successToolResult(`Squashed ${row.branch} into main as ${sq.newCommit?.slice(0, 7) ?? "(no commit)"}`);
+				return successToolResult(
+					`Squashed ${row.branch} into main as ${sq.newCommit?.slice(0, 7) ?? "(no commit)"}`,
+				);
 			}
 
 			const merge = await runShell(
@@ -512,10 +530,18 @@ export function createExperimentToolDefinitions(
 				{ cwd },
 			);
 			if (merge.exitCode !== 0) {
-				return errorToolResult(`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`);
+				return errorToolResult(
+					`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`,
+				);
 			}
 			const head = await runShell("git", ["rev-parse", "HEAD"], { cwd });
-			await finalizeExperimentMerge(cwd, row, "merge", head.exitCode === 0 ? head.stdout.trim() : undefined, onRegistryChanged);
+			await finalizeExperimentMerge(
+				cwd,
+				row,
+				"merge",
+				head.exitCode === 0 ? head.stdout.trim() : undefined,
+				onRegistryChanged,
+			);
 			return successToolResult(`Merged ${row.branch} into main as ${head.stdout.trim().slice(0, 7)}`);
 		},
 	};
@@ -583,7 +609,9 @@ export function createExperimentToolDefinitions(
 			}
 			const text = rows
 				.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-				.map((r) => `[${r.status}] ${r.approach} ${r.id} (${r.createdAt.slice(0, 16)}) ${truncate(r.hypothesis, 60)}`)
+				.map(
+					(r) => `[${r.status}] ${r.approach} ${r.id} (${r.createdAt.slice(0, 16)}) ${truncate(r.hypothesis, 60)}`,
+				)
 				.join("\n");
 			return successToolResult(`${rows.length} experiment(s):\n\n${text}`);
 		},

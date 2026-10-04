@@ -23,14 +23,14 @@
  * needed here.
  */
 
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import { isAbsolute, resolve as resolvePath } from "node:path";
 import { type Static, Type } from "typebox";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
-import { getBackgroundRegistry, type BackgroundRegistry, startBackgroundSubagent } from "./background.ts";
+import { type BackgroundRegistry, getBackgroundRegistry, startBackgroundSubagent } from "./background.ts";
 import { createBunProcessRunner } from "./bun-process-runner.ts";
 import { renderSubagentCall, renderSubagentResult } from "./render.ts";
 import { isBunRuntime } from "./runtime.ts";
@@ -54,29 +54,36 @@ const DEFAULT_MAX_PARALLEL_TASKS = 8;
 
 const subagentSpecSchema = Type.Object({
 	role: Type.String({
-		description: "Short specialist label for the subagent, e.g. 'code-reviewer' or 'scout'. Shown in the UI and analytics.",
+		description:
+			"Short specialist label for the subagent, e.g. 'code-reviewer' or 'scout'. Shown in the UI and analytics.",
 	}),
 	instructions: Type.String({
 		description:
 			"The complete task and behavioral guidance. The subagent runs with a fresh context and never sees this conversation, so include every piece of context it needs to succeed.",
 	}),
 	model: Type.Optional(
-		Type.String({ description: "Model id for the subagent. Omit to inherit this session's model and thinking level." }),
+		Type.String({
+			description: "Model id for the subagent. Omit to inherit this session's model and thinking level.",
+		}),
 	),
 	tools: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Allowlist of built-in tool names (read, bash, edit, write, grep, find, ls). Omit for the full coding set.",
+			description:
+				"Allowlist of built-in tool names (read, bash, edit, write, grep, find, ls). Omit for the full coding set.",
 		}),
 	),
 	cwd: Type.Optional(
-		Type.String({ description: "Working directory for the subagent. Omit to inherit this session's working directory." }),
+		Type.String({
+			description: "Working directory for the subagent. Omit to inherit this session's working directory.",
+		}),
 	),
 });
 
 export const subagentSchema = Type.Object({
 	role: Type.Optional(
 		Type.String({
-			description: "Short specialist label for the subagent, e.g. 'code-reviewer' or 'scout'. Shown in the UI and analytics.",
+			description:
+				"Short specialist label for the subagent, e.g. 'code-reviewer' or 'scout'. Shown in the UI and analytics.",
 		}),
 	),
 	instructions: Type.Optional(
@@ -86,19 +93,25 @@ export const subagentSchema = Type.Object({
 		}),
 	),
 	model: Type.Optional(
-		Type.String({ description: "Model id for the subagent. Omit to inherit this session's model and thinking level." }),
+		Type.String({
+			description: "Model id for the subagent. Omit to inherit this session's model and thinking level.",
+		}),
 	),
 	tools: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Allowlist of built-in tool names (read, bash, edit, write, grep, find, ls). Omit for the full coding set.",
+			description:
+				"Allowlist of built-in tool names (read, bash, edit, write, grep, find, ls). Omit for the full coding set.",
 		}),
 	),
 	cwd: Type.Optional(
-		Type.String({ description: "Working directory for the subagent. Omit to inherit this session's working directory." }),
+		Type.String({
+			description: "Working directory for the subagent. Omit to inherit this session's working directory.",
+		}),
 	),
 	tasks: Type.Optional(
 		Type.Array(subagentSpecSchema, {
-			description: "Independent subagent tasks to run in parallel. Mutually exclusive with role/instructions and chain.",
+			description:
+				"Independent subagent tasks to run in parallel. Mutually exclusive with role/instructions and chain.",
 		}),
 	),
 	chain: Type.Optional(
@@ -241,7 +254,7 @@ async function runOne(
 
 		const result = await runner.run(request, signal, listener);
 		const failed = isFailedSubagentResult(result);
-		endSubagentTask(spanId, !failed, failed ? result.errorMessage ?? `exit code ${result.exitCode}` : undefined);
+		endSubagentTask(spanId, !failed, failed ? (result.errorMessage ?? `exit code ${result.exitCode}`) : undefined);
 		return result;
 	} catch (err) {
 		// The run never started (spawn failure, runner rejection): report it as a
@@ -384,7 +397,9 @@ export function createSubagentToolDefinition(
 			const parent = options?.getParentContext?.() ?? {};
 			const runner = getRunner();
 
-			const resolution = options?.resolveModel ? resolveModelOverrides(rawParams, options.resolveModel) : { input: rawParams };
+			const resolution = options?.resolveModel
+				? resolveModelOverrides(rawParams, options.resolveModel)
+				: { input: rawParams };
 			if (resolution.error !== undefined) {
 				return {
 					content: [{ type: "text", text: resolution.error }],
@@ -394,7 +409,10 @@ export function createSubagentToolDefinition(
 			}
 			const params = resolution.input;
 
-			const singleSpec = params.role && params.instructions?.trim() ? specFromInput({ ...params, role: params.role, instructions: params.instructions }) : undefined;
+			const singleSpec =
+				params.role && params.instructions?.trim()
+					? specFromInput({ ...params, role: params.role, instructions: params.instructions })
+					: undefined;
 			const tasks = params.tasks ?? [];
 			const chain = params.chain ?? [];
 			const modeCount = Number(singleSpec !== undefined) + Number(tasks.length > 0) + Number(chain.length > 0);
@@ -553,7 +571,9 @@ export function createSubagentToolDefinition(
 					const done = allResults.filter((r) => r.exitCode !== -1).length;
 					const running = allResults.length - done;
 					onUpdate({
-						content: [{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` }],
+						content: [
+							{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
+						],
 						details: { mode: "parallel", results: [...allResults] },
 					});
 				};

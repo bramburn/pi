@@ -101,10 +101,7 @@ export function runGit(args: string[], cwd: string, signal?: AbortSignal): Promi
  * child's stdout from reaching the parent terminal, nothrow stops a non-zero
  * exit from rejecting. Order does not matter, but both are required.
  */
-async function executeDollar(
-	build: (shell: BunShell) => BunShellCommand,
-	options: ShellOptions,
-): Promise<ShellResult> {
+async function executeDollar(build: (shell: BunShell) => BunShellCommand, options: ShellOptions): Promise<ShellResult> {
 	const started = Date.now();
 	const bun = getBun();
 	const shell = options.cwd ? bun.$.cwd(options.cwd) : bun.$;

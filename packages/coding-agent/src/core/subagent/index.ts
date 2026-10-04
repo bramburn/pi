@@ -24,26 +24,32 @@ export type {
 	BackgroundUsage,
 	TaskStatus,
 } from "./background.ts";
-export { BG_CUSTOM_MESSAGE_TYPE, _resetBackgroundRegistryForTests, getBackgroundRegistry, RegistryLockError, startBackgroundSubagent } from "./background.ts";
+export {
+	_resetBackgroundRegistryForTests,
+	BG_CUSTOM_MESSAGE_TYPE,
+	getBackgroundRegistry,
+	RegistryLockError,
+	startBackgroundSubagent,
+} from "./background.ts";
 export type { BunProcessRunnerOptions } from "./bun-process-runner.ts";
 export { createBunProcessRunner, getPiInvocation } from "./bun-process-runner.ts";
 export {
-	appendExperimentLogEvent,
 	addExperiment,
+	appendExperimentLogEvent,
 	ExperimentRegistryLockError,
-	experimentDir,
-	experimentsDir,
-	ensureExperimentLog,
 	type ExperimentResult,
 	type ExperimentRow,
 	type ExperimentStatus,
+	ensureExperimentLog,
+	experimentDir,
+	experimentsDir,
 	getExperiment,
 	listExperiments,
 	logPath,
 	makeExperimentId,
-	readRegistry,
-	type RegistryFile,
 	REGISTRY_VERSION,
+	type RegistryFile,
+	readRegistry,
 	updateExperiment,
 	withWriteLock,
 	writeRegistry,
@@ -64,27 +70,27 @@ export {
 	showDashboard,
 	UI_KEYS,
 } from "./experiments-dashboard.ts";
-export { type ResearchModeOptions, ResearchModeTracker } from "./research-mode.ts";
-export { getBun, isBunRuntime } from "./runtime.ts";
-export type { BunApi, BunReadableStream, BunShell, BunShellResult, BunSpawnOptions, BunSubprocess } from "./runtime.ts";
-export { formatTokens, formatUsageStats, getDisplayItems, renderSubagentCall, renderSubagentResult } from "./render.ts";
 export type { DisplayItem } from "./render.ts";
+export { formatTokens, formatUsageStats, getDisplayItems, renderSubagentCall, renderSubagentResult } from "./render.ts";
+export { type ResearchModeOptions, ResearchModeTracker } from "./research-mode.ts";
+export type { BunApi, BunReadableStream, BunShell, BunShellResult, BunSpawnOptions, BunSubprocess } from "./runtime.ts";
+export { getBun, isBunRuntime } from "./runtime.ts";
 export type { ShellOptions, ShellResult } from "./shell.ts";
 export { runGit, runShell, runShellLine } from "./shell.ts";
 export { buildStatusInjection } from "./status-injector.ts";
-export { collectStream, createStreamPump } from "./stream.ts";
 export type { CollectedStream, StreamPump } from "./stream.ts";
+export { collectStream, createStreamPump } from "./stream.ts";
 export {
 	createSubagentTool,
 	createSubagentToolDefinition,
 	PER_TASK_OUTPUT_CAP,
 	resolveModelOverrides,
-	shouldRegisterSubagentTool,
-	subagentSchema,
 	type SubagentSettingsReader,
 	type SubagentToolDetails,
 	type SubagentToolInput,
 	type SubagentToolOptions,
+	shouldRegisterSubagentTool,
+	subagentSchema,
 } from "./subagent-tool.ts";
 export type {
 	SubagentEvent,

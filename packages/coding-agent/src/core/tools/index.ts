@@ -1,4 +1,20 @@
 export {
+	createExperimentToolDefinitions,
+	createExperimentTools,
+	EXPERIMENT_TOOL_NAMES,
+	type ExperimentToolName,
+	shouldRegisterExperimentTools,
+} from "../subagent/experiment-tools.ts";
+export {
+	createSubagentTool,
+	createSubagentToolDefinition,
+	type SubagentSettingsReader,
+	type SubagentToolDetails,
+	type SubagentToolInput,
+	type SubagentToolOptions,
+	shouldRegisterSubagentTool,
+} from "../subagent/subagent-tool.ts";
+export {
 	type BashOperations,
 	type BashSpawnContext,
 	type BashSpawnHook,
@@ -17,6 +33,7 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 } from "./edit.ts";
+export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createFindTool,
 	createFindToolDefinition,
@@ -25,23 +42,6 @@ export {
 	type FindToolInput,
 	type FindToolOptions,
 } from "./find.ts";
-export {
-	createSubagentTool,
-	createSubagentToolDefinition,
-	shouldRegisterSubagentTool,
-	type SubagentSettingsReader,
-	type SubagentToolDetails,
-	type SubagentToolInput,
-	type SubagentToolOptions,
-} from "../subagent/subagent-tool.ts";
-export {
-	createExperimentToolDefinitions,
-	createExperimentTools,
-	EXPERIMENT_TOOL_NAMES,
-	type ExperimentToolName,
-	shouldRegisterExperimentTools,
-} from "../subagent/experiment-tools.ts";
-export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createGrepTool,
 	createGrepToolDefinition,
@@ -107,8 +107,8 @@ import {
 import {
 	createSubagentTool,
 	createSubagentToolDefinition,
-	shouldRegisterSubagentTool,
 	type SubagentToolOptions,
+	shouldRegisterSubagentTool,
 } from "../subagent/subagent-tool.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
@@ -121,7 +121,17 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls" | "subagent" | ExperimentToolName;
+export type ToolName =
+	| "read"
+	| "bash"
+	| "powershell"
+	| "edit"
+	| "write"
+	| "grep"
+	| "find"
+	| "ls"
+	| "subagent"
+	| ExperimentToolName;
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",

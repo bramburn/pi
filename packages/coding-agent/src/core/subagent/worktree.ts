@@ -15,7 +15,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
+import { resolve as resolvePath } from "node:path";
 import { DEFAULT_SUBAGENT_SETTINGS } from "../defaults.ts";
 import { runShell } from "./shell.ts";
 

@@ -99,7 +99,9 @@ describe("subagent.* settings", () => {
 		// Wrong types arrive through hand-edited JSON; the getters must fall back.
 		writeFileSync(
 			join(agentDir, "settings.json"),
-			JSON.stringify({ subagent: { maxConcurrent: "many", enabled: "yes", enableExperiments: 1, worktreeBase: 42 } }),
+			JSON.stringify({
+				subagent: { maxConcurrent: "many", enabled: "yes", enableExperiments: 1, worktreeBase: 42 },
+			}),
 			"utf-8",
 		);
 		const fromFile = SettingsManager.create(projectDir, agentDir);

@@ -22,10 +22,15 @@ import { collectStream, createStreamPump } from "../src/core/subagent/stream.ts"
  * A stand-in for a subprocess pipe whose writer never closes: the grandchild
  * case, without needing a grandchild.
  */
-function createNeverClosingPipe(chunks: string[]): { getReader: () => { read: () => Promise<{ done: boolean; value?: Uint8Array }>; cancel: (reason?: unknown) => Promise<void>; releaseLock: () => void } } {
+function createNeverClosingPipe(chunks: string[]): {
+	getReader: () => {
+		read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+		cancel: (reason?: unknown) => Promise<void>;
+		releaseLock: () => void;
+	};
+} {
 	const encoder = new TextEncoder();
 	let index = 0;
-	let cancelled = false;
 	return {
 		getReader: () => ({
 			read: () => {
@@ -37,13 +42,8 @@ function createNeverClosingPipe(chunks: string[]): { getReader: () => { read: ()
 				// A surviving grandchild: the pipe stays open forever.
 				return new Promise<{ done: boolean; value?: Uint8Array }>(() => {});
 			},
-			cancel: () => {
-				cancelled = true;
-				return Promise.resolve();
-			},
-			releaseLock: () => {
-				cancelled = true;
-			},
+			cancel: () => Promise.resolve(),
+			releaseLock: () => {},
 		}),
 	};
 }
@@ -91,32 +91,40 @@ describe("subagent stream lifetime", () => {
 		expect(pump.text).toBe("x");
 	});
 
-	it.runIf(isBunRuntime())("a real grandchild-holding process does not hang collectStream", async () => {
-		const started = Date.now();
-		const proc = getBun().spawn(["bash", "-c", "sleep 30 & echo leaked-partial; exit 0"], {
-			stdout: "pipe",
-			stderr: "ignore",
-			stdin: "ignore",
-		});
-		const exitCode = await proc.exited;
-		const collected = await collectStream(proc.stdout, 500);
-		const elapsed = Date.now() - started;
+	it.runIf(isBunRuntime())(
+		"a real grandchild-holding process does not hang collectStream",
+		async () => {
+			const started = Date.now();
+			const proc = getBun().spawn(["bash", "-c", "sleep 30 & echo leaked-partial; exit 0"], {
+				stdout: "pipe",
+				stderr: "ignore",
+				stdin: "ignore",
+			});
+			const exitCode = await proc.exited;
+			const collected = await collectStream(proc.stdout, 500);
+			const elapsed = Date.now() - started;
 
-		expect(exitCode).toBe(0);
-		expect(collected.text).toContain("leaked-partial");
-		expect(elapsed).toBeLessThan(5_000);
-	}, 15_000);
+			expect(exitCode).toBe(0);
+			expect(collected.text).toContain("leaked-partial");
+			expect(elapsed).toBeLessThan(5_000);
+		},
+		15_000,
+	);
 
-	it.runIf(isBunRuntime())("a real closing process reports complete", async () => {
-		const proc = getBun().spawn(["bash", "-c", "echo done; exit 3"], {
-			stdout: "pipe",
-			stderr: "ignore",
-			stdin: "ignore",
-		});
-		const collected = await collectStream(proc.stdout, 2_000);
-		const exitCode = await proc.exited;
-		expect(collected.text.trim()).toBe("done");
-		expect(collected.complete).toBe(true);
-		expect(exitCode).toBe(3);
-	}, 15_000);
+	it.runIf(isBunRuntime())(
+		"a real closing process reports complete",
+		async () => {
+			const proc = getBun().spawn(["bash", "-c", "echo done; exit 3"], {
+				stdout: "pipe",
+				stderr: "ignore",
+				stdin: "ignore",
+			});
+			const collected = await collectStream(proc.stdout, 2_000);
+			const exitCode = await proc.exited;
+			expect(collected.text.trim()).toBe("done");
+			expect(collected.complete).toBe(true);
+			expect(exitCode).toBe(3);
+		},
+		15_000,
+	);
 });

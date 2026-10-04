@@ -74,7 +74,8 @@ export function renderExperimentsStatusPill(theme: Theme, repoRoot: string, acti
 function formatRow(theme: Theme, row: ReturnType<typeof listExperiments>[number]): string {
 	const status = formatStatus(row.status);
 	const elapsed = elapsedSince(row.createdAt);
-	const result = row.result.testPassed !== undefined ? `tests:${row.result.testPassed}P/${row.result.testFailed ?? 0}F` : "";
+	const result =
+		row.result.testPassed !== undefined ? `tests:${row.result.testPassed}P/${row.result.testFailed ?? 0}F` : "";
 	return (
 		theme.fg("muted", `[${status}] `) +
 		theme.fg("accent", row.approach) +

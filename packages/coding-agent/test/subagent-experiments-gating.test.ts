@@ -34,13 +34,26 @@ describe("experiment tool gating (subagent.enableExperiments)", () => {
 
 	it("registers all eight when the flag is on", () => {
 		const defs = createAllToolDefinitions(process.cwd(), { subagent: { settings: settingsWith(true) } });
-		expect(Object.keys(defs).filter((n) => n.startsWith("experiment_")).sort()).toEqual(experimentNames);
+		expect(
+			Object.keys(defs)
+				.filter((n) => n.startsWith("experiment_"))
+				.sort(),
+		).toEqual(experimentNames);
 
 		const defList = createCodingToolDefinitions(process.cwd(), { subagent: { settings: settingsWith(true) } });
-		expect(defList.map((d) => d.name).filter((n) => n.startsWith("experiment_")).sort()).toEqual(experimentNames);
+		expect(
+			defList
+				.map((d) => d.name)
+				.filter((n) => n.startsWith("experiment_"))
+				.sort(),
+		).toEqual(experimentNames);
 
 		const tools = createAllTools(process.cwd(), { subagent: { settings: settingsWith(true) } });
-		expect(Object.keys(tools).filter((n) => n.startsWith("experiment_")).sort()).toEqual(experimentNames);
+		expect(
+			Object.keys(tools)
+				.filter((n) => n.startsWith("experiment_"))
+				.sort(),
+		).toEqual(experimentNames);
 	});
 
 	it("never registers experiment tools as read-only", () => {

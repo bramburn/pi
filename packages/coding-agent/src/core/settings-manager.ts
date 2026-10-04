@@ -8,8 +8,8 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
-import { DEFAULT_SUBAGENT_SETTINGS } from "./defaults.ts";
 import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
+import { DEFAULT_SUBAGENT_SETTINGS } from "./defaults.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {

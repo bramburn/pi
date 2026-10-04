@@ -29,12 +29,6 @@ export {
 	newTaskSpanId,
 	startSubagentTask,
 } from "./core/analytics-store.ts";
-// Native subagents (experiments/registry/worktree helpers stay at the core barrel)
-export type {
-	SubagentEvent,
-	SubagentRunner,
-	SubagentSpec,
-} from "./core/subagent/index.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
@@ -287,6 +281,12 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
+// Native subagents (experiments/registry/worktree helpers stay at the core barrel)
+export type {
+	SubagentEvent,
+	SubagentRunner,
+	SubagentSpec,
+} from "./core/subagent/index.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

@@ -114,7 +114,9 @@ export function formatToolCall(toolName: string, args: Record<string, unknown>, 
 	}
 }
 
-export type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, unknown> };
+export type DisplayItem =
+	| { type: "text"; text: string }
+	| { type: "toolCall"; name: string; args: Record<string, unknown> };
 
 /** Flatten the child transcript into display items: assistant text and tool calls. */
 export function getDisplayItems(messages: Message[]): DisplayItem[] {
@@ -187,7 +189,11 @@ export function renderSubagentCall(args: SubagentToolInput, theme: Theme): Compo
 		return new Text(text, 0, 0);
 	}
 	const role = args.role || "...";
-	const preview = args.instructions ? (args.instructions.length > 60 ? `${args.instructions.slice(0, 60)}...` : args.instructions) : "...";
+	const preview = args.instructions
+		? args.instructions.length > 60
+			? `${args.instructions.slice(0, 60)}...`
+			: args.instructions
+		: "...";
 	let text =
 		theme.fg("toolTitle", theme.bold("subagent ")) +
 		theme.fg("accent", role) +
@@ -227,7 +233,8 @@ export function renderSubagentResult(
 			let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
 			if (failed && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 			container.addChild(new Text(header, 0, 0));
-			if (failed && r.errorMessage) container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
+			if (failed && r.errorMessage)
+				container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
 			container.addChild(new Spacer(1));
 			container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
 			container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
@@ -238,7 +245,9 @@ export function renderSubagentResult(
 			} else {
 				for (const item of displayItems) {
 					if (item.type === "toolCall") {
-						container.addChild(new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0));
+						container.addChild(
+							new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0),
+						);
 					}
 				}
 				if (finalOutput) {
@@ -257,7 +266,8 @@ export function renderSubagentResult(
 		let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
 		if (failed && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 		if (failed && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-		else if (displayItems.length === 0) text += `\n${theme.fg("muted", finalOutput ? finalOutput.split("\n").slice(0, 3).join("\n") : "(no output)")}`;
+		else if (displayItems.length === 0)
+			text += `\n${theme.fg("muted", finalOutput ? finalOutput.split("\n").slice(0, 3).join("\n") : "(no output)")}`;
 		else {
 			text += `\n${renderDisplayItems(theme, displayItems, COLLAPSED_ITEM_COUNT, false)}`;
 			if (displayItems.length > COLLAPSED_ITEM_COUNT) {
@@ -297,7 +307,9 @@ export function renderSubagentResult(
 				container.addChild(new Text(`${theme.fg("muted", "Task: ")}${theme.fg("dim", r.task)}`, 0, 0));
 				for (const item of displayItems) {
 					if (item.type === "toolCall") {
-						container.addChild(new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0));
+						container.addChild(
+							new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0),
+						);
 					}
 				}
 				if (r.finalOutput) {
@@ -318,7 +330,11 @@ export function renderSubagentResult(
 		let text = `${icon} ${theme.fg("toolTitle", theme.bold("chain "))}${theme.fg("accent", `${successCount}/${details.results.length} steps`)}`;
 		for (const r of details.results) {
 			const rIcon =
-				r.exitCode === -1 ? theme.fg("warning", "⏳") : isFailedSubagentResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
+				r.exitCode === -1
+					? theme.fg("warning", "⏳")
+					: isFailedSubagentResult(r)
+						? theme.fg("error", "✗")
+						: theme.fg("success", "✓");
 			const displayItems = getDisplayItems(r.messages);
 			text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.role)} ${rIcon}`;
 			if (displayItems.length === 0) {
@@ -340,7 +356,11 @@ export function renderSubagentResult(
 	const successCount = details.results.filter((r) => r.exitCode !== -1 && !isFailedSubagentResult(r)).length;
 	const failCount = details.results.filter((r) => r.exitCode !== -1 && isFailedSubagentResult(r)).length;
 	const isRunning = runningCount > 0;
-	const icon = isRunning ? theme.fg("warning", "⏳") : failCount > 0 ? theme.fg("warning", "◐") : theme.fg("success", "✓");
+	const icon = isRunning
+		? theme.fg("warning", "⏳")
+		: failCount > 0
+			? theme.fg("warning", "◐")
+			: theme.fg("success", "✓");
 	const status = isRunning
 		? `${successCount + failCount}/${details.results.length} done, ${runningCount} running`
 		: `${successCount}/${details.results.length} tasks`;
@@ -358,7 +378,9 @@ export function renderSubagentResult(
 			container.addChild(new Text(`${theme.fg("muted", "Task: ")}${theme.fg("dim", r.task)}`, 0, 0));
 			for (const item of displayItems) {
 				if (item.type === "toolCall") {
-					container.addChild(new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0));
+					container.addChild(
+						new Text(`${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme)}`, 0, 0),
+					);
 				}
 			}
 			if (r.finalOutput) {
@@ -379,7 +401,11 @@ export function renderSubagentResult(
 	let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`;
 	for (const r of details.results) {
 		const rIcon =
-			r.exitCode === -1 ? theme.fg("warning", "⏳") : isFailedSubagentResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
+			r.exitCode === -1
+				? theme.fg("warning", "⏳")
+				: isFailedSubagentResult(r)
+					? theme.fg("error", "✗")
+					: theme.fg("success", "✓");
 		const displayItems = getDisplayItems(r.messages);
 		text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.role)} ${rIcon}`;
 		if (displayItems.length === 0) {
