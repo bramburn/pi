@@ -67,6 +67,17 @@ Each subagent's output is capped at 50 KB in the tool result text (`Output trunc
 
 With `enableAnalytics` on, each dispatched run records one `pi_subagent_tasks` row (`agent_name` = role, `task_label` = first 200 characters of the instructions, duration, success). Nested spans record parent/child relationships when a subagent dispatches further subagents.
 
+## Orchestration tips
+
+- **Self-contained instructions win.** The child starts with a fresh context and never sees this conversation. Name exact files, symbols, and expected outputs in `instructions` instead of "the function we discussed".
+- **Parallelize independent lookups.** Use `tasks: [...]` when tasks do not read each other's output (e.g. scouting several modules at once). Keep each task narrow enough that its 50 KB output cap is not hit.
+- **Chain when each step builds on the last.** Use `chain: [...]` for generate-then-review or map-then-summarize flows; `{previous}` carries the earlier output forward.
+- **Match the role to the job.** The `role` is a short specialist label — it shapes the child's system prompt fragment, so `code-reviewer` and `scout` produce different stances.
+
+## Comparison with the npm `pi-subagents` package
+
+The native tool covers inline, ad-hoc subagents: every call defines its own `role` and `instructions`, runs, and returns. The npm [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) package builds on the same extension API for named, persisted agents with watchdog loops and mission-style task orchestration. Use the native tool for one-shot and short-chain delegation; use the package when you need long-lived named agents or scheduled mission loops.
+
 ## Experiments surface
 
 Gated behind `subagent.enableExperiments` (default off). When enabled, eight tools appear for running experiments in isolated git worktrees:
