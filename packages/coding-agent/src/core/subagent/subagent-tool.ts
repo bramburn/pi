@@ -24,12 +24,15 @@
  */
 
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Message } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { type Static, Type } from "typebox";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
+import { getBackgroundRegistry, type BackgroundRegistry, startBackgroundSubagent } from "./background.ts";
 import { createBunProcessRunner } from "./bun-process-runner.ts";
+import { renderSubagentCall, renderSubagentResult } from "./render.ts";
 import { isBunRuntime } from "./runtime.ts";
 import {
 	createEmptyUsage,
@@ -104,6 +107,13 @@ export const subagentSchema = Type.Object({
 				"Sequential subagent steps. '{previous}' in a step's instructions is replaced with the previous step's output. Stops at the first failure. Mutually exclusive with role/instructions and tasks.",
 		}),
 	),
+	background: Type.Optional(
+		Type.Boolean({
+			description:
+				"Fire-and-forget mode. The call returns immediately with task id(s); each subagent runs detached and its result is delivered when it settles. Default false (synchronous).",
+			default: false,
+		}),
+	),
 });
 
 export type SubagentToolInput = Static<typeof subagentSchema>;
@@ -111,6 +121,9 @@ export type SubagentToolInput = Static<typeof subagentSchema>;
 export interface SubagentToolDetails {
 	mode: SubagentMode;
 	results: SubagentResult[];
+	/** Present when the call dispatched background tasks instead of running inline. */
+	background?: boolean;
+	taskIds?: string[];
 }
 
 /** Minimal settings surface consulted by the registration guard. */
@@ -129,6 +142,14 @@ export interface SubagentToolOptions {
 	maxParallelTasks?: number;
 	/** Parent session model + thinking level, read at dispatch time for inheritance. */
 	getParentContext?: () => { model?: string; thinkingLevel?: ThinkingLevel };
+	/**
+	 * Called once per background subagent when it settles. The harness wires this
+	 * to session result injection; without it the result still lands in the
+	 * registry and the task log.
+	 */
+	onBackgroundSettled?: (taskId: string, result: SubagentResult) => void;
+	/** Background registry. Defaults to the on-disk singleton. Injectable for tests. */
+	registry?: BackgroundRegistry;
 }
 
 /**
@@ -176,8 +197,12 @@ async function runOne(
 	try {
 		let lastText = "";
 		const liveUsage = createEmptyUsage();
+		const seen: Message[] = [];
 		const listener: SubagentEventListener | undefined = onPartial
 			? (event) => {
+					if (event.type === "message_end" || event.type === "tool_result_end") {
+						seen.push(event.message);
+					}
 					if (event.type !== "message_end" || event.message.role !== "assistant") return;
 					const message = event.message;
 					if (message.usage) {
@@ -198,7 +223,7 @@ async function runOne(
 						stderr: "",
 						usage: { ...liveUsage },
 						...(step === undefined ? {} : { step }),
-						messages: [],
+						messages: [...seen],
 					});
 				}
 			: undefined;
@@ -300,6 +325,14 @@ export function createSubagentToolDefinition(
 		promptSnippet: "Delegate work to a subagent with a fresh context (role + instructions per call)",
 		parameters: subagentSchema,
 
+		renderCall(args, theme) {
+			return renderSubagentCall(args, theme);
+		},
+
+		renderResult(result, options, theme) {
+			return renderSubagentResult(result, options, theme);
+		},
+
 		async execute(_toolCallId, params, signal, onUpdate) {
 			const parent = options?.getParentContext?.() ?? {};
 			const runner = getRunner();
@@ -320,6 +353,74 @@ export function createSubagentToolDefinition(
 					],
 					details: { mode, results: [] },
 					isError: true,
+				};
+			}
+
+			// ----------------------------------------------------------------
+			// Background: fire detached tasks, return their ids immediately.
+			//
+			// Chain stays sequential even detached: each step's {previous} carries
+			// the prior step's output and the next step fires when it settles. (The
+			// reference extension fired chain steps as independent tasks, ignoring
+			// the dependency; that is corrected here.) Task ids are pre-generated so
+			// the response can name every step up front.
+			// ----------------------------------------------------------------
+			if (params.background === true) {
+				const registry = options?.registry ?? getBackgroundRegistry();
+				const resolveTaskCwd = (spec: SubagentSpec) =>
+					spec.cwd ? (isAbsolute(spec.cwd) ? spec.cwd : resolvePath(cwd, spec.cwd)) : cwd;
+				const fire = (
+					spec: SubagentSpec,
+					taskId: string | undefined,
+					onSettled?: (taskId: string, result: SubagentResult) => void,
+				): string => {
+					const dispatch = startBackgroundSubagent({
+						registry,
+						runner,
+						spec,
+						task: spec.instructions,
+						cwd: resolveTaskCwd(spec),
+						parentModel: parent.model,
+						parentThinkingLevel: parent.thinkingLevel,
+						onSettled: onSettled ?? options?.onBackgroundSettled,
+						...(taskId === undefined ? {} : { taskId }),
+					});
+					return dispatch.taskId;
+				};
+
+				const taskIds: string[] = [];
+				if (singleSpec) {
+					taskIds.push(fire(singleSpec, undefined));
+				} else if (tasks.length > 0) {
+					const ids = tasks.map(() => registry.makeTaskId());
+					for (let i = 0; i < tasks.length; i++) fire(specFromInput(tasks[i]), ids[i]);
+					taskIds.push(...ids);
+				} else {
+					const ids = chain.map(() => registry.makeTaskId());
+					taskIds.push(...ids);
+					const fireStep = (index: number, previousOutput: string): void => {
+						const stepInput = chain[index];
+						const spec = specFromInput({
+							...stepInput,
+							instructions: stepInput.instructions.replace(/\{previous\}/g, previousOutput),
+						});
+						fire(spec, ids[index], (taskId, result) => {
+							options?.onBackgroundSettled?.(taskId, result);
+							const next = index + 1;
+							if (next >= chain.length || isFailedSubagentResult(result)) return;
+							fireStep(next, result.finalOutput);
+						});
+					};
+					fireStep(0, "");
+				}
+
+				const summary =
+					taskIds.length === 1
+						? `Background task ${taskIds[0]} started (${mode}). Its result is delivered when it settles.`
+						: `Started ${taskIds.length} background tasks: ${taskIds.join(", ")} (${mode}). Results are delivered as they settle.`;
+				return {
+					content: [{ type: "text", text: summary }],
+					details: { mode, results: [], background: true, taskIds },
 				};
 			}
 

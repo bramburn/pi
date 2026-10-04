@@ -31,6 +31,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "../../config.ts";
+import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
 import {
 	isFailedSubagentResult,
 	type SubagentResult,
@@ -345,6 +346,8 @@ export interface BackgroundRunOptions {
 	spec: SubagentSpec;
 	task: string;
 	cwd: string;
+	/** Pre-generated task id (e.g. a chain step reported before it starts). Default: fresh id. */
+	taskId?: string;
 	/** The model the parent session is using, used when `spec.model` is absent. */
 	parentModel?: string;
 	parentThinkingLevel?: SubagentRunRequest["parentThinkingLevel"];
@@ -365,7 +368,7 @@ export interface BackgroundRunOptions {
  */
 export function startBackgroundSubagent(options: BackgroundRunOptions): BackgroundDispatch {
 	const registry = options.registry;
-	const taskId = registry.makeTaskId();
+	const taskId = options.taskId ?? registry.makeTaskId();
 	const now = new Date().toISOString();
 	registry.add({
 		id: taskId,
@@ -383,19 +386,31 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 	});
 	registry.appendLog(taskId, { type: "SPAWN", role: options.spec.role });
 
+	const spanId = newTaskSpanId();
+	startSubagentTask({ spanId, agentName: options.spec.role, taskLabel: options.task.slice(0, 200) });
+
 	// Fire and forget: this promise is intentionally not awaited here, and every
 	// exit path is guarded so it can never reject.
-	void runDetached(options, taskId).catch((err: unknown) => {
-		registry.update(taskId, {
-			status: "crashed",
-			errorMessage: `runner crashed: ${err instanceof Error ? err.message : String(err)}`,
-			finishedAt: new Date().toISOString(),
+	void runDetached(options, taskId)
+		.then(({ failed, errorMessage }) => {
+			endSubagentTask(spanId, !failed, failed ? errorMessage : undefined);
+		})
+		.catch((err: unknown) => {
+			const message = err instanceof Error ? err.message : String(err);
+			endSubagentTask(spanId, false, message);
+			registry.update(taskId, {
+				status: "crashed",
+				errorMessage: `runner crashed: ${message}`,
+				finishedAt: new Date().toISOString(),
+			});
 		});
-	});
 	return { taskId };
 }
 
-async function runDetached(options: BackgroundRunOptions, taskId: string): Promise<void> {
+async function runDetached(
+	options: BackgroundRunOptions,
+	taskId: string,
+): Promise<{ failed: boolean; errorMessage?: string }> {
 	const registry = options.registry;
 	let lastText = "";
 	const usage = { input: 0, output: 0, cost: 0, turns: 0 };
@@ -447,4 +462,8 @@ async function runDetached(options: BackgroundRunOptions, taskId: string): Promi
 	});
 	registry.appendLog(taskId, { type: "EXIT", exitCode: result.exitCode, status: failed ? "failed" : "completed" });
 	options.onSettled?.(taskId, result);
+	return {
+		failed,
+		...(failed ? { errorMessage: result.errorMessage ?? `exit code ${result.exitCode}` } : {}),
+	};
 }
