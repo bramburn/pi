@@ -157,6 +157,10 @@ export interface SubagentToolOptions {
 	onBackgroundSettled?: (taskId: string, result: SubagentResult) => void;
 	/** Background registry. Defaults to the on-disk singleton. Injectable for tests. */
 	registry?: BackgroundRegistry;
+	/** Base dir for experiment worktrees (`subagent.worktreeBase`). */
+	worktreeBase?: string;
+	/** Called after experiment registry mutations so the UI can refresh its status pill. */
+	onRegistryChanged?: () => void;
 }
 
 /**

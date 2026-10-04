@@ -32,8 +32,9 @@ export interface CollectedStream {
 export async function collectStream(
 	stream: { getReader(): ReaderLike } | null,
 	graceMs: number = DEFAULT_DRAIN_GRACE_MS,
+	onChunk?: (text: string) => void,
 ): Promise<CollectedStream> {
-	const pump = createStreamPump(stream);
+	const pump = createStreamPump(stream, onChunk);
 	await pump.release(graceMs);
 	return { text: pump.text, complete: pump.complete };
 }

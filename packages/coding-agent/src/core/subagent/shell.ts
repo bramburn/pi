@@ -55,6 +55,8 @@ export interface ShellOptions {
 	env?: Record<string, string | undefined>;
 	/** Run through the platform shell instead of exec'ing directly. */
 	shell?: boolean;
+	/** Observe output chunks as they arrive (spawn path). Used for live logging. */
+	onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 
 const decoder = new TextDecoder();
@@ -170,7 +172,11 @@ async function execute(argv: string[], options: ShellOptions): Promise<ShellResu
 
 	// Pump both pipes concurrently with the wait, so a chatty child can never
 	// fill its pipe buffer and deadlock against `exited`.
-	const [out, err] = await Promise.all([collectStream(proc.stdout), collectStream(proc.stderr)]);
+	const onOutput = options.onOutput;
+	const [out, err] = await Promise.all([
+		collectStream(proc.stdout, undefined, onOutput ? (chunk) => onOutput("stdout", chunk) : undefined),
+		collectStream(proc.stderr, undefined, onOutput ? (chunk) => onOutput("stderr", chunk) : undefined),
+	]);
 	const exitCode = await proc.exited;
 
 	if (timer) clearTimeout(timer);

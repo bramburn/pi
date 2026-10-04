@@ -34,6 +34,13 @@ export {
 	type SubagentToolInput,
 	type SubagentToolOptions,
 } from "../subagent/subagent-tool.ts";
+export {
+	createExperimentToolDefinitions,
+	createExperimentTools,
+	EXPERIMENT_TOOL_NAMES,
+	type ExperimentToolName,
+	shouldRegisterExperimentTools,
+} from "../subagent/experiment-tools.ts";
 export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createGrepTool,
@@ -91,6 +98,13 @@ export {
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import {
+	createExperimentToolDefinitions,
+	createExperimentTools,
+	EXPERIMENT_TOOL_NAMES,
+	type ExperimentToolName,
+	shouldRegisterExperimentTools,
+} from "../subagent/experiment-tools.ts";
+import {
 	createSubagentTool,
 	createSubagentToolDefinition,
 	shouldRegisterSubagentTool,
@@ -107,7 +121,7 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls" | "subagent";
+export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls" | "subagent" | ExperimentToolName;
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -118,6 +132,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"find",
 	"ls",
 	"subagent",
+	...EXPERIMENT_TOOL_NAMES,
 ]);
 
 export interface ToolsOptions {
@@ -152,6 +167,15 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createLsToolDefinition(cwd, options?.ls);
 		case "subagent":
 			return createSubagentToolDefinition(cwd, options?.subagent);
+		case "experiment_start":
+		case "experiment_run":
+		case "experiment_test":
+		case "experiment_diff":
+		case "experiment_merge":
+		case "experiment_discard":
+		case "experiment_list":
+		case "experiment_compare":
+			return createExperimentToolDefinitions(cwd, options?.subagent)[toolName];
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -177,6 +201,15 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createLsTool(cwd, options?.ls);
 		case "subagent":
 			return createSubagentTool(cwd, options?.subagent);
+		case "experiment_start":
+		case "experiment_run":
+		case "experiment_test":
+		case "experiment_diff":
+		case "experiment_merge":
+		case "experiment_discard":
+		case "experiment_list":
+		case "experiment_compare":
+			return createExperimentTools(cwd, options?.subagent)[toolName];
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -192,6 +225,10 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 	// Not read-only: a subagent spawns full agents with write access.
 	if (shouldRegisterSubagentTool(options?.subagent)) {
 		definitions.push(createSubagentToolDefinition(cwd, options?.subagent));
+	}
+	// Experiments create worktrees and merge branches — full write access.
+	if (shouldRegisterExperimentTools(options?.subagent)) {
+		definitions.push(...Object.values(createExperimentToolDefinitions(cwd, options?.subagent)));
 	}
 	return definitions;
 }
@@ -219,6 +256,9 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): P
 	if (shouldRegisterSubagentTool(options?.subagent)) {
 		definitions.subagent = createSubagentToolDefinition(cwd, options?.subagent);
 	}
+	if (shouldRegisterExperimentTools(options?.subagent)) {
+		Object.assign(definitions, createExperimentToolDefinitions(cwd, options?.subagent));
+	}
 	return definitions;
 }
 
@@ -231,6 +271,9 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 	];
 	if (shouldRegisterSubagentTool(options?.subagent)) {
 		tools.push(createSubagentTool(cwd, options?.subagent));
+	}
+	if (shouldRegisterExperimentTools(options?.subagent)) {
+		tools.push(...Object.values(createExperimentTools(cwd, options?.subagent)));
 	}
 	return tools;
 }
@@ -257,6 +300,9 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Partial<Rec
 	};
 	if (shouldRegisterSubagentTool(options?.subagent)) {
 		tools.subagent = createSubagentTool(cwd, options?.subagent);
+	}
+	if (shouldRegisterExperimentTools(options?.subagent)) {
+		Object.assign(tools, createExperimentTools(cwd, options?.subagent));
 	}
 	return tools;
 }
