@@ -35,8 +35,8 @@ import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-
 import {
 	isFailedSubagentResult,
 	type SubagentResult,
-	type SubagentRunRequest,
 	type SubagentRunner,
+	type SubagentRunRequest,
 	type SubagentSpec,
 } from "./types.ts";
 
@@ -110,6 +110,9 @@ export class RegistryLockError extends Error {
 }
 
 function withLock<T>(lockPath: string, fn: () => T): T {
+	// The first registry write on a fresh agent dir must create the directory
+	// before "wx" can create the lock file inside it (openSync does not mkdir).
+	ensureBgDir();
 	for (let attempt = 0; attempt < BG_LOCK_MAX_RETRIES; attempt++) {
 		try {
 			const fd = openSync(lockPath, "wx");

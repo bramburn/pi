@@ -2,6 +2,8 @@
 
 Pi ships a built-in `subagent` tool: the model delegates work to a child pi process with a fresh context and gets back a summary. There are no agent files, discovery, scopes, or trust prompts — every subagent is defined inline in the tool call.
 
+The tool is registered but not in pi's default tool set (`read`, `bash`, `edit`, `write`), so activate it like any other tool: `--tools read,bash,edit,write,subagent` on the CLI, `"defaultTools": ["read", "bash", "edit", "write", "subagent"]` in settings, or `tools: [...]` through the SDK. The `experiment_*` tools activate the same way when `subagent.enableExperiments` is on.
+
 The child is a real `pi --mode json` subprocess spawned with `Bun.spawn`, so the tool is registered only under the Bun runtime. Set `subagent.enabled: false` to leave it out entirely. When the tool is active, the system prompt gains a short orchestration guide (`SUBAGENT_USAGE`) describing the three modes below.
 
 ## Modes
