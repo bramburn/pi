@@ -19,6 +19,17 @@ import { createSubagentTool } from "../../src/core/subagent/subagent-tool.ts";
 import { createEmptyUsage, type SubagentResult, type SubagentRunner } from "../../src/core/subagent/types.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
+// CI installs with --ignore-scripts, so better-sqlite3's native bindings may be
+// absent. The row assertion needs a real sqlite DB; skip it where the bindings
+// cannot load (the second test in this file does not touch the store).
+let sqliteBindingsAvailable = true;
+try {
+	const probe = new Database(":memory:");
+	probe.close();
+} catch {
+	sqliteBindingsAvailable = false;
+}
+
 describe("native subagent tool end-to-end", () => {
 	const harnesses: Harness[] = [];
 	let previousAnalyticsHome: string | undefined;
@@ -41,7 +52,7 @@ describe("native subagent tool end-to-end", () => {
 		analyticsHome = undefined;
 	});
 
-	it("delegates to a subagent and records a pi_subagent_tasks row", async () => {
+	it.skipIf(!sqliteBindingsAvailable)("delegates to a subagent and records a pi_subagent_tasks row", async () => {
 		const stubRunner: SubagentRunner = {
 			async run(request): Promise<SubagentResult> {
 				return {
