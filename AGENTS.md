@@ -26,6 +26,7 @@ Node fallback.
 - `node:path` and `node:os` are fine and are not a Node fallback — Bun implements them and there is no replacement for POSIX path primitives.
 - Do not gate new code on `typeof Bun === "undefined"` unless it is a registration-time capability check that prevents registering a tool which cannot run (see `isBunRuntime()` in `src/core/subagent/runtime.ts`).
 - Declare the Bun surface you use in a local module and read it from `globalThis`; do not add `bun-types` as a dependency and do not rely on a `Bun` global being typed. The root tsconfig pins `"types": ["node"]` and `lib: ["ES2024"]` (no DOM), so `Bun` and `ReadableStream` are both untyped by default.
+- `node:fs` stays allowed where Bun has no equivalent primitive: atomic rename (`renameSync`) and exclusive-create locking (`openSync(path, "wx")`). `src/core/subagent/experiment-registry.ts` is the worked example — `Bun.write` is neither atomic nor lockable.
 - Verify Bun behaviour with a throwaway script run under `bun`, not from docs or memory. Concrete cases already disproven in this repo: `Bun.$` keeps stdout and stderr separate and does not need `.nothrow()` (use `.quiet()`, which also stops the child writing to the parent's terminal); `subprocess.signalCode` resolves to a signal *name* string, not a number; `exited` is `128 + signal`, not null, when the child is signalled.
 
 ### Subprocess pipes
