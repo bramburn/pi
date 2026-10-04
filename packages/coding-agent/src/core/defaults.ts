@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { SubagentSettings } from "./settings-manager.ts";
 
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 export const THINKING_LEVEL_OPTIONS: readonly ThinkingLevel[] = [
@@ -10,3 +11,18 @@ export const THINKING_LEVEL_OPTIONS: readonly ThinkingLevel[] = [
 	"xhigh",
 	"max",
 ];
+
+/**
+ * Defaults for the `subagent.*` settings (native subagent capability).
+ *
+ * `enabled` is the master switch for the built-in `subagent` tool;
+ * `enableExperiments` gates the experiment tools, registry, and dashboard.
+ */
+export const DEFAULT_SUBAGENT_SETTINGS: Required<SubagentSettings> = {
+	enabled: true,
+	maxConcurrent: 4,
+	maxParallelTasks: 8,
+	worktreeBase: ".worktrees",
+	enableExperiments: false,
+	researchModeTriggerCount: 3,
+};

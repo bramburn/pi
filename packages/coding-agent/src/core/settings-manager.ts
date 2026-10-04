@@ -8,6 +8,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
+import { DEFAULT_SUBAGENT_SETTINGS } from "./defaults.ts";
 import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
@@ -161,6 +162,22 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+/** Settings for the native subagent capability (`subagent.*`). */
+export interface SubagentSettings {
+	/** Master switch for the built-in `subagent` tool. Default true. */
+	enabled?: boolean;
+	/** Max subagents running at once in parallel mode. Default 4. */
+	maxConcurrent?: number;
+	/** Max tasks accepted in one parallel `tasks: [...]` call. Default 8. */
+	maxParallelTasks?: number;
+	/** Base directory for experiment worktrees. Default ".worktrees". */
+	worktreeBase?: string;
+	/** Gates the experiment tools, registry, research mode, and dashboard. Default false. */
+	enableExperiments?: boolean;
+	/** Same-error streak that triggers Research Mode. Default 3. */
+	researchModeTriggerCount?: number;
+}
+
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
@@ -201,6 +218,7 @@ export interface Settings {
 	deepseekHarness?: DeepseekHarnessSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
+	subagent?: SubagentSettings;
 	hideThinkingBlock?: boolean;
 	showCacheMissNotices?: boolean; // default: false - show transcript notices for significant prompt-cache misses
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
@@ -1533,5 +1551,41 @@ export class SettingsManager {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
 		this.save();
+	}
+
+	getSubagentEnabled(): boolean {
+		const value = this.settings.subagent?.enabled;
+		return typeof value === "boolean" ? value : DEFAULT_SUBAGENT_SETTINGS.enabled;
+	}
+
+	getSubagentMaxConcurrent(): number {
+		const value = this.settings.subagent?.maxConcurrent;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxConcurrent;
+	}
+
+	getSubagentMaxParallelTasks(): number {
+		const value = this.settings.subagent?.maxParallelTasks;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxParallelTasks;
+	}
+
+	getSubagentWorktreeBase(): string {
+		const value = this.settings.subagent?.worktreeBase;
+		return typeof value === "string" && value.trim() !== "" ? value : DEFAULT_SUBAGENT_SETTINGS.worktreeBase;
+	}
+
+	getSubagentEnableExperiments(): boolean {
+		const value = this.settings.subagent?.enableExperiments;
+		return typeof value === "boolean" ? value : DEFAULT_SUBAGENT_SETTINGS.enableExperiments;
+	}
+
+	getSubagentResearchModeTriggerCount(): number {
+		const value = this.settings.subagent?.researchModeTriggerCount;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.researchModeTriggerCount;
 	}
 }
