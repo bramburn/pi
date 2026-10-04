@@ -112,3 +112,169 @@ describe("SUBAGENT_USAGE", () => {
 		expect(SUBAGENT_USAGE).toContain("model");
 	});
 });
+
+describe("subagent dispatch modes", () => {
+	const okRunner: SubagentRunner = {
+		async run(request, _signal, onEvent): Promise<SubagentResult> {
+			onEvent?.({ type: "spawned", pid: 4242 });
+			return {
+				role: request.spec.role,
+				task: request.task,
+				exitCode: 0,
+				aborted: false,
+				finalOutput: `out:${request.spec.role}`,
+				stderr: "",
+				usage: createEmptyUsage(),
+				messages: [],
+				...(request.step === undefined ? {} : { step: request.step }),
+			};
+		},
+	};
+
+	it("rejects zero modes and multiple modes as tool errors", async () => {
+		const tool = createSubagentToolDefinition(process.cwd(), { runner: okRunner });
+		const none = await tool.execute("t1", {}, undefined, undefined, undefined as never);
+		expect((none as { isError?: boolean }).isError).toBe(true);
+		expect((none.content[0] as { text: string }).text).toContain("exactly one mode");
+
+		const two = await tool.execute(
+			"t2",
+			{ role: "a", instructions: "x", tasks: [{ role: "b", instructions: "y" }] },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect((two as { isError?: boolean }).isError).toBe(true);
+	});
+
+	it("chain substitutes {previous} at every occurrence and numbers steps", async () => {
+		const seen: string[] = [];
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				seen.push(`step${request.step}:${request.task}`);
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: `PREV-${request.spec.role}`,
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+					...(request.step === undefined ? {} : { step: request.step }),
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t3",
+			{
+				chain: [
+					{ role: "s1", instructions: "produce" },
+					{ role: "s2", instructions: "review {previous} and {previous}" },
+				],
+			},
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect(seen).toEqual(["step1:produce", "step2:review PREV-s1 and PREV-s1"]);
+		expect((result.content[0] as { text: string }).text).toBe("PREV-s2");
+		const steps = (result.details as { results: { step?: number }[] }).results.map((r) => r.step);
+		expect(steps).toEqual([1, 2]);
+	});
+
+	it("chain stops at the first failure and names the step", async () => {
+		const ran: string[] = [];
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				ran.push(request.spec.role);
+				const failed = request.spec.role === "s1";
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: failed ? 2 : 0,
+					aborted: false,
+					finalOutput: "",
+					stderr: "boom",
+					usage: createEmptyUsage(),
+					messages: [],
+					...(failed ? { errorMessage: "boom" } : {}),
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t4",
+			{ chain: [{ role: "s1", instructions: "a" }, { role: "s2", instructions: "b" }] },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect(ran).toEqual(["s1"]);
+		expect((result as { isError?: boolean }).isError).toBe(true);
+		expect((result.content[0] as { text: string }).text).toContain("Chain stopped at step 1 (s1)");
+	});
+
+	it("caps parallel output at 50 KB in text and keeps the full output in details", async () => {
+		const bigText = "x".repeat(60 * 1024);
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: bigText,
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t5",
+			{ tasks: [{ role: "big", instructions: "go" }] },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		const text = (result.content[0] as { text: string }).text;
+		expect(text).toContain("Output truncated:");
+		expect(text.length).toBeLessThan(52_000);
+		expect((result.details as { results: { finalOutput: string }[] }).results[0].finalOutput).toBe(bigText);
+	});
+
+	it("parallel partial failure marks the call as an error with both summaries", async () => {
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				const failed = request.spec.role === "bad";
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: failed ? 3 : 0,
+					aborted: false,
+					finalOutput: failed ? "" : "done",
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+					...(failed ? { errorMessage: "kaboom" } : {}),
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t6",
+			{ tasks: [{ role: "good", instructions: "1" }, { role: "bad", instructions: "2" }] },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect((result as { isError?: boolean }).isError).toBe(true);
+		const text = (result.content[0] as { text: string }).text;
+		expect(text).toContain("Parallel: 1/2 succeeded");
+		expect(text).toContain("[good] completed");
+		expect(text).toContain("[bad] failed");
+	});
+});
