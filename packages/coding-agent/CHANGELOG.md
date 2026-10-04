@@ -7,6 +7,7 @@
 - Ctrl+V paste now reads video payloads from the Wayland/X11 clipboard and attaches them behind `[paste #N video: file]` markers. Video attachments are uploaded only when the active model's API accepts video (Google Gemini/Vertex); otherwise they are dropped with a warning.
 - Ctrl+V paste now attaches clipboard PDFs (`readClipboardPdf`) behind `[paste #N pdf: file]` markers. Video/PDF uploads are gated per model via `modelSupportsMediaUpload` (registry `input` modality plus API serialization support) instead of an API-name check.
 - `models.json` `input` (custom model definitions and `modelOverrides`) can declare `video`, `pdf`, and `audio` modalities per model.
+- Built-in `subagent` tool: delegate work to spawned pi child agents inline (single), in parallel (`tasks`), or as a sequential chain (`chain`), with per-subagent model overrides and background execution. Opt-in experiments mode (`subagent.enableExperiments`) adds 8 `experiment_*` tools for hypothesis-driven worktree exploration backed by `.pi-experiments/registry.json`, a `Ctrl+E` dashboard with footer pills, and a Research Mode watcher that suggests a minimal repro after 3 consecutive identical tool errors. Enabled by default on the Bun runtime (`subagent.enabled`); see the [Subagents doc](docs/subagents.md).
 
 ### Fixed
 
