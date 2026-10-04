@@ -17,7 +17,6 @@ export {
 	type EditToolInput,
 	type EditToolOptions,
 } from "./edit.ts";
-export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createFindTool,
 	createFindToolDefinition,
@@ -26,6 +25,16 @@ export {
 	type FindToolInput,
 	type FindToolOptions,
 } from "./find.ts";
+export {
+	createSubagentTool,
+	createSubagentToolDefinition,
+	shouldRegisterSubagentTool,
+	type SubagentSettingsReader,
+	type SubagentToolDetails,
+	type SubagentToolInput,
+	type SubagentToolOptions,
+} from "../subagent/subagent-tool.ts";
+export { withFileMutationQueue } from "./file-mutation-queue.ts";
 export {
 	createGrepTool,
 	createGrepToolDefinition,
@@ -81,6 +90,12 @@ export {
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import {
+	createSubagentTool,
+	createSubagentToolDefinition,
+	shouldRegisterSubagentTool,
+	type SubagentToolOptions,
+} from "../subagent/subagent-tool.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
@@ -92,7 +107,7 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls";
+export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep" | "find" | "ls" | "subagent";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -102,6 +117,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"grep",
 	"find",
 	"ls",
+	"subagent",
 ]);
 
 export interface ToolsOptions {
@@ -113,6 +129,7 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
+	subagent?: SubagentToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -133,6 +150,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createFindToolDefinition(cwd, options?.find);
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
+		case "subagent":
+			return createSubagentToolDefinition(cwd, options?.subagent);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -156,18 +175,25 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createFindTool(cwd, options?.find);
 		case "ls":
 			return createLsTool(cwd, options?.ls);
+		case "subagent":
+			return createSubagentTool(cwd, options?.subagent);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
-	return [
+	const definitions: ToolDef[] = [
 		createReadToolDefinition(cwd, options?.read),
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd, options?.edit),
 		createWriteToolDefinition(cwd, options?.write),
 	];
+	// Not read-only: a subagent spawns full agents with write access.
+	if (shouldRegisterSubagentTool(options?.subagent)) {
+		definitions.push(createSubagentToolDefinition(cwd, options?.subagent));
+	}
+	return definitions;
 }
 
 export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
@@ -179,8 +205,8 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 	];
 }
 
-export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
-	return {
+export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Partial<Record<ToolName, ToolDef>> {
+	const definitions: Partial<Record<ToolName, ToolDef>> = {
 		read: createReadToolDefinition(cwd, options?.read),
 		bash: createBashToolDefinition(cwd, options?.bash),
 		powershell: createPowerShellToolDefinition(cwd, options?.powershell),
@@ -190,15 +216,23 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
 	};
+	if (shouldRegisterSubagentTool(options?.subagent)) {
+		definitions.subagent = createSubagentToolDefinition(cwd, options?.subagent);
+	}
+	return definitions;
 }
 
 export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [
+	const tools: Tool[] = [
 		createReadTool(cwd, options?.read),
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd, options?.edit),
 		createWriteTool(cwd, options?.write),
 	];
+	if (shouldRegisterSubagentTool(options?.subagent)) {
+		tools.push(createSubagentTool(cwd, options?.subagent));
+	}
+	return tools;
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
@@ -210,8 +244,8 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 	];
 }
 
-export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
-	return {
+export function createAllTools(cwd: string, options?: ToolsOptions): Partial<Record<ToolName, Tool>> {
+	const tools: Partial<Record<ToolName, Tool>> = {
 		read: createReadTool(cwd, options?.read),
 		bash: createBashTool(cwd, options?.bash),
 		powershell: createPowerShellTool(cwd, options?.powershell),
@@ -221,4 +255,8 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
 	};
+	if (shouldRegisterSubagentTool(options?.subagent)) {
+		tools.subagent = createSubagentTool(cwd, options?.subagent);
+	}
+	return tools;
 }
