@@ -23,7 +23,6 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import { killProcessTree, trackDetachedChildPid, untrackDetachedChildPid } from "../../utils/shell.ts";
-import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
 import { type BunApi, getBun } from "./runtime.ts";
 import { createStreamPump } from "./stream.ts";
 import {
@@ -39,11 +38,6 @@ const SIGKILL_GRACE_MS = 5_000;
 const PROMPT_DIR_PREFIX = "pi-subagent-";
 
 export interface BunProcessRunnerOptions {
-	/**
-	 * Record a `pi_subagent_tasks` span per run. The tool factory passes the
-	 * session's analytics-enabled state; the runner does not detect it itself.
-	 */
-	analyticsEnabled?: boolean;
 	/** Override how the child `pi` is invoked. Defaults to self-re-exec, then `pi` on PATH. */
 	resolveInvocation?: (args: string[]) => { command: string; args: string[] };
 }
@@ -198,8 +192,6 @@ class JsonLineParser {
 // ============================================================================
 
 export function createBunProcessRunner(options?: BunProcessRunnerOptions): SubagentRunner {
-	const analyticsEnabled = options?.analyticsEnabled ?? false;
-
 	return {
 		async run(request, signal, onEvent): Promise<SubagentResult> {
 			const emit: SubagentEventListener = onEvent ?? (() => {});
@@ -229,11 +221,6 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 					? options.resolveInvocation(args)
 					: await getPiInvocation(args);
 
-				const spanId = analyticsEnabled ? newTaskSpanId() : undefined;
-				if (spanId) {
-					startSubagentTask({ spanId, agentName: request.spec.role, taskLabel: request.task.slice(0, 200) });
-				}
-
 				const childRequest: ChildRequest = {
 					command: invocation.command,
 					args: invocation.args,
@@ -247,10 +234,6 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 				const bun = getBun();
 				await runChild(childRequest, signal, result, emit, bun);
 
-				if (spanId) {
-					const success = !result.aborted && result.exitCode === 0 && result.stopReason !== "error";
-					endSubagentTask(spanId, success, success ? undefined : result.errorMessage);
-				}
 				return result;
 			} finally {
 				await removePromptFile(promptFile);
