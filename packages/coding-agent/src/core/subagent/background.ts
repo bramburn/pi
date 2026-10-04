@@ -31,6 +31,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "../../config.ts";
+import {
+	isFailedSubagentResult,
+	type SubagentResult,
+	type SubagentRunRequest,
+	type SubagentRunner,
+	type SubagentSpec,
+} from "./types.ts";
 
 export const BG_DIR_NAME = "subagent-bg";
 export const BG_REGISTRY_FILE = "registry.json";
@@ -39,6 +46,7 @@ export const BG_LOG_FILE = "log.jsonl";
 export const BG_REGISTRY_VERSION = 1;
 export const BG_LOCK_RETRY_MS = 100;
 export const BG_LOCK_MAX_RETRIES = 50; // 5s total
+export const BG_CUSTOM_MESSAGE_TYPE = "subagent-background-result";
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "crashed";
 
@@ -320,4 +328,123 @@ export function getBackgroundRegistry(): BackgroundRegistry {
 /** Test helper — clear the singleton so a new instance is created on next call. */
 export function _resetBackgroundRegistryForTests(): void {
 	singleton = null;
+}
+
+// ============================================================================
+// Detached dispatch
+// ============================================================================
+
+export interface BackgroundDispatch {
+	/** Registry id. Stable for the life of the task; shown to the model. */
+	taskId: string;
+}
+
+export interface BackgroundRunOptions {
+	registry: BackgroundRegistry;
+	runner: SubagentRunner;
+	spec: SubagentSpec;
+	task: string;
+	cwd: string;
+	/** The model the parent session is using, used when `spec.model` is absent. */
+	parentModel?: string;
+	parentThinkingLevel?: SubagentRunRequest["parentThinkingLevel"];
+	/** Called once the task reaches a terminal state. Must not throw. */
+	onSettled?: (taskId: string, result: SubagentResult) => void;
+	/** No hard limit by default: a background task is expected to outlive a turn. */
+	timeoutMs?: number;
+}
+
+/**
+ * Start a subagent that outlives the current tool call.
+ *
+ * The call returns as soon as the task is recorded, so the tool can hand the
+ * model a task id immediately. Everything after that is detached: the runner's
+ * events are folded into the registry as they arrive, and a top-level catch
+ * marks the task `crashed` rather than surfacing an unhandled rejection that
+ * would take the parent session down with it.
+ */
+export function startBackgroundSubagent(options: BackgroundRunOptions): BackgroundDispatch {
+	const registry = options.registry;
+	const taskId = registry.makeTaskId();
+	const now = new Date().toISOString();
+	registry.add({
+		id: taskId,
+		kind: "pi-subprocess",
+		mode: "single",
+		role: options.spec.role,
+		label: `${options.spec.role} (background)`,
+		task: options.task,
+		model: options.spec.model ?? options.parentModel,
+		status: "running",
+		startedAt: now,
+		lastEventAt: now,
+		lastOutput: "",
+		cwd: options.cwd,
+	});
+	registry.appendLog(taskId, { type: "SPAWN", role: options.spec.role });
+
+	// Fire and forget: this promise is intentionally not awaited here, and every
+	// exit path is guarded so it can never reject.
+	void runDetached(options, taskId).catch((err: unknown) => {
+		registry.update(taskId, {
+			status: "crashed",
+			errorMessage: `runner crashed: ${err instanceof Error ? err.message : String(err)}`,
+			finishedAt: new Date().toISOString(),
+		});
+	});
+	return { taskId };
+}
+
+async function runDetached(options: BackgroundRunOptions, taskId: string): Promise<void> {
+	const registry = options.registry;
+	let lastText = "";
+	const usage = { input: 0, output: 0, cost: 0, turns: 0 };
+
+	const result = await options.runner.run(
+		{
+			spec: options.spec,
+			task: options.task,
+			cwd: options.cwd,
+			parentModel: options.parentModel,
+			parentThinkingLevel: options.parentThinkingLevel,
+			logPath: join(getAgentDir(), BG_DIR_NAME, taskId, BG_LOG_FILE),
+			...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+		},
+		// No caller signal: a background task must not inherit the turn's abort.
+		undefined,
+		(event) => {
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				const message = event.message;
+				if (message.usage) {
+					usage.input += message.usage.input ?? 0;
+					usage.output += message.usage.output ?? 0;
+					usage.cost += message.usage.cost?.total ?? 0;
+					usage.turns += 1;
+				}
+				for (const part of message.content) {
+					if (part.type === "text") lastText = part.text;
+				}
+				registry.update(taskId, { lastOutput: lastText.slice(-200), usage });
+			} else if (event.type === "tool_result_end") {
+				const message = event.message as { toolName?: string; output?: unknown };
+				const rendered = typeof message.output === "string" ? message.output : JSON.stringify(message.output ?? "");
+				registry.update(taskId, { lastOutput: `[${message.toolName ?? "tool"}] ${rendered.slice(-160)}` });
+			} else if (event.type === "stderr") {
+				registry.update(taskId, { lastOutput: `[stderr] ${event.text.slice(-160)}` });
+			}
+		},
+	);
+
+	const failed = isFailedSubagentResult(result);
+	const output = result.finalOutput || lastText || "(no output)";
+	registry.update(taskId, {
+		status: failed ? (result.aborted ? "cancelled" : "failed") : "completed",
+		exitCode: result.exitCode,
+		finishedAt: new Date().toISOString(),
+		lastOutput: output.slice(-200),
+		usage,
+		...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+	});
+	registry.appendLog(taskId, { type: "EXIT", exitCode: result.exitCode, status: failed ? "failed" : "completed" });
+	options.onSettled?.(taskId, result);
 }

@@ -49,12 +49,18 @@ export interface BunSubprocess {
 export interface BunSpawnOptions {
 	cwd?: string;
 	env?: Record<string, string | undefined>;
-	stdin?: "ignore" | "pipe";
-	stdout?: "pipe";
-	stderr?: "pipe";
+	/** `"pipe"` gives a readable stream; `"ignore"` / null discards the output. */
+	stdin?: "ignore" | "pipe" | null;
+	stdout?: "pipe" | "ignore" | null;
+	stderr?: "pipe" | "ignore" | null;
 }
 
-/** Output of a `Bun.$` invocation made with `.quiet()` or `.nothrow()`. */
+/**
+ * Result of a `Bun.$` invocation.
+ *
+ * Verified under Bun 1.4: stdout and stderr come back as separate buffers, so
+ * a helper can return the (exitCode, stdout, stderr) triple without a shell hop.
+ */
 export interface BunShellResult {
 	exitCode: number;
 	stdout: Uint8Array;
@@ -63,14 +69,21 @@ export interface BunShellResult {
 }
 
 export interface BunShellCommand {
-	/** Suppress stdio inheritance and return the full result instead of throwing. */
-	quiet(): Promise<BunShellResult>;
-	/** Like `quiet()` but keeps the failure as a rejected promise. */
+	/**
+	 * Stop the child writing to the parent's terminal. Does NOT stop throwing:
+	 * `.quiet()` alone still rejects with a `ShellError` on a non-zero exit.
+	 */
+	quiet(): BunShellCommand;
+	/** Stop throwing on a non-zero exit. Does NOT stop stdio inheritance. */
 	nothrow(): Promise<BunShellResult>;
 	env(vars: Record<string, string>): BunShellCommand;
 }
 
-export type BunShell = (command: TemplateStringsArray, ...values: unknown[]) => BunShellCommand;
+export interface BunShell {
+	(command: TemplateStringsArray, ...values: unknown[]): BunShellCommand;
+	/** A shell rooted at `path`. Verified: `$.cwd(dir)\`node -e "..."\`` reports the cwd. */
+	cwd(path: string): BunShell;
+}
 
 export interface BunFileLike {
 	exists(): Promise<boolean>;

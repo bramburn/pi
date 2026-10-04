@@ -94,31 +94,32 @@ function buildChildArgs(request: SubagentRunRequest): string[] {
 // Prompt file (the child's system prompt)
 // ============================================================================
 
+let promptFileCounter = 0;
+
 /**
  * Write the child's system prompt to a private temp file and pass it via
  * `--append-system-prompt`.
  *
- * `Bun.write` creates the parent directories itself, so no mkdir step is
- * needed. The prompt is written into a fresh `mkdtemp`-style directory so a
- * crashed run cannot leak a file that a later run would pick up.
+ * A flat temp file, not a per-run temp directory: `Bun.write` creates missing
+ * parent directories, and a single file is removed with `Bun.file().delete()`.
+ * That avoids a recursive delete, which would need either `node:fs` or a POSIX
+ * `rm` that does not exist on Windows.
  */
-async function writeInstructionsToTempFile(role: string, instructions: string): Promise<{ dir: string; file: string }> {
-	const bun = getBun();
-	const dir = join(tmpdir(), `${PROMPT_DIR_PREFIX}${Date.now().toString(36)}-${process.pid}`);
+async function writeInstructionsToTempFile(role: string, instructions: string): Promise<string> {
 	const safeRole = role.replace(/[^\w.-]+/g, "_");
-	const file = join(dir, `prompt-${safeRole}.md`);
-	await bun.write(file, instructions);
-	return { dir, file };
+	promptFileCounter += 1;
+	const name = `${PROMPT_DIR_PREFIX}${Date.now().toString(36)}-${process.pid}-${promptFileCounter}-${safeRole}.md`;
+	const file = join(tmpdir(), name);
+	await getBun().write(file, instructions);
+	return file;
 }
 
-async function removePromptFile(dir: string | null, file: string | null): Promise<void> {
-	const bun = getBun();
-	if (file)
-		await bun
-			.file(file)
-			.delete()
-			.catch(() => {});
-	if (dir) await bun.$`rm -rf ${dir}`.quiet().catch(() => {});
+async function removePromptFile(file: string | null): Promise<void> {
+	if (!file) return;
+	await getBun()
+		.file(file)
+		.delete()
+		.catch(() => {});
 }
 
 // ============================================================================
@@ -215,13 +216,10 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 			};
 
 			const instructions = request.spec.instructions.trim();
-			let promptDir: string | null = null;
 			let promptFile: string | null = null;
 			try {
 				if (instructions) {
-					const written = await writeInstructionsToTempFile(request.spec.role, instructions);
-					promptDir = written.dir;
-					promptFile = written.file;
+					promptFile = await writeInstructionsToTempFile(request.spec.role, instructions);
 				}
 
 				const args = buildChildArgs(request);
@@ -255,7 +253,7 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 				}
 				return result;
 			} finally {
-				await removePromptFile(promptDir, promptFile);
+				await removePromptFile(promptFile);
 			}
 		},
 	};

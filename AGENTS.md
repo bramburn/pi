@@ -47,6 +47,37 @@ await reader.cancel(); // safe: we own the lock
 
 `src/core/subagent/stream.ts` implements this (`createStreamPump`,
 `collectStream`). Reuse it rather than re-deriving the pattern.
+`test/subagent-stream.test.ts` covers it, with a fake never-closing pipe so the
+assertion runs in the Node-based vitest suite, plus real-process cases that run
+only under Bun.
+
+### `Bun.$` vs `Bun.spawn`
+
+Pick the backend by what the caller needs. Both claims below were verified by
+running Bun, because the intuitive answer is wrong in both directions.
+
+`Bun.$`, when no timeout or abort is requested:
+
+- Returns `{ stdout, stderr, exitCode }` with the streams kept separate.
+- `.quiet()` and `.nothrow()` are both required, in either order. `.quiet()`
+  alone still rejects with `ShellError` on a non-zero exit; `.nothrow()` alone
+  still leaks the child's stdout to the parent terminal.
+- `$\`${[cmd, ...args]}\`` spreads and escapes: an argument of `"a b"` and one of
+  `"c;echo injected"` both stay single argv elements.
+- `$.cwd(dir)` works.
+
+`Bun.spawn`, whenever a timeout or an abort signal is supplied, or the command is
+a shell line:
+
+- `$.timeout` is `undefined`, so `$` cannot time out at all.
+- `$` exposes no pid, so nothing can be signalled — no tree kill, no cancel.
+- `$` hangs on a grandchild-held pipe and returns no partial output.
+
+A dynamic command *line* is not expressible in `Bun.$`:
+`$\`${"echo dynamic-line-works"}\`` fails with `command not found`, because an
+interpolated value is escaped into one quoted word. Lines with pipes, redirects
+or quoting are shell source, so they need `Bun.spawn` with `sh -c` / `cmd /c`.
+See `src/core/subagent/shell.ts` for the split contract.
 
 ## Code Quality
 
