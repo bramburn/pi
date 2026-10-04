@@ -16,6 +16,38 @@
 - When the user asks a question, answer it first before making edits or running implementation commands.
 - When responding to user feedback or an analysis, explicitly say whether you agree or disagree before saying what you changed.
 
+## Runtime: Bun only
+
+pi runs on Bun. New code must use Bun APIs, not Node APIs, and must not carry a
+Node fallback.
+
+- Use `Bun.spawn` for subprocesses. Never import `node:child_process` in new code; there is no `spawn` from `"bun"` import path, and no dual-backend runner.
+- Use `Bun.write` / `Bun.file(...)` for file IO in new code, not `node:fs` or `node:fs/promises`. `Bun.file(p).exists()`, `.text()`, `.delete()` cover the common cases.
+- `node:path` and `node:os` are fine and are not a Node fallback — Bun implements them and there is no replacement for POSIX path primitives.
+- Do not gate new code on `typeof Bun === "undefined"` unless it is a registration-time capability check that prevents registering a tool which cannot run (see `isBunRuntime()` in `src/core/subagent/runtime.ts`).
+- Declare the Bun surface you use in a local module and read it from `globalThis`; do not add `bun-types` as a dependency and do not rely on a `Bun` global being typed. The root tsconfig pins `"types": ["node"]` and `lib: ["ES2024"]` (no DOM), so `Bun` and `ReadableStream` are both untyped by default.
+- Verify Bun behaviour with a throwaway script run under `bun`, not from docs or memory. Concrete cases already disproven in this repo: `Bun.$` keeps stdout and stderr separate and does not need `.nothrow()` (use `.quiet()`, which also stops the child writing to the parent's terminal); `subprocess.signalCode` resolves to a signal *name* string, not a number; `exited` is `128 + signal`, not null, when the child is signalled.
+
+### Subprocess pipes
+
+A child's grandchildren inherit its stdout/stderr, so a pipe can stay open after
+the child exits. `await new Response(proc.stdout).text()` then never settles, and
+`proc.stdout.cancel()` throws `Cannot cancel a locked ReadableStream` because the
+pending `Response` holds the lock.
+
+Never read a subprocess pipe to EOF before awaiting `exited`. Take the lock
+yourself and bound the wait:
+
+```ts
+const reader = stream.getReader(); // we own the lock
+// ... pump chunks, then after `exited`:
+await Promise.race([finished, deadline]);
+await reader.cancel(); // safe: we own the lock
+```
+
+`src/core/subagent/stream.ts` implements this (`createStreamPump`,
+`collectStream`). Reuse it rather than re-deriving the pattern.
+
 ## Code Quality
 
 - Read files in full before wide-ranging changes, before editing files you have not fully inspected, and when asked to investigate or audit. Do not rely on search snippets for broad changes.
