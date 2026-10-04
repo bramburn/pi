@@ -239,6 +239,32 @@ On Windows, select `powershell` instead of `bash`, or include both:
 
 An empty array starts with no built-in tools while preserving extension and SDK custom tools. `--tools` replaces this behavior with a strict allowlist for all tools, `--no-tools` disables all tools, and `--no-builtin-tools` disables the built-in defaults. `--exclude-tools` filters the resulting list. A project `defaultTools` array replaces the global array.
 
+### Subagents
+
+See [Subagents](subagents.md) for the built-in delegation tool and the experiments surface.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `subagent.enabled` | boolean | `true` | Register the built-in `subagent` tool. Requires the Bun runtime |
+| `subagent.maxConcurrent` | number | `4` | Max subagent processes running at once per session |
+| `subagent.maxParallelTasks` | number | `8` | Max tasks accepted in one parallel `tasks: [...]` call |
+| `subagent.worktreeBase` | string | `".worktrees"` | Directory for experiment worktrees (`<repo>/<worktreeBase>/<slug>`) |
+| `subagent.enableExperiments` | boolean | `false` | Experiments surface: the eight `experiment_*` tools, the `.pi-experiments/` registry, and worktrees |
+| `subagent.researchModeTriggerCount` | number | `3` | Consecutive same-error tool failures before the Research Mode suggestion fires (see [Subagents](subagents.md#research-mode)) |
+
+```json
+{
+ "subagent": {
+ "enabled": true,
+ "maxConcurrent": 4,
+ "maxParallelTasks": 8,
+ "worktreeBase": ".worktrees",
+ "enableExperiments": false,
+ "researchModeTriggerCount": 3
+ }
+}
+```
+
 ### Sessions
 
 | Setting | Type | Default | Description |
