@@ -18,7 +18,10 @@ export const THINKING_LEVEL_OPTIONS: readonly ThinkingLevel[] = [
  * `enabled` is the master switch for the built-in `subagent` tool;
  * `enableExperiments` gates the experiment tools, registry, and dashboard.
  */
-export const DEFAULT_SUBAGENT_SETTINGS: Required<SubagentSettings> = {
+/** Every `subagent.*` setting resolved to a concrete value (no optionality). */
+export type ResolvedSubagentSettings = Required<SubagentSettings>;
+
+export const DEFAULT_SUBAGENT_SETTINGS: ResolvedSubagentSettings = {
 	enabled: true,
 	maxConcurrent: 4,
 	maxParallelTasks: 8,

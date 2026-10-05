@@ -61,11 +61,12 @@ describe("experiment tool gating (subagent.enableExperiments)", () => {
 		expect(readOnly.map((d) => d.name).filter((n) => n.startsWith("experiment_"))).toHaveLength(0);
 	});
 
-	it("resolves every experiment tool by name", () => {
+	it("resolves every experiment tool by name when experiments are enabled", () => {
+		const opts = { subagent: { settings: settingsWith(true) } };
 		for (const name of EXPERIMENT_TOOL_NAMES) {
-			const def = createToolDefinition(name as ToolName, process.cwd());
+			const def = createToolDefinition(name as ToolName, process.cwd(), opts);
 			expect(def.name).toBe(name);
-			const tool = createTool(name as ToolName, process.cwd());
+			const tool = createTool(name as ToolName, process.cwd(), opts);
 			expect(tool.name).toBe(name);
 		}
 	});

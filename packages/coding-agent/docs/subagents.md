@@ -67,14 +67,14 @@ Each subagent's output is capped at 50 KB in the tool result text (`Output trunc
 
 ## Analytics
 
-With `enableAnalytics` on, each dispatched run records one `pi_subagent_tasks` row (`agent_name` = role, `task_label` = first 200 characters of the instructions, duration, success). Nested spans record parent/child relationships when a subagent dispatches further subagents.
+With `enableAnalytics` on, each dispatched run records one `pi_subagent_tasks` row (`agent_name` = role, `task_label` = first 200 characters of the instructions, duration, success). Nested parent/child spans for subagent-dispatches-subagent are planned but not yet recorded.
 
 ## Orchestration tips
 
 - **Self-contained instructions win.** The child starts with a fresh context and never sees this conversation. Name exact files, symbols, and expected outputs in `instructions` instead of "the function we discussed".
 - **Parallelize independent lookups.** Use `tasks: [...]` when tasks do not read each other's output (e.g. scouting several modules at once). Keep each task narrow enough that its 50 KB output cap is not hit.
 - **Chain when each step builds on the last.** Use `chain: [...]` for generate-then-review or map-then-summarize flows; `{previous}` carries the earlier output forward.
-- **Match the role to the job.** The `role` is a short specialist label — it shapes the child's system prompt fragment, so `code-reviewer` and `scout` produce different stances.
+- **Match the role to the job.** The `role` is a short specialist label — it labels the run in the UI, logs, and analytics and does not alter the child's prompt. Put any stance or persona differences (e.g. `code-reviewer` vs `scout`) in `instructions`.
 
 ## Comparison with the npm `pi-subagents` package
 
@@ -101,7 +101,7 @@ The registry lives at `<repo>/.pi-experiments/registry.json` (format version 1).
 
 Research Mode is a suggestion, never an automatic action: when the same tool error (normalised to ignore line numbers and timestamps) repeats `subagent.researchModeTriggerCount` times in a row (default 3), the tracker notifies that a minimal repro in a fresh scratch worktree may be worth trying and appends a `RESEARCH_MODE_TRIGGERED` event to the active experiment's log. It never spawns worktrees on its own.
 
-> **Interactive wiring:** with `subagent.enableExperiments` on, `Ctrl+E` (`app.subagent.experimentsDashboard`) toggles the dashboard below the editor (`Esc` closes it), and the footer shows an experiments pill and a background-task pill as related tools run. The research-mode watcher runs in every session with the flag on: the suggestion is a warning notification plus the `RESEARCH_MODE_TRIGGERED` log event.
+> **Interactive wiring:** with `subagent.enableExperiments` on, `Ctrl+Shift+E` (`app.subagent.experimentsDashboard`) toggles the dashboard below the editor (`Esc` closes it), and the footer shows an experiments pill and a background-task pill as related tools run. The research-mode watcher runs in every session with the flag on: the suggestion is a warning notification plus the `RESEARCH_MODE_TRIGGERED` log event.
 
 ## Coexistence with the example extension
 

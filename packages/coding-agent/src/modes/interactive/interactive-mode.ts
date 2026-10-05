@@ -111,6 +111,7 @@ import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { getBackgroundRegistry } from "../../core/subagent/background.ts";
+import { listExperiments } from "../../core/subagent/experiment-registry.ts";
 import {
 	clearDashboard,
 	type ExperimentsUi,
@@ -2052,6 +2053,9 @@ export class InteractiveMode {
 			this.editor.setPaddingX?.(editorPaddingX);
 			this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
 		}
+		// Refresh the subagent pills against the current project (and clear them
+		// when the feature is off or there is nothing to show).
+		this.updateSubagentStatusPills();
 	}
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
@@ -2941,7 +2945,12 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
-		this.defaultEditor.onAction("app.subagent.experimentsDashboard", () => this.toggleExperimentsDashboard());
+		// Registered only when the experiments feature is enabled at registration
+		// time, so the dashboard key is not intercepted (and a "dashboard is off"
+		// notice shown) for users who never opted in.
+		if (this.settingsManager.getSubagentEnableExperiments()) {
+			this.defaultEditor.onAction("app.subagent.experimentsDashboard", () => this.toggleExperimentsDashboard());
+		}
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -4420,13 +4429,21 @@ export class InteractiveMode {
 
 	/** Footer pills for experiments and background tasks (plan 4.6 surface). */
 	private updateSubagentStatusPills(): void {
-		if (this.settingsManager.getSubagentEnableExperiments()) {
-			this.setExtensionStatus(
-				UI_KEYS.STATUS_KEY,
-				renderExperimentsStatusPill(theme, this.sessionManager.getCwd(), true),
-			);
-		}
-		const tasks = getBackgroundRegistry().snapshot().tasks;
+		const cwd = this.sessionManager.getCwd();
+		// Undefined clears the pill: nothing to show when the feature is off or the
+		// current project has no experiments.
+		this.setExtensionStatus(
+			UI_KEYS.STATUS_KEY,
+			this.settingsManager.getSubagentEnableExperiments() && listExperiments(cwd, "all").length > 0
+				? renderExperimentsStatusPill(theme, cwd, true)
+				: undefined,
+		);
+		// The registry is user-level and spans every session and project — count
+		// only this session's project. renderBackgroundPill returns undefined at
+		// zero total, which clears the pill.
+		const tasks = getBackgroundRegistry()
+			.snapshot()
+			.tasks.filter((t) => t.cwd === cwd);
 		this.setExtensionStatus(
 			UI_KEYS.BG_STATUS_KEY,
 			renderBackgroundPill(

@@ -15,7 +15,11 @@ import { appendExperimentLogEvent } from "./experiment-registry.ts";
 const DEFAULT_THRESHOLD = 3;
 
 export interface ResearchModeOptions {
-	threshold?: number;
+	/**
+	 * Same-error streak that fires the suggestion. A function is read at
+	 * comparison time so mid-session settings changes take effect live.
+	 */
+	threshold?: number | (() => number);
 	/** Hook to surface the trigger to the user. */
 	notify?: (message: string, type: "info" | "warning" | "error") => void;
 }
@@ -28,11 +32,12 @@ interface SessionState {
 
 export class ResearchModeTracker {
 	private readonly sessions = new Map<string, SessionState>();
-	private readonly threshold: number;
+	private readonly threshold: () => number;
 	private readonly notify: (message: string, type: "info" | "warning" | "error") => void;
 
 	constructor(opts: ResearchModeOptions = {}) {
-		this.threshold = opts.threshold ?? DEFAULT_THRESHOLD;
+		const threshold = opts.threshold;
+		this.threshold = typeof threshold === "function" ? threshold : () => threshold ?? DEFAULT_THRESHOLD;
 		this.notify =
 			opts.notify ??
 			(() => {
@@ -75,7 +80,7 @@ export class ResearchModeTracker {
 		}
 		this.sessions.set(sessionId, state);
 
-		if (state.count >= this.threshold) {
+		if (state.count >= this.threshold()) {
 			this.notify(
 				`Research Mode suggested: same error ${state.count}x on ${toolName} — consider a minimal repro in a fresh scratch worktree.`,
 				"warning",

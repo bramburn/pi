@@ -157,6 +157,22 @@ export interface ToolsOptions {
 	subagent?: SubagentToolOptions;
 }
 
+/**
+ * By-name factories are explicit opt-ins, so they enforce the same registration
+ * guards as the registry paths instead of handing out flag-gated tools.
+ */
+function ensureSubagentToolAllowed(options?: ToolsOptions): void {
+	if (shouldRegisterSubagentTool(options?.subagent)) return;
+	throw new Error(
+		"subagent tool requires the Bun runtime (or an injected runner) with subagent.enabled: true — use createAllToolDefinitions for conditional registration",
+	);
+}
+
+function ensureExperimentToolsAllowed(options?: ToolsOptions): void {
+	if (shouldRegisterExperimentTools(options?.subagent)) return;
+	throw new Error("experiment tools require subagent.enableExperiments: true — use createAllToolDefinitions");
+}
+
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
 	switch (toolName) {
 		case "read":
@@ -176,6 +192,7 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
 		case "subagent":
+			ensureSubagentToolAllowed(options);
 			return createSubagentToolDefinition(cwd, options?.subagent);
 		case "experiment_start":
 		case "experiment_run":
@@ -185,6 +202,7 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 		case "experiment_discard":
 		case "experiment_list":
 		case "experiment_compare":
+			ensureExperimentToolsAllowed(options);
 			return createExperimentToolDefinitions(cwd, options?.subagent)[toolName];
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
@@ -210,6 +228,7 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 		case "ls":
 			return createLsTool(cwd, options?.ls);
 		case "subagent":
+			ensureSubagentToolAllowed(options);
 			return createSubagentTool(cwd, options?.subagent);
 		case "experiment_start":
 		case "experiment_run":
@@ -219,6 +238,7 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 		case "experiment_discard":
 		case "experiment_list":
 		case "experiment_compare":
+			ensureExperimentToolsAllowed(options);
 			return createExperimentTools(cwd, options?.subagent)[toolName];
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);

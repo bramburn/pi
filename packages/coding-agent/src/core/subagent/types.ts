@@ -77,7 +77,12 @@ export interface SubagentRunRequest {
 export interface SubagentResult {
 	role: string;
 	task: string;
-	/** Process exit code; `null` when the child was killed. */
+	/**
+	 * Process exit code. Always a number — widening to `null` was rejected
+	 * because consumers require one. A child that survives even the force-kill
+	 * reports HARD_KILL_EXIT_CODE (137) instead, and the kill context lives in
+	 * `aborted` (a timeout additionally sets `errorMessage`).
+	 */
 	exitCode: number;
 	aborted: boolean;
 	finalOutput: string;

@@ -114,7 +114,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { BG_CUSTOM_MESSAGE_TYPE } from "./subagent/background.ts";
+import { BG_CUSTOM_MESSAGE_TYPE, getBackgroundRegistry } from "./subagent/background.ts";
 import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
 import { ResearchModeTracker } from "./subagent/research-mode.ts";
 import { isFailedSubagentResult } from "./subagent/types.ts";
@@ -440,6 +440,14 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
+
+		// Startup hygiene for the background registry: crash-mark rows orphaned
+		// by a dead session (pid-liveness based, so safe from any session) and
+		// prune old terminal rows. Fire-and-forget with a catch so startup never
+		// blocks or throws.
+		const backgroundRegistry = getBackgroundRegistry();
+		void backgroundRegistry.markAllRunningAsCrashed().catch(console.warn);
+		void backgroundRegistry.prune().catch(console.warn);
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -2992,9 +3000,16 @@ export class AgentSession {
 								}
 							},
 						},
-						maxConcurrent: this.settingsManager.getSubagentMaxConcurrent(),
-						maxParallelTasks: this.settingsManager.getSubagentMaxParallelTasks(),
-						worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
+						// Live getters: subagent settings must be read at dispatch time so
+						// mid-session changes apply without a runtime rebuild.
+						subagentSettings: () => ({
+							enabled: this.settingsManager.getSubagentEnabled(),
+							maxConcurrent: this.settingsManager.getSubagentMaxConcurrent(),
+							maxParallelTasks: this.settingsManager.getSubagentMaxParallelTasks(),
+							worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
+							enableExperiments: this.settingsManager.getSubagentEnableExperiments(),
+							researchModeTriggerCount: this.settingsManager.getSubagentResearchModeTriggerCount(),
+						}),
 						getParentContext: () => ({
 							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
 							thinkingLevel: this.thinkingLevel,
@@ -3045,7 +3060,7 @@ export class AgentSession {
 		// experiments flag like the rest of the surface.
 		this._researchMode = this.settingsManager.getSubagentEnableExperiments()
 			? new ResearchModeTracker({
-					threshold: this.settingsManager.getSubagentResearchModeTriggerCount(),
+					threshold: () => this.settingsManager.getSubagentResearchModeTriggerCount(),
 					notify: (message, type) => this._extensionUIContext?.notify(message, type),
 				})
 			: undefined;

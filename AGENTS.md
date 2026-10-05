@@ -21,7 +21,7 @@
 pi runs on Bun. New code must use Bun APIs, not Node APIs, and must not carry a
 Node fallback.
 
-- Use `Bun.spawn` for subprocesses. Never import `node:child_process` in new code; there is no `spawn` from `"bun"` import path, and no dual-backend runner.
+- Use `Bun.spawn` for subprocesses. Never import `node:child_process` in new code; use `Bun.spawn` and do not rely on a `spawn` re-export from the `"bun"` import path; there is no dual-backend runner.
 - Use `Bun.write` / `Bun.file(...)` for file IO in new code, not `node:fs` or `node:fs/promises`. `Bun.file(p).exists()`, `.text()`, `.delete()` cover the common cases.
 - `node:path` and `node:os` are fine and are not a Node fallback — Bun implements them and there is no replacement for POSIX path primitives.
 - Do not gate new code on `typeof Bun === "undefined"` unless it is a registration-time capability check that prevents registering a tool which cannot run (see `isBunRuntime()` in `src/core/subagent/runtime.ts`).

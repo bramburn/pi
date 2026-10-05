@@ -118,7 +118,9 @@ export const KEYBINDINGS = {
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.subagent.experimentsDashboard": {
-		defaultKeys: "ctrl+e",
+		// ctrl+e is a tui.editor.cursorLineEnd default, and app keybindings are
+		// checked before editor actions — keep these defaults disjoint.
+		defaultKeys: "ctrl+shift+e",
 		description: "Open subagent experiments dashboard",
 	},
 	"app.thinking.toggle": {

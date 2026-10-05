@@ -38,7 +38,7 @@ import {
 	updateExperiment,
 } from "./experiment-registry.ts";
 import { getBun } from "./runtime.ts";
-import { runShell, runShellLine, type ShellResult } from "./shell.ts";
+import { runShell, runShellLine, type ShellOptions, type ShellResult } from "./shell.ts";
 import type { SubagentToolOptions } from "./subagent-tool.ts";
 import {
 	cherryPickFromBranch,
@@ -133,13 +133,6 @@ const CompareParams = Type.Object({
 // Helpers
 // ============================================================================
 
-function errorToolResult(message: string): AgentToolResult<unknown> {
-	return {
-		content: [{ type: "text", text: message }],
-		details: { error: message },
-	};
-}
-
 function successToolResult(message: string, details: unknown = {}): AgentToolResult<unknown> {
 	return {
 		content: [{ type: "text", text: message }],
@@ -166,22 +159,29 @@ interface RunCommandResult {
 }
 
 /**
- * Run one shell command inside a worktree and mirror its output into the
+ * Run one command inside a worktree and mirror its output into the
  * experiment's JSONL log chunk by chunk (`{type: "OUTPUT", stream, line}`),
  * matching the reference extension's log format.
+ *
+ * `command` is either a shell line (user-authored `experiment_run` commands)
+ * or an argv array (detected test runners). The argv form never puts
+ * user-supplied filter text on a shell command line.
  */
-async function runCommand(command: string, opts: RunCommandOptions): Promise<RunCommandResult> {
+async function runCommand(command: string | string[], opts: RunCommandOptions): Promise<RunCommandResult> {
 	const onOutput = opts.experimentLogPath
 		? (stream: "stdout" | "stderr", chunk: string) => {
 				appendExperimentLogEvent(opts.experimentLogPath as string, { type: "OUTPUT", stream, line: chunk });
 			}
 		: undefined;
-	const res: ShellResult = await runShellLine(command, {
+	const shellOptions: ShellOptions = {
 		cwd: opts.cwd,
 		timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 		...(opts.signal ? { signal: opts.signal } : {}),
 		...(onOutput ? { onOutput } : {}),
-	});
+	};
+	const res: ShellResult = Array.isArray(command)
+		? await runShell(command[0], command.slice(1), shellOptions)
+		: await runShellLine(command, shellOptions);
 	return {
 		exitCode: res.exitCode,
 		stdout: res.stdout,
@@ -193,25 +193,43 @@ async function runCommand(command: string, opts: RunCommandOptions): Promise<Run
 	};
 }
 
-async function detectTestRunner(cwd: string): Promise<{ name: string; command: string; filterFlag: string } | null> {
+/** A detected test runner: fixed argv prefix plus the flag that carries the filter. */
+export interface TestRunnerPlan {
+	name: string;
+	/** Executable and fixed leading arguments, e.g. `["vitest", "run"]`. */
+	argv: string[];
+	/** Flag before the filter value. `"--"` passes the filter as a positional (npm). */
+	filterFlag: string;
+}
+
+/**
+ * Build the argv for one test run. The filter is always a single argv element —
+ * never quoted or interpolated into a shell line — so filters with spaces or
+ * shell metacharacters reach the runner literally on every platform.
+ */
+export function buildTestArgv(plan: TestRunnerPlan, filter: string | undefined): string[] {
+	return filter ? [...plan.argv, plan.filterFlag, filter] : [...plan.argv];
+}
+
+async function detectTestRunner(cwd: string): Promise<TestRunnerPlan | null> {
 	const bun = getBun();
 	if ((await bun.file(join(cwd, "bun.lockb")).exists()) || (await bun.file(join(cwd, "bun.lock")).exists())) {
-		return { name: "bun", command: "bun test", filterFlag: "-t" };
+		return { name: "bun", argv: ["bun", "test"], filterFlag: "-t" };
 	}
 	if (
 		(await bun.file(join(cwd, "vitest.config.ts")).exists()) ||
 		(await bun.file(join(cwd, "vitest.config.js")).exists())
 	) {
-		return { name: "vitest", command: "npx vitest run", filterFlag: "-t" };
+		return { name: "vitest", argv: ["npx", "vitest", "run"], filterFlag: "-t" };
 	}
 	if (
 		(await bun.file(join(cwd, "jest.config.ts")).exists()) ||
 		(await bun.file(join(cwd, "jest.config.js")).exists())
 	) {
-		return { name: "jest", command: "npx jest", filterFlag: "-t" };
+		return { name: "jest", argv: ["npx", "jest"], filterFlag: "-t" };
 	}
 	if (await bun.file(join(cwd, "package.json")).exists()) {
-		return { name: "npm", command: "npm test --", filterFlag: "--" };
+		return { name: "npm", argv: ["npm", "test"], filterFlag: "--" };
 	}
 	return null;
 }
@@ -283,7 +301,6 @@ export function createExperimentToolDefinitions(
 	cwd: string,
 	options?: SubagentToolOptions,
 ): Record<ExperimentToolName, ToolDefinition> {
-	const worktreeBase = options?.worktreeBase ?? DEFAULT_SUBAGENT_SETTINGS.worktreeBase;
 	const onRegistryChanged = options?.onRegistryChanged;
 
 	const experiment_start: ToolDefinition = {
@@ -293,21 +310,24 @@ export function createExperimentToolDefinitions(
 		parameters: StartParams,
 		async execute(_id, params: Static<typeof StartParams>, _signal, _onUpdate) {
 			if (!(await isGitRepo(cwd))) {
-				return errorToolResult(`Not a git repository: ${cwd}. Experimental mode requires git.`);
+				throw new Error(`Not a git repository: ${cwd}. Experimental mode requires git.`);
 			}
 			let parentCommit: string;
 			try {
 				parentCommit = params.parent_commit ?? (await currentHead(cwd));
 			} catch (err) {
-				return errorToolResult(
-					`Could not resolve parent commit: ${err instanceof Error ? err.message : String(err)}`,
-				);
+				throw new Error(`Could not resolve parent commit: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			const id = makeExperimentId(params.approach_name);
+			// Read live per dispatch — see SubagentToolOptions.subagentSettings.
+			const worktreeBase = options?.subagentSettings?.().worktreeBase ?? DEFAULT_SUBAGENT_SETTINGS.worktreeBase;
 			const work = await createWorktree(cwd, params.approach_name, parentCommit, worktreeBase);
-			if (work.exitCode !== 0) {
-				return errorToolResult(
-					`git worktree add failed (exit ${work.exitCode}): ${work.stderr.trim() || work.stdout.trim()}`,
+			// complete:false means the git output was cut short — the result is
+			// untrustworthy even when the exit code says success.
+			if (work.exitCode !== 0 || work.complete === false) {
+				throw new Error(
+					work.error ??
+						`git worktree add failed (exit ${work.exitCode}): ${work.stderr.trim() || work.stdout.trim()}`,
 				);
 			}
 			const logFile = logPath(cwd, id);
@@ -351,7 +371,7 @@ export function createExperimentToolDefinitions(
 		parameters: RunParams,
 		async execute(_id, params: Static<typeof RunParams>, signal, _onUpdate) {
 			const row = getExperiment(cwd, params.experiment_id);
-			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			if (!row) throw new Error(`Unknown experiment: ${params.experiment_id}`);
 			const logFile = logPath(cwd, row.id);
 			ensureExperimentLog(logFile);
 			appendExperimentLogEvent(logFile, {
@@ -396,20 +416,16 @@ export function createExperimentToolDefinitions(
 		parameters: TestParams,
 		async execute(_id, params: Static<typeof TestParams>, signal, _onUpdate) {
 			const row = getExperiment(cwd, params.experiment_id);
-			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			if (!row) throw new Error(`Unknown experiment: ${params.experiment_id}`);
 			const detector = await detectTestRunner(row.worktreePath);
 			if (!detector) {
-				return errorToolResult(
-					"Could not detect a test runner. Pass an explicit command via experiment_run instead.",
-				);
+				throw new Error("Could not detect a test runner. Pass an explicit command via experiment_run instead.");
 			}
-			const command = params.filter
-				? `${detector.command} ${detector.filterFlag} ${`'${params.filter.replace(/'/g, "'\\''")}'`}`
-				: detector.command;
+			const argv = buildTestArgv(detector, params.filter);
 			const logFile = logPath(cwd, row.id);
 			ensureExperimentLog(logFile);
-			appendExperimentLogEvent(logFile, { type: "TEST_STARTED", runner: detector.name, command });
-			const result = await runCommand(command, {
+			appendExperimentLogEvent(logFile, { type: "TEST_STARTED", runner: detector.name, command: argv.join(" ") });
+			const result = await runCommand(argv, {
 				cwd: row.worktreePath,
 				...(signal ? { signal } : {}),
 				experimentLogPath: logFile,
@@ -444,11 +460,12 @@ export function createExperimentToolDefinitions(
 		parameters: DiffParams,
 		async execute(_id, params: Static<typeof DiffParams>) {
 			const row = getExperiment(cwd, params.experiment_id);
-			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			if (!row) throw new Error(`Unknown experiment: ${params.experiment_id}`);
 			const diff = await diffVsParent(row.worktreePath, row.parentCommit);
-			if (diff.raw.exitCode !== 0) {
-				return errorToolResult(
-					`git diff failed (exit ${diff.raw.exitCode}): ${diff.raw.stderr.trim() || diff.raw.stdout.trim()}`,
+			if (diff.raw.exitCode !== 0 || diff.raw.complete === false) {
+				throw new Error(
+					diff.raw.error ??
+						`git diff failed (exit ${diff.raw.exitCode}): ${diff.raw.stderr.trim() || diff.raw.stdout.trim()}`,
 				);
 			}
 			const commitList =
@@ -473,8 +490,10 @@ export function createExperimentToolDefinitions(
 		parameters: MergeParams,
 		async execute(_id, params: Static<typeof MergeParams>) {
 			const row = getExperiment(cwd, params.experiment_id);
-			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
-			if (row.merged) return errorToolResult(`Experiment ${row.id} is already merged.`);
+			if (!row) throw new Error(`Unknown experiment: ${params.experiment_id}`);
+			if (row.merged) throw new Error(`Experiment ${row.id} is already merged.`);
+			// Read live per dispatch — see SubagentToolOptions.subagentSettings.
+			const worktreeBase = options?.subagentSettings?.().worktreeBase ?? DEFAULT_SUBAGENT_SETTINGS.worktreeBase;
 
 			// Refuse to merge if the main worktree has uncommitted changes (ignoring
 			// the registry dir and the worktree base, which are expected untracked).
@@ -483,7 +502,7 @@ export function createExperimentToolDefinitions(
 				{ cwd },
 			);
 			if (status.stdout.trim().length > 0) {
-				return errorToolResult(
+				throw new Error(
 					`Main worktree has uncommitted changes. Commit or stash them before merging an experiment.\n${status.stdout}`,
 				);
 			}
@@ -491,12 +510,13 @@ export function createExperimentToolDefinitions(
 			if (params.strategy === "cherry-pick") {
 				const head = await runShell("git", ["rev-parse", row.branch], { cwd });
 				if (head.exitCode !== 0) {
-					return errorToolResult(`Could not resolve ${row.branch}: ${head.stderr.trim() || head.stdout.trim()}`);
+					throw new Error(`Could not resolve ${row.branch}: ${head.stderr.trim() || head.stdout.trim()}`);
 				}
 				const pick = await cherryPickFromBranch(cwd, row.branch, head.stdout.trim());
-				if (pick.exitCode !== 0) {
-					return errorToolResult(
-						`Cherry-pick failed (exit ${pick.exitCode}): ${pick.stderr.trim() || pick.stdout.trim()}`,
+				if (pick.exitCode !== 0 || pick.complete === false) {
+					throw new Error(
+						pick.error ??
+							`Cherry-pick failed (exit ${pick.exitCode}): ${pick.stderr.trim() || pick.stdout.trim()}`,
 					);
 				}
 				await finalizeExperimentMerge(cwd, row, "cherry-pick", pick.newCommit, onRegistryChanged);
@@ -507,16 +527,16 @@ export function createExperimentToolDefinitions(
 
 			if (params.strategy === "squash") {
 				if (!params.squash_message) {
-					return errorToolResult("strategy='squash' requires squash_message.");
+					throw new Error("strategy='squash' requires squash_message.");
 				}
 				const sq = await squashSinceParent(cwd, row.branch, row.parentCommit, params.squash_message);
-				if (sq.exitCode !== 0) {
-					return errorToolResult(`Squash failed (exit ${sq.exitCode}): ${sq.stderr.trim() || sq.stdout.trim()}`);
+				if (sq.exitCode !== 0 || sq.complete === false) {
+					throw new Error(
+						sq.error ?? `Squash failed (exit ${sq.exitCode}): ${sq.stderr.trim() || sq.stdout.trim()}`,
+					);
 				}
 				if (sq.wasNoOp) {
-					return errorToolResult(
-						"No commits to squash. The experiment worktree has no commits beyond the parent.",
-					);
+					throw new Error("No commits to squash. The experiment worktree has no commits beyond the parent.");
 				}
 				await finalizeExperimentMerge(cwd, row, "squash", sq.newCommit, onRegistryChanged);
 				return successToolResult(
@@ -530,19 +550,12 @@ export function createExperimentToolDefinitions(
 				{ cwd },
 			);
 			if (merge.exitCode !== 0) {
-				return errorToolResult(
-					`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`,
-				);
+				throw new Error(`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`);
 			}
 			const head = await runShell("git", ["rev-parse", "HEAD"], { cwd });
-			await finalizeExperimentMerge(
-				cwd,
-				row,
-				"merge",
-				head.exitCode === 0 ? head.stdout.trim() : undefined,
-				onRegistryChanged,
-			);
-			return successToolResult(`Merged ${row.branch} into main as ${head.stdout.trim().slice(0, 7)}`);
+			const newCommit = head.exitCode === 0 ? head.stdout.trim() : undefined;
+			await finalizeExperimentMerge(cwd, row, "merge", newCommit, onRegistryChanged);
+			return successToolResult(`Merged ${row.branch} into main as ${newCommit?.slice(0, 7) ?? "(unknown)"}`);
 		},
 	};
 
@@ -554,7 +567,7 @@ export function createExperimentToolDefinitions(
 		parameters: DiscardParams,
 		async execute(_id, params: Static<typeof DiscardParams>) {
 			const row = getExperiment(cwd, params.experiment_id);
-			if (!row) return errorToolResult(`Unknown experiment: ${params.experiment_id}`);
+			if (!row) throw new Error(`Unknown experiment: ${params.experiment_id}`);
 			const keepBranch = params.keep_branch ?? true;
 			if (keepBranch) {
 				const whyPath = join(row.worktreePath, "WHY_IT_FAILED.md");
@@ -576,9 +589,9 @@ export function createExperimentToolDefinitions(
 				}
 			}
 			const removed = await removeWorktree(cwd, row.worktreePath, true);
-			if (removed.exitCode !== 0) {
-				return errorToolResult(
-					`git worktree remove failed (exit ${removed.exitCode}): ${removed.stderr.trim()}\n\n` +
+			if (removed.exitCode !== 0 || removed.complete === false) {
+				throw new Error(
+					`${removed.error ?? `git worktree remove failed (exit ${removed.exitCode}): ${removed.stderr.trim()}`}\n\n` +
 						`On Windows this often means MAX_PATH or a handle lock. Move the build dir aside and retry:\n` +
 						` Move-Item "${row.worktreePath}\\node_modules" "${row.worktreePath}\\__nm_backup" -Force\n` +
 						` git worktree remove --force "${row.worktreePath}"`,
@@ -625,8 +638,8 @@ export function createExperimentToolDefinitions(
 		async execute(_id, params: Static<typeof CompareParams>) {
 			const a = getExperiment(cwd, params.exp_id_1);
 			const b = getExperiment(cwd, params.exp_id_2);
-			if (!a) return errorToolResult(`Unknown experiment: ${params.exp_id_1}`);
-			if (!b) return errorToolResult(`Unknown experiment: ${params.exp_id_2}`);
+			if (!a) throw new Error(`Unknown experiment: ${params.exp_id_1}`);
+			if (!b) throw new Error(`Unknown experiment: ${params.exp_id_2}`);
 			const axes = params.axes ?? Object.keys({ ...a.result.benchmarks, ...b.result.benchmarks });
 			const lines: string[] = [];
 			for (const axis of axes) {

@@ -28,6 +28,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel
 import type { Message } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
+import { DEFAULT_SUBAGENT_SETTINGS, type ResolvedSubagentSettings } from "../defaults.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
 import { type BackgroundRegistry, getBackgroundRegistry, startBackgroundSubagent } from "./background.ts";
@@ -46,11 +47,12 @@ import {
 	type SubagentSpec,
 } from "./types.ts";
 
-/** Per-task model-facing output cap in parallel mode. Full output stays in tool details. */
+/**
+ * Model-facing output cap: parallel per-task summaries, single/chain result
+ * text, and the `{previous}` substitution input. Full output stays in tool
+ * details.
+ */
 export const PER_TASK_OUTPUT_CAP = 50 * 1024;
-
-const DEFAULT_MAX_CONCURRENT = 4;
-const DEFAULT_MAX_PARALLEL_TASKS = 8;
 
 const subagentSpecSchema = Type.Object({
 	role: Type.String({
@@ -149,10 +151,12 @@ export interface SubagentToolOptions {
 	runner?: SubagentRunner;
 	/** Settings reader; the guard reads the `subagent.enabled` master switch from it. */
 	settings?: SubagentSettingsReader;
-	/** Max subagents running at once in parallel mode. Default 4. */
-	maxConcurrent?: number;
-	/** Max tasks accepted in one parallel call. Default 8. */
-	maxParallelTasks?: number;
+	/**
+	 * Live `subagent.*` settings (maxConcurrent, maxParallelTasks, worktreeBase),
+	 * read at dispatch time so mid-session settings changes take effect without a
+	 * runtime rebuild. Defaults to DEFAULT_SUBAGENT_SETTINGS when absent.
+	 */
+	subagentSettings?: () => ResolvedSubagentSettings;
 	/** Parent session model + thinking level, read at dispatch time for inheritance. */
 	getParentContext?: () => { model?: string; thinkingLevel?: ThinkingLevel };
 	/**
@@ -170,8 +174,6 @@ export interface SubagentToolOptions {
 	onBackgroundSettled?: (taskId: string, result: SubagentResult) => void;
 	/** Background registry. Defaults to the on-disk singleton. Injectable for tests. */
 	registry?: BackgroundRegistry;
-	/** Base dir for experiment worktrees (`subagent.worktreeBase`). */
-	worktreeBase?: string;
 	/** Called after experiment registry mutations so the UI can refresh its status pill. */
 	onRegistryChanged?: () => void;
 }
@@ -298,16 +300,26 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 	return results;
 }
 
-/** Cap one parallel task's model-facing output at PER_TASK_OUTPUT_CAP bytes. */
-function truncateParallelOutput(output: string): string {
+/**
+ * Cap model-facing output at PER_TASK_OUTPUT_CAP bytes (UTF-8).
+ *
+ * Trimming walks code points via the string iterator, so the cut can never
+ * split a UTF-16 surrogate pair.
+ */
+function truncateModelFacingOutput(output: string): string {
 	const byteLength = Buffer.byteLength(output, "utf8");
 	if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
 
-	let truncated = output.slice(0, PER_TASK_OUTPUT_CAP);
-	while (Buffer.byteLength(truncated, "utf8") > PER_TASK_OUTPUT_CAP) {
-		truncated = truncated.slice(0, -1);
+	let keptBytes = 0;
+	let keptLength = 0;
+	for (const codePoint of output) {
+		const width = Buffer.byteLength(codePoint, "utf8");
+		if (keptBytes + width > PER_TASK_OUTPUT_CAP) break;
+		keptBytes += width;
+		keptLength += codePoint.length;
 	}
-	return `${truncated}\n\n[Output truncated: ${byteLength - Buffer.byteLength(truncated, "utf8")} bytes omitted. Full output preserved in tool details.]`;
+	const truncated = output.slice(0, keptLength);
+	return `${truncated}\n\n[Output truncated: ${byteLength - keptBytes} bytes omitted. Full output preserved in tool details.]`;
 }
 
 function specFromInput(input: {
@@ -371,8 +383,6 @@ export function createSubagentToolDefinition(
 		defaultRunner ??= createBunProcessRunner();
 		return options?.runner ?? defaultRunner;
 	};
-	const maxConcurrent = options?.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
-	const maxParallelTasks = options?.maxParallelTasks ?? DEFAULT_MAX_PARALLEL_TASKS;
 
 	return {
 		name: "subagent",
@@ -394,18 +404,20 @@ export function createSubagentToolDefinition(
 		},
 
 		async execute(_toolCallId, rawParams, signal, onUpdate) {
+			// Failure contract (matches agent-loop): dispatch failures (invalid
+			// params, unknown model) and single/chain run failures THROW — the loop
+			// turns a thrown error into error content + isError:true. A parallel
+			// batch with per-task failures still resolves: the call itself worked.
 			const parent = options?.getParentContext?.() ?? {};
 			const runner = getRunner();
+			// Read live per dispatch — see SubagentToolOptions.subagentSettings.
+			const subagentSettings = options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS;
 
 			const resolution = options?.resolveModel
 				? resolveModelOverrides(rawParams, options.resolveModel)
 				: { input: rawParams };
 			if (resolution.error !== undefined) {
-				return {
-					content: [{ type: "text", text: resolution.error }],
-					details: { mode: "single", results: [] },
-					isError: true,
-				};
+				throw new Error(resolution.error);
 			}
 			const params = resolution.input;
 
@@ -419,16 +431,9 @@ export function createSubagentToolDefinition(
 			const mode: SubagentMode = chain.length > 0 ? "chain" : tasks.length > 0 ? "parallel" : "single";
 
 			if (modeCount !== 1) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "Invalid parameters. Provide exactly one mode: `{ role, instructions }` (single), `{ tasks }` (parallel), or `{ chain }` (sequential).",
-						},
-					],
-					details: { mode, results: [] },
-					isError: true,
-				};
+				throw new Error(
+					"Invalid parameters. Provide exactly one mode: `{ role, instructions }` (single), `{ tasks }` (parallel), or `{ chain }` (sequential).",
+				);
 			}
 
 			// ----------------------------------------------------------------
@@ -465,11 +470,12 @@ export function createSubagentToolDefinition(
 
 				const taskIds: string[] = [];
 				if (singleSpec) {
+					// fire() returns the post-add registry id (add() reassigns on a
+					// collision), so the reported id always matches the registry.
 					taskIds.push(fire(singleSpec, undefined));
 				} else if (tasks.length > 0) {
 					const ids = tasks.map(() => registry.makeTaskId());
-					for (let i = 0; i < tasks.length; i++) fire(specFromInput(tasks[i]), ids[i]);
-					taskIds.push(...ids);
+					for (let i = 0; i < tasks.length; i++) taskIds.push(fire(specFromInput(tasks[i]), ids[i]));
 				} else {
 					const ids = chain.map(() => registry.makeTaskId());
 					taskIds.push(...ids);
@@ -477,14 +483,25 @@ export function createSubagentToolDefinition(
 						const stepInput = chain[index];
 						const spec = specFromInput({
 							...stepInput,
-							instructions: stepInput.instructions.replace(/\{previous\}/g, previousOutput),
+							// Function replacement: a literal $ pattern in `previousOutput`
+							// must not be reinterpreted by `replace`.
+							instructions: stepInput.instructions.replace(/\{previous\}/g, () =>
+								truncateModelFacingOutput(previousOutput),
+							),
 						});
-						fire(spec, ids[index], (taskId, result) => {
+						// Steps beyond the first fire only when their predecessor settles,
+						// so their pre-generated ids are all the up-front summary can name.
+						// Record the post-add id back into the tracked arrays (add()
+						// reassigns on a collision) so every later report and the
+						// onSettled callback line up with the registry.
+						const finalId = fire(spec, ids[index], (taskId, result) => {
 							options?.onBackgroundSettled?.(taskId, result);
 							const next = index + 1;
 							if (next >= chain.length || isFailedSubagentResult(result)) return;
 							fireStep(next, result.finalOutput);
 						});
+						ids[index] = finalId;
+						taskIds[index] = finalId;
 					};
 					fireStep(0, "");
 				}
@@ -509,7 +526,11 @@ export function createSubagentToolDefinition(
 					const stepInput = chain[i];
 					const spec = specFromInput({
 						...stepInput,
-						instructions: stepInput.instructions.replace(/\{previous\}/g, previousOutput),
+						// Function replacement: a literal $ pattern in `previousOutput`
+						// must not be reinterpreted by `replace`.
+						instructions: stepInput.instructions.replace(/\{previous\}/g, () =>
+							truncateModelFacingOutput(previousOutput),
+						),
 					});
 					const result = await runOne(runner, spec, cwd, parent, i + 1, signal, (snapshot) => {
 						onUpdate?.({
@@ -519,22 +540,16 @@ export function createSubagentToolDefinition(
 					});
 					results.push(result);
 					if (isFailedSubagentResult(result)) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Chain stopped at step ${i + 1} (${stepInput.role}): ${getSubagentResultOutput(result)}`,
-								},
-							],
-							details: { mode: "chain", results },
-							isError: true,
-						};
+						throw new Error(
+							`Chain stopped at step ${i + 1} (${stepInput.role}): ${getSubagentResultOutput(result)}`,
+						);
 					}
 					previousOutput = result.finalOutput;
 				}
 				const last = results[results.length - 1];
+				const finalText = truncateModelFacingOutput(last?.finalOutput ?? "");
 				return {
-					content: [{ type: "text", text: last?.finalOutput || "(no output)" }],
+					content: [{ type: "text", text: finalText || "(no output)" }],
 					details: { mode: "chain", results },
 				};
 			}
@@ -543,17 +558,10 @@ export function createSubagentToolDefinition(
 			// Parallel: bounded concurrency, per-task output cap
 			// ----------------------------------------------------------------
 			if (tasks.length > 0) {
-				if (tasks.length > maxParallelTasks) {
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Too many parallel tasks (${tasks.length}). Max is ${maxParallelTasks} (subagent.maxParallelTasks).`,
-							},
-						],
-						details: { mode: "parallel", results: [] },
-						isError: true,
-					};
+				if (tasks.length > subagentSettings.maxParallelTasks) {
+					throw new Error(
+						`Too many parallel tasks (${tasks.length}). Max is ${subagentSettings.maxParallelTasks} (subagent.maxParallelTasks).`,
+					);
 				}
 
 				const allResults: SubagentResult[] = tasks.map((task) => ({
@@ -578,24 +586,39 @@ export function createSubagentToolDefinition(
 					});
 				};
 
-				const results = await mapWithConcurrencyLimit(tasks, maxConcurrent, async (task, index) => {
-					const result = await runOne(runner, specFromInput(task), cwd, parent, undefined, signal, (snapshot) => {
-						allResults[index] = snapshot;
+				const results = await mapWithConcurrencyLimit(
+					tasks,
+					subagentSettings.maxConcurrent,
+					async (task, index) => {
+						const result = await runOne(
+							runner,
+							specFromInput(task),
+							cwd,
+							parent,
+							undefined,
+							signal,
+							(snapshot) => {
+								allResults[index] = snapshot;
+								emitParallelUpdate();
+							},
+						);
+						allResults[index] = result;
 						emitParallelUpdate();
-					});
-					allResults[index] = result;
-					emitParallelUpdate();
-					return result;
-				});
+						return result;
+					},
+				);
 
 				const successCount = results.filter((r) => !isFailedSubagentResult(r)).length;
 				const summaries = results.map((r) => {
-					const output = truncateParallelOutput(getSubagentResultOutput(r));
+					const output = truncateModelFacingOutput(getSubagentResultOutput(r));
 					const status = isFailedSubagentResult(r)
 						? `failed${r.stopReason && r.stopReason !== "end" ? ` (${r.stopReason})` : ""}`
 						: "completed";
 					return `### [${r.role}] ${status}\n\n${output}`;
 				});
+				// A partially failed batch is a resolved result — the tool did its job
+				// and the per-task summaries carry each failure. Only a failed dispatch
+				// throws.
 				return {
 					content: [
 						{
@@ -604,7 +627,6 @@ export function createSubagentToolDefinition(
 						},
 					],
 					details: { mode: "parallel", results },
-					...(successCount === results.length ? {} : { isError: true }),
 				};
 			}
 
@@ -619,19 +641,12 @@ export function createSubagentToolDefinition(
 				});
 			});
 			if (isFailedSubagentResult(result)) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Subagent ${result.role} ${result.stopReason || "failed"}: ${getSubagentResultOutput(result)}`,
-						},
-					],
-					details: { mode: "single", results: [result] },
-					isError: true,
-				};
+				throw new Error(
+					`Subagent ${result.role} ${result.stopReason || "failed"}: ${getSubagentResultOutput(result)}`,
+				);
 			}
 			return {
-				content: [{ type: "text", text: result.finalOutput || "(no output)" }],
+				content: [{ type: "text", text: truncateModelFacingOutput(result.finalOutput) || "(no output)" }],
 				details: { mode: "single", results: [result] },
 			};
 		},

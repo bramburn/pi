@@ -715,6 +715,7 @@ describe("ModelRegistry", () => {
 
 			// Other models should be unchanged
 			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.8");
+			expect(opus).toBeDefined();
 			expect(opus?.name).not.toBe("Custom Sonnet Name");
 		});
 
@@ -786,6 +787,7 @@ describe("ModelRegistry", () => {
 
 			// Models without sampling config keep it unset.
 			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.8");
+			expect(opus).toBeDefined();
 			expect(opus?.samplingParams).toBeUndefined();
 		});
 
@@ -825,6 +827,7 @@ describe("ModelRegistry", () => {
 			const models = getModelsForProvider(registry, "openrouter");
 			const sonnet = models.find((model) => model.id === "anthropic/claude-sonnet-4");
 			const opus = models.find((model) => model.id === "anthropic/claude-opus-4.8");
+			expect(opus).toBeDefined();
 
 			expect((sonnet?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(false);
 			expect((opus?.compat as OpenAICompletionsCompat | undefined)?.supportsFinishReason).toBe(true);
@@ -871,6 +874,7 @@ describe("ModelRegistry", () => {
 
 			const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-4");
 			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.8");
+			expect(opus).toBeDefined();
 
 			const sonnetCompat = sonnet?.compat as OpenAICompletionsCompat | undefined;
 			const opusCompat = opus?.compat as OpenAICompletionsCompat | undefined;
@@ -900,6 +904,7 @@ describe("ModelRegistry", () => {
 
 			// Other models should have the baseUrl but not the name override
 			const opus = models.find((m) => m.id === "anthropic/claude-opus-4.8");
+			expect(opus).toBeDefined();
 			expect(opus?.baseUrl).toBe("https://my-proxy.example.com/v1");
 			expect(opus?.name).not.toBe("Proxied Sonnet");
 		});

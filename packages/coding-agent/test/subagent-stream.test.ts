@@ -19,10 +19,13 @@ import { getBun, isBunRuntime } from "../src/core/subagent/runtime.ts";
 import { collectStream, createStreamPump } from "../src/core/subagent/stream.ts";
 
 /**
- * A stand-in for a subprocess pipe whose writer never closes: the grandchild
- * case, without needing a grandchild.
+ * A stand-in for a subprocess pipe. `close: false` models a surviving
+ * grandchild (the pipe stays open forever); `close: true` models a clean EOF.
  */
-function createNeverClosingPipe(chunks: string[]): {
+function createFakePipe(
+	chunks: string[],
+	close: boolean,
+): {
 	getReader: () => {
 		read: () => Promise<{ done: boolean; value?: Uint8Array }>;
 		cancel: (reason?: unknown) => Promise<void>;
@@ -39,6 +42,7 @@ function createNeverClosingPipe(chunks: string[]): {
 					index += 1;
 					return Promise.resolve({ done: false, value });
 				}
+				if (close) return Promise.resolve({ done: true });
 				// A surviving grandchild: the pipe stays open forever.
 				return new Promise<{ done: boolean; value?: Uint8Array }>(() => {});
 			},
@@ -50,7 +54,7 @@ function createNeverClosingPipe(chunks: string[]): {
 
 describe("subagent stream lifetime", () => {
 	it("collectStream returns partial output when the writer never closes", async () => {
-		const pipe = createNeverClosingPipe(["first", "second"]);
+		const pipe = createFakePipe(["first", "second"], false);
 		const started = Date.now();
 		const result = await collectStream(pipe, 100);
 		const elapsed = Date.now() - started;
@@ -61,15 +65,14 @@ describe("subagent stream lifetime", () => {
 	});
 
 	it("collectStream reports a clean EOF as complete", async () => {
-		const pipe = createNeverClosingPipe(["only"]);
+		const pipe = createFakePipe(["only"], true);
 		const result = await collectStream(pipe, 100);
-		// The fake keeps the pipe open, so this is the partial-read shape; the
-		// complete=true case is asserted by the Bun-only test below.
 		expect(result.text).toBe("only");
+		expect(result.complete).toBe(true);
 	});
 
 	it("createStreamPump streams chunks before release and keeps them", async () => {
-		const pipe = createNeverClosingPipe(["a", "b", "c"]);
+		const pipe = createFakePipe(["a", "b", "c"], false);
 		const seen: string[] = [];
 		const pump = createStreamPump(pipe, (chunk) => seen.push(chunk));
 
@@ -84,7 +87,7 @@ describe("subagent stream lifetime", () => {
 	});
 
 	it("release is idempotent", async () => {
-		const pipe = createNeverClosingPipe(["x"]);
+		const pipe = createFakePipe(["x"], false);
 		const pump = createStreamPump(pipe);
 		await pump.release(20);
 		await pump.release(20);

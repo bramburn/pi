@@ -126,6 +126,7 @@ This routing remains configurable through the ordinary action bindings. For exam
 | `app.suspend` | `ctrl+z` (none on Windows) | Suspend to background |
 | `app.editor.external` | `ctrl+g` | Open in external editor (`externalEditor`, `$VISUAL`, `$EDITOR`, Notepad on Windows, or `nano` elsewhere) |
 | `app.clipboard.pasteImage` | `ctrl+v` (`alt+v` on Windows and WSL) | Paste image or text from clipboard |
+| `app.subagent.experimentsDashboard` | `ctrl+shift+e` | Open the subagent experiments dashboard (only active with `subagent.enableExperiments` enabled) |
 
 ### Sessions
 

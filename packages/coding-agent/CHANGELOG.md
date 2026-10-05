@@ -12,6 +12,10 @@
 ### Fixed
 
 - Fixed `EEXIST: file already exists` crash when switching models before the first assistant message on a new session.
+- Subagent subprocess handling: stream pumps flush at EOF and release with a bounded post-exit grace instead of stalling on a grandchild-held pipe, truncated output and capped stderr are surfaced instead of silently dropped, the kill escalation no longer fires after the child exits, and prompt temp files are created exclusively so their names are not predictable.
+- Subagent registries: an unreadable registry is preserved as `*.corrupt-<ts>` instead of being silently rewritten empty, a stale lock left by a crashed session is detected (owner pid/age/token) and broken instead of bricking writes for every session, and lock waits no longer busy-spin a CPU core.
+- Subagent tool contract: single and chain failures now surface as real tool errors (the loop's throw contract) instead of encoded results, `experiment_test` filters pass as a single argv element so they work on Windows, `{previous}` substitution no longer corrupts `$` patterns in the previous output, and the 50KB model-facing cap applies in all modes. Subagent settings (concurrency limits, `worktreeBase`, Research Mode trigger count) are read at dispatch time, so mid-session changes apply immediately.
+- Wiring and worktree hygiene: the experiments dashboard moved to `Ctrl+Shift+E` (`Ctrl+E` collided with cursor line end) and registers only when `subagent.enableExperiments` is on, footer pills are project-scoped and clear when stale, analytics spans settle even when already flushed, and by-name tool factories enforce the registration guards. Worktrees delete their `exp/*` branch on removal, a failed `experiment_start` cleans up partial worktrees, and a cherry-pick conflict aborts instead of leaving a conflicted index behind.
 
 ## [0.85.0-b1] - 2026-09-14
 

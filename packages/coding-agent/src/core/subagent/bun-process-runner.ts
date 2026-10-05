@@ -10,8 +10,8 @@
  *
  * `Bun.spawn` starts faster than `node:child_process` (which matters at 4
  * concurrent children) and exposes stdout as a web `ReadableStream`, which is
- * read through `collectStream` so a grandchild holding the pipe cannot hang the
- * parent. There is no `node:child_process` fallback: pi is Bun-only, and the
+ * read through early stream pumps so a grandchild holding the pipe cannot hang
+ * the parent. There is no `node:child_process` fallback: pi is Bun-only, and the
  * tool factory gates registration on `isBunRuntime()` so this runner is never
  * reached elsewhere.
  *
@@ -19,11 +19,13 @@
  * replacement — they are the POSIX path primitives, not Node-only code.
  */
 
+import { closeSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
-import { killProcessTree, trackDetachedChildPid, untrackDetachedChildPid } from "../../utils/shell.ts";
-import { type BunApi, getBun } from "./runtime.ts";
+import { trackDetachedChildPid, untrackDetachedChildPid } from "../../utils/shell.ts";
+import { type BunApi, type BunSpawnOptions, getBun } from "./runtime.ts";
+import { createKillController, HARD_KILL_EXIT_CODE } from "./shell.ts";
 import { createStreamPump } from "./stream.ts";
 import {
 	createEmptyUsage,
@@ -34,12 +36,19 @@ import {
 } from "./types.ts";
 
 const MAX_LOG_LINE_BYTES = 1_000_000;
-const SIGKILL_GRACE_MS = 5_000;
+/** Cap on retained child stderr: head + tail of a possibly huge stream. */
+const MAX_STDERR_CHARS = 1_000_000;
 const PROMPT_DIR_PREFIX = "pi-subagent-";
+/** Exclusive-create attempts before giving up on a private prompt file name. */
+const MAX_PROMPT_FILE_ATTEMPTS = 10;
 
 export interface BunProcessRunnerOptions {
 	/** Override how the child `pi` is invoked. Defaults to self-re-exec, then `pi` on PATH. */
 	resolveInvocation?: (args: string[]) => { command: string; args: string[] };
+	/** Bun API override, for tests. Defaults to the real runtime. */
+	bun?: BunApi;
+	/** Kill escalation grace: first kill → SIGKILL → give up, each after this long. Default 5000ms. */
+	killGraceMs?: number;
 }
 
 // ============================================================================
@@ -52,10 +61,10 @@ export interface BunProcessRunnerOptions {
  * A compiled Bun binary re-spawns itself via `process.execPath`; running from
  * source re-runs the current script; otherwise fall back to `pi` on PATH.
  */
-export async function getPiInvocation(args: string[]): Promise<{ command: string; args: string[] }> {
+export async function getPiInvocation(args: string[], bun?: BunApi): Promise<{ command: string; args: string[] }> {
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
-	if (currentScript && !isBunVirtualScript && (await getBun().file(currentScript).exists())) {
+	if (currentScript && !isBunVirtualScript && (await (bun ?? getBun()).file(currentScript).exists())) {
 		return { command: process.execPath, args: [currentScript, ...args] };
 	}
 
@@ -94,23 +103,44 @@ let promptFileCounter = 0;
  * Write the child's system prompt to a private temp file and pass it via
  * `--append-system-prompt`.
  *
+ * The file is created exclusively (`openSync` with `wx` / O_EXCL) at mode
+ * 0600: the name is predictable in a shared tmpdir, so without O_EXCL another
+ * local user could pre-create a symlink there and read the prompt — or worse,
+ * swap its target. O_EXCL fails on any pre-existing name, symlinks included,
+ * so the worst an attacker gains is denial-of-service; a collision retries
+ * with a fresh name. The content is then written with `Bun.write`, which
+ * truncates the file we just created and keeps its 0600 mode (between create
+ * and write nobody else can replace the file: the sticky bit on POSIX tmpdirs
+ * forbids removing another user's file).
+ *
  * A flat temp file, not a per-run temp directory: `Bun.write` creates missing
  * parent directories, and a single file is removed with `Bun.file().delete()`.
  * That avoids a recursive delete, which would need either `node:fs` or a POSIX
  * `rm` that does not exist on Windows.
  */
-async function writeInstructionsToTempFile(role: string, instructions: string): Promise<string> {
+async function writeInstructionsToTempFile(role: string, instructions: string, bun: BunApi): Promise<string> {
 	const safeRole = role.replace(/[^\w.-]+/g, "_");
-	promptFileCounter += 1;
-	const name = `${PROMPT_DIR_PREFIX}${Date.now().toString(36)}-${process.pid}-${promptFileCounter}-${safeRole}.md`;
-	const file = join(tmpdir(), name);
-	await getBun().write(file, instructions);
-	return file;
+	for (let attempt = 0; attempt < MAX_PROMPT_FILE_ATTEMPTS; attempt += 1) {
+		promptFileCounter += 1;
+		const name = `${PROMPT_DIR_PREFIX}${Date.now().toString(36)}-${process.pid}-${promptFileCounter}-${safeRole}.md`;
+		const file = join(tmpdir(), name);
+		let fd: number;
+		try {
+			fd = openSync(file, "wx", 0o600);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+			throw error;
+		}
+		closeSync(fd);
+		await bun.write(file, instructions);
+		return file;
+	}
+	throw new Error("Could not create an exclusive prompt temp file");
 }
 
-async function removePromptFile(file: string | null): Promise<void> {
+async function removePromptFile(file: string | null, bun: BunApi): Promise<void> {
 	if (!file) return;
-	await getBun()
+	await bun
 		.file(file)
 		.delete()
 		.catch(() => {});
@@ -132,9 +162,11 @@ async function removePromptFile(file: string | null): Promise<void> {
 class EventLog {
 	private lines: string[] = [];
 	private readonly path: string | undefined;
+	private readonly bun: BunApi;
 
-	constructor(path: string | undefined) {
+	constructor(path: string | undefined, bun: BunApi) {
 		this.path = path;
+		this.bun = bun;
 	}
 
 	append(event: Record<string, unknown>): void {
@@ -148,9 +180,9 @@ class EventLog {
 		const payload = `${this.lines.join("\n")}\n`;
 		this.lines = [];
 		try {
-			const existing = await getBun().file(this.path).exists();
-			const previous = existing ? await getBun().file(this.path).text() : "";
-			await getBun().write(this.path, `${previous}${payload}`);
+			const existing = await this.bun.file(this.path).exists();
+			const previous = existing ? await this.bun.file(this.path).text() : "";
+			await this.bun.write(this.path, `${previous}${payload}`);
 		} catch {
 			/* logging is best-effort and must never fail a run */
 		}
@@ -208,10 +240,11 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 			};
 
 			const instructions = request.spec.instructions.trim();
+			const bun = options?.bun ?? getBun();
 			let promptFile: string | null = null;
 			try {
 				if (instructions) {
-					promptFile = await writeInstructionsToTempFile(request.spec.role, instructions);
+					promptFile = await writeInstructionsToTempFile(request.spec.role, instructions, bun);
 				}
 
 				const args = buildChildArgs(request);
@@ -219,7 +252,7 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 
 				const invocation = options?.resolveInvocation
 					? options.resolveInvocation(args)
-					: await getPiInvocation(args);
+					: await getPiInvocation(args, bun);
 
 				const childRequest: ChildRequest = {
 					command: invocation.command,
@@ -228,15 +261,15 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 					env: { ...process.env },
 					role: request.spec.role,
 					timeoutMs: request.timeoutMs,
+					killGraceMs: options?.killGraceMs,
 					logPath: request.logPath,
 				};
 
-				const bun = getBun();
 				await runChild(childRequest, signal, result, emit, bun);
 
 				return result;
 			} finally {
-				await removePromptFile(promptFile);
+				await removePromptFile(promptFile, bun);
 			}
 		},
 	};
@@ -249,6 +282,7 @@ interface ChildRequest {
 	env: Record<string, string | undefined>;
 	role: string;
 	timeoutMs?: number;
+	killGraceMs?: number;
 	logPath?: string;
 }
 
@@ -327,12 +361,11 @@ function attachAbort(signal: AbortSignal | undefined, kill: () => void): () => v
 		kill();
 		return () => {};
 	}
-	const onAbort = () => {
-		kill();
-		setTimeout(kill, SIGKILL_GRACE_MS);
-	};
-	signal.addEventListener("abort", onAbort, { once: true });
-	return () => signal.removeEventListener("abort", onAbort);
+	// Kill escalation (SIGKILL after a grace) lives inside the KillController;
+	// a plain callback here cannot deadhead it the way the old paired
+	// `setTimeout(kill, grace)` did against `kill`'s idempotence guard.
+	signal.addEventListener("abort", kill, { once: true });
+	return () => signal.removeEventListener("abort", kill);
 }
 
 function startTimeout(timeoutMs: number | undefined, kill: () => void): NodeJS.Timeout | undefined {
@@ -346,6 +379,42 @@ function startTimeout(timeoutMs: number | undefined, kill: () => void): NodeJS.T
 /** Grace period for reading a pipe after the child has already exited. */
 const POST_EXIT_DRAIN_GRACE_MS = 500;
 
+/**
+ * Bounded text accumulation: keeps the head and tail of a possibly huge
+ * stream and marks the cut, so one noisy child cannot grow parent memory
+ * without limit.
+ */
+class BoundedText {
+	private head = "";
+	private tail = "";
+	private overflow = false;
+	private readonly limit: number;
+
+	constructor(limit: number) {
+		this.limit = limit;
+	}
+
+	append(chunk: string): void {
+		const tailRoom = Math.floor(this.limit / 2);
+		if (!this.overflow) {
+			const room = tailRoom - this.head.length;
+			if (chunk.length <= room) {
+				this.head += chunk;
+				return;
+			}
+			this.head += chunk.slice(0, Math.max(0, room));
+			this.overflow = true;
+			this.tail = chunk.slice(Math.max(0, room)).slice(-tailRoom);
+			return;
+		}
+		this.tail = (this.tail + chunk).slice(-tailRoom);
+	}
+
+	get text(): string {
+		return this.overflow ? `${this.head}\n... [truncated] ...\n${this.tail}` : this.head;
+	}
+}
+
 async function runChild(
 	child: ChildRequest,
 	signal: AbortSignal | undefined,
@@ -355,57 +424,65 @@ async function runChild(
 ): Promise<void> {
 	const streams = createChildStreams();
 	const parser = new JsonLineParser();
-	const log = new EventLog(child.logPath);
-	const proc = bun.spawn([child.command, ...child.args], {
+	const log = new EventLog(child.logPath, bun);
+	const spawnOptions: BunSpawnOptions = {
 		cwd: child.cwd,
 		env: child.env,
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
-	});
+		// Own process group on POSIX so the tree kill reaches grandchildren
+		// (`kill(-pid)` would otherwise ESRCH and orphan them). The Windows
+		// residual limitation is documented on createKillController.
+		detached: true,
+	};
+	const proc = bun.spawn([child.command, ...child.args], spawnOptions);
 	if (proc.pid) trackDetachedChildPid(proc.pid);
 	emit({ type: "spawned", pid: proc.pid });
 	log.append({ type: "SPAWN", role: child.role, pid: proc.pid });
 
 	let killed = false;
 	let timedOut = false;
-	const kill = () => {
-		if (killed) return;
+	const kills = createKillController(proc, child.killGraceMs);
+	const killOnce = () => {
 		killed = true;
-		// The child runs its own tools, so its real descendants are grandchildren.
-		// Signal the whole tree when we can address it.
-		if (proc.pid !== undefined) killProcessTree(proc.pid);
-		else proc.kill("SIGTERM");
+		kills.killOnce();
 	};
-	const detachAbort = attachAbort(signal, kill);
+	const detachAbort = attachAbort(signal, killOnce);
 	const timer = startTimeout(child.timeoutMs, () => {
 		timedOut = true;
-		kill();
+		killOnce();
 	});
 
 	// Parse JSONL as it arrives: a long-running subagent must keep emitting
-	// progress, not stay silent until it exits.
+	// progress, not stay silent until it exits. The pumps run with the child and
+	// release only after it is gone, so the drain grace bounds the post-exit
+	// wait and never the child's lifetime.
 	const stdoutPump = createStreamPump(proc.stdout, (chunk) => {
 		parser.push(chunk, (event) => applyJsonEvent(event, streams, emit));
 	});
-	let stderr = "";
+	const stderrBuffer = new BoundedText(MAX_STDERR_CHARS);
 	const stderrPump = createStreamPump(proc.stderr, (chunk) => {
-		stderr += chunk;
+		stderrBuffer.append(chunk);
 		emit({ type: "stderr", text: chunk });
 		log.append({ type: "STDERR", text: chunk });
 	});
 
-	const exitCode = await proc.exited;
+	// Bounded after a kill: a child that survives even SIGKILL must not hang the
+	// run. waitForExit then resolves null and the synthetic exit code plus
+	// aborted/timedOut flags carry the outcome.
+	const exitCode = await kills.waitForExit();
 	clearTimeout(timer);
 	detachAbort();
 	parser.flush((event) => applyJsonEvent(event, streams, emit));
 	// Only now do we stop waiting for EOF: a surviving grandchild may still hold
 	// the pipe open, and it must not stall the parent after the child is gone.
 	await Promise.all([stdoutPump.release(POST_EXIT_DRAIN_GRACE_MS), stderrPump.release(POST_EXIT_DRAIN_GRACE_MS)]);
+	kills.dispose();
 	if (proc.pid) untrackDetachedChildPid(proc.pid);
 
-	result.stderr = stderr;
-	result.exitCode = exitCode ?? 0;
+	result.stderr = stderrBuffer.text;
+	result.exitCode = exitCode ?? HARD_KILL_EXIT_CODE;
 	finishResult(result, streams, killed, timedOut, child.timeoutMs);
 	const signalName = killed ? "SIGTERM" : null;
 	emit({ type: "exit", exitCode, signal: signalName });

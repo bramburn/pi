@@ -41,24 +41,19 @@ describe("subagent tool integrated dispatch (real child)", () => {
 	);
 
 	it.runIf(isBunRuntime())(
-		"maps a failing real child to an error result",
+		"maps a failing real child to a thrown tool error",
 		async () => {
 			const tool = createSubagentToolDefinition(process.cwd(), {
 				runner: createBunProcessRunner({
 					resolveInvocation: () => ({ command: process.execPath, args: ["-e", CHILD_FAIL] }),
 				}),
 			});
-			const result = await tool.execute(
-				"it2",
-				{ role: "worker", instructions: "go" },
-				undefined,
-				undefined,
-				undefined as never,
-			);
-			expect((result as { isError?: boolean }).isError).toBe(true);
-			const text = (result.content[0] as { text: string }).text;
-			expect(text).toContain("Subagent ");
-			expect(text).toContain("child exploded");
+			// Failure contract: single/chain run failures THROW with
+			// `Subagent <role> <stopReason|failed>: <output>`; the agent loop turns
+			// the throw into the tool error.
+			await expect(
+				tool.execute("it2", { role: "worker", instructions: "go" }, undefined, undefined, undefined as never),
+			).rejects.toThrow("Subagent worker failed: child exploded");
 		},
 		20_000,
 	);

@@ -49,6 +49,12 @@ export interface BunSubprocess {
 export interface BunSpawnOptions {
 	cwd?: string;
 	env?: Record<string, string | undefined>;
+	/**
+	 * Detach the child into its own process group (POSIX) so a tree kill via
+	 * `kill(-pid)` reaches grandchildren. Accepted (and ignored for grouping)
+	 * on Windows. Verified under Bun on both platforms.
+	 */
+	detached?: boolean;
 	/** `"pipe"` gives a readable stream; `"ignore"` / null discards the output. */
 	stdin?: "ignore" | "pipe" | null;
 	stdout?: "pipe" | "ignore" | null;

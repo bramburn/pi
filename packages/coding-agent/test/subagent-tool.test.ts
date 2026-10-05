@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createSubagentToolDefinition, resolveModelOverrides } from "../src/core/subagent/subagent-tool.ts";
+import {
+	createSubagentToolDefinition,
+	PER_TASK_OUTPUT_CAP,
+	resolveModelOverrides,
+} from "../src/core/subagent/subagent-tool.ts";
 import type { SubagentResult, SubagentRunner } from "../src/core/subagent/types.ts";
 import { createEmptyUsage } from "../src/core/subagent/types.ts";
 import { buildSystemPrompt, SUBAGENT_USAGE } from "../src/core/system-prompt.ts";
@@ -67,19 +71,18 @@ describe("resolveModelOverrides", () => {
 });
 
 describe("subagent tool model validation", () => {
-	it("returns a tool error naming the model instead of throwing", async () => {
+	it("throws an error naming the model and dispatches nothing", async () => {
 		const capture = { models: [] as string[] };
 		const tool = createSubagentToolDefinition(process.cwd(), { runner: stubRunner(capture), resolveModel });
-		const result = await tool.execute(
-			"tc1",
-			{ role: "scout", instructions: "x", model: "nope-9" },
-			undefined,
-			undefined,
-			undefined as never,
-		);
-		expect((result as { isError?: boolean }).isError).toBe(true);
-		expect(result.content[0]).toMatchObject({ type: "text" });
-		expect((result.content[0] as { text: string }).text).toContain('Unknown model "nope-9"');
+		await expect(
+			tool.execute(
+				"tc1",
+				{ role: "scout", instructions: "x", model: "nope-9" },
+				undefined,
+				undefined,
+				undefined as never,
+			),
+		).rejects.toThrow('Unknown model "nope-9"');
 		expect(capture.models).toEqual([]);
 	});
 
@@ -143,20 +146,21 @@ describe("subagent dispatch modes", () => {
 		},
 	};
 
-	it("rejects zero modes and multiple modes as tool errors", async () => {
+	it("rejects zero modes and multiple modes by throwing", async () => {
 		const tool = createSubagentToolDefinition(process.cwd(), { runner: okRunner });
-		const none = await tool.execute("t1", {}, undefined, undefined, undefined as never);
-		expect((none as { isError?: boolean }).isError).toBe(true);
-		expect((none.content[0] as { text: string }).text).toContain("exactly one mode");
-
-		const two = await tool.execute(
-			"t2",
-			{ role: "a", instructions: "x", tasks: [{ role: "b", instructions: "y" }] },
-			undefined,
-			undefined,
-			undefined as never,
+		await expect(tool.execute("t1", {}, undefined, undefined, undefined as never)).rejects.toThrow(
+			"exactly one mode",
 		);
-		expect((two as { isError?: boolean }).isError).toBe(true);
+
+		await expect(
+			tool.execute(
+				"t2",
+				{ role: "a", instructions: "x", tasks: [{ role: "b", instructions: "y" }] },
+				undefined,
+				undefined,
+				undefined as never,
+			),
+		).rejects.toThrow("exactly one mode");
 	});
 
 	it("chain substitutes {previous} at every occurrence and numbers steps", async () => {
@@ -196,7 +200,7 @@ describe("subagent dispatch modes", () => {
 		expect(steps).toEqual([1, 2]);
 	});
 
-	it("chain stops at the first failure and names the step", async () => {
+	it("chain stops at the first failure and throws naming the step", async () => {
 		const ran: string[] = [];
 		const runner: SubagentRunner = {
 			async run(request): Promise<SubagentResult> {
@@ -216,21 +220,21 @@ describe("subagent dispatch modes", () => {
 			},
 		};
 		const tool = createSubagentToolDefinition(process.cwd(), { runner });
-		const result = await tool.execute(
-			"t4",
-			{
-				chain: [
-					{ role: "s1", instructions: "a" },
-					{ role: "s2", instructions: "b" },
-				],
-			},
-			undefined,
-			undefined,
-			undefined as never,
-		);
+		await expect(
+			tool.execute(
+				"t4",
+				{
+					chain: [
+						{ role: "s1", instructions: "a" },
+						{ role: "s2", instructions: "b" },
+					],
+				},
+				undefined,
+				undefined,
+				undefined as never,
+			),
+		).rejects.toThrow("Chain stopped at step 1 (s1)");
 		expect(ran).toEqual(["s1"]);
-		expect((result as { isError?: boolean }).isError).toBe(true);
-		expect((result.content[0] as { text: string }).text).toContain("Chain stopped at step 1 (s1)");
 	});
 
 	it("caps parallel output at 50 KB in text and keeps the full output in details", async () => {
@@ -263,7 +267,7 @@ describe("subagent dispatch modes", () => {
 		expect((result.details as { results: { finalOutput: string }[] }).results[0].finalOutput).toBe(bigText);
 	});
 
-	it("parallel partial failure marks the call as an error with both summaries", async () => {
+	it("parallel partial failure resolves with both per-task summaries", async () => {
 		const runner: SubagentRunner = {
 			async run(request): Promise<SubagentResult> {
 				const failed = request.spec.role === "bad";
@@ -293,10 +297,142 @@ describe("subagent dispatch modes", () => {
 			undefined,
 			undefined as never,
 		);
-		expect((result as { isError?: boolean }).isError).toBe(true);
+		expect(result).not.toHaveProperty("isError");
 		const text = (result.content[0] as { text: string }).text;
 		expect(text).toContain("Parallel: 1/2 succeeded");
 		expect(text).toContain("[good] completed");
 		expect(text).toContain("[bad] failed");
+	});
+
+	it("chain {previous} substitution keeps $ patterns verbatim", async () => {
+		const seen: string[] = [];
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				seen.push(request.task);
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: request.spec.role === "s1" ? "A $& B $` C $' D $$ E" : "ok",
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t7",
+			{
+				chain: [
+					{ role: "s1", instructions: "produce" },
+					{ role: "s2", instructions: "review {previous} !" },
+				],
+			},
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect(seen[1]).toBe("review A $& B $` C $' D $$ E !");
+		expect((result.content[0] as { text: string }).text).toBe("ok");
+	});
+
+	it("caps single-mode output at 50 KB and keeps the full output in details", async () => {
+		const bigText = "x".repeat(60 * 1024);
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: bigText,
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t8",
+			{ role: "big", instructions: "go" },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		const text = (result.content[0] as { text: string }).text;
+		expect(text).toContain("Output truncated:");
+		expect(text.length).toBeLessThan(52_000);
+		expect((result.details as { results: { finalOutput: string }[] }).results[0].finalOutput).toBe(bigText);
+	});
+
+	it("caps the {previous} substitution input at 50 KB", async () => {
+		const bigText = "x".repeat(60 * 1024);
+		const seen: string[] = [];
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				seen.push(request.task);
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: bigText,
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		await tool.execute(
+			"t9",
+			{
+				chain: [
+					{ role: "s1", instructions: "produce" },
+					{ role: "s2", instructions: "review {previous}" },
+				],
+			},
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect(seen[1]).toContain("Output truncated:");
+		expect(seen[1].length).toBeLessThan(52_000);
+	});
+
+	it("truncation never splits a UTF-16 surrogate pair", async () => {
+		const emoji = "\u{1F600}";
+		const output = "x".repeat(PER_TASK_OUTPUT_CAP - 3) + emoji + "y".repeat(100);
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: output,
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t10",
+			{ role: "emoji", instructions: "go" },
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		const text = (result.content[0] as { text: string }).text;
+		const body = text.slice(0, text.indexOf("\n\n[Output truncated:"));
+		// Byte cap lands inside the emoji; the kept body must end before it, never
+		// on a lone surrogate half.
+		expect(body).toBe("x".repeat(PER_TASK_OUTPUT_CAP - 3));
+		expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(PER_TASK_OUTPUT_CAP);
 	});
 });

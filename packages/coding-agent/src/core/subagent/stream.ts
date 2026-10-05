@@ -29,6 +29,15 @@ export interface CollectedStream {
 	complete: boolean;
 }
 
+/**
+ * Pump a stream to EOF, bounded by `graceMs`, in one call.
+ *
+ * Only for streams whose writer has already exited: `release` is called
+ * immediately, so the grace bounds a post-exit drain. Using this on a live
+ * child would race the grace against the child's whole lifetime and silently
+ * discard everything the child prints after it. Live children need
+ * {@link createStreamPump} plus a `release` after `exited` resolves.
+ */
 export async function collectStream(
 	stream: { getReader(): ReaderLike } | null,
 	graceMs: number = DEFAULT_DRAIN_GRACE_MS,
@@ -84,18 +93,34 @@ export function createStreamPump(
 	let text = "";
 	let complete = false;
 
+	// A consumer callback must never stop consumption: a throwing `onChunk`
+	// (the background registry lock under contention, for example) would
+	// otherwise trip the read loop's catch, deadhead the pipe, and block the
+	// child forever. Consumer errors are swallowed per chunk; the outer catch
+	// stays for genuine read failures (a pipe torn down mid-read).
+	const deliver = (chunk: string) => {
+		text += chunk;
+		try {
+			onChunk?.(chunk);
+		} catch {
+			// One bad consumer must not stall the producer.
+		}
+	};
+
 	const finished = (async () => {
 		try {
 			while (true) {
 				const { done, value } = await reader.read();
 				if (done) {
+					// Flush the decoder so a multibyte character split across the
+					// last chunk boundary is not dropped.
+					const tail = decoder.decode();
+					if (tail) deliver(tail);
 					complete = true;
 					return;
 				}
 				if (!value) continue;
-				const chunk = decoder.decode(value, { stream: true });
-				text += chunk;
-				onChunk?.(chunk);
+				deliver(decoder.decode(value, { stream: true }));
 			}
 		} catch {
 			// A pipe torn down mid-read is not an error here: keep what we read.
@@ -120,7 +145,12 @@ export function createStreamPump(
 			// cannot throw the "locked ReadableStream" error that `stream.cancel()`
 			// does when a `Response` holds it.
 			await reader.cancel().catch(() => {});
-			reader.releaseLock();
+			try {
+				reader.releaseLock();
+			} catch {
+				// A read still pending on a cancelled stream can make releaseLock
+				// throw; the lock is being torn down regardless.
+			}
 		}
 	};
 
