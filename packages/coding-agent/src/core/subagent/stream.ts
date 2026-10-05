@@ -92,6 +92,7 @@ export function createStreamPump(
 	const decoder = new TextDecoder();
 	let text = "";
 	let complete = false;
+	let cutShort = false;
 
 	// A consumer callback must never stop consumption: a throwing `onChunk`
 	// (the background registry lock under contention, for example) would
@@ -116,7 +117,12 @@ export function createStreamPump(
 					// last chunk boundary is not dropped.
 					const tail = decoder.decode();
 					if (tail) deliver(tail);
-					complete = true;
+					// `reader.cancel()` in `release` resolves this same pending read
+					// with done (verified on real Bun streams). That forced EOF must
+					// not be reported as a natural one: a drain cut short at the
+					// grace deadline is exactly what `complete: false` exists to
+					// signal.
+					complete = !cutShort;
 					return;
 				}
 				if (!value) continue;
@@ -137,8 +143,17 @@ export function createStreamPump(
 			timer = setTimeout(resolve, graceMs);
 			timer.unref?.();
 		});
+		let finishedWon = false;
 		try {
-			await Promise.race([finished, deadline]);
+			await Promise.race([
+				finished.then(() => {
+					finishedWon = true;
+				}),
+				deadline,
+			]);
+			// The deadline won: the read loop is about to be cut short. Remember
+			// that before `cancel()` below forces done onto our own pending read.
+			if (!finishedWon) cutShort = true;
 		} finally {
 			if (timer) clearTimeout(timer);
 			// Cancelling releases the pipe and the lock. We own the lock, so this

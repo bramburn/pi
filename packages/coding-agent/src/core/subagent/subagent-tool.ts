@@ -13,6 +13,11 @@
  *   instructions is replaced with the previous step's output; stops at the
  *   first failure.
  *
+ * Background (`background: true`) dispatch is intentionally NOT parallel-capped
+ * or concurrency-limited: `maxParallelTasks`/`maxConcurrent` bound the inline
+ * work of one call, while a detached task outlives the turn. The on-disk
+ * registry is the record of what is running.
+ *
  * Services arrive through the options bag, not `ExtensionContext`: the runner,
  * the settings reader (registration guard), concurrency limits, and a getter for
  * the parent session's model + thinking level (read at dispatch time so
@@ -306,7 +311,7 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
  * Trimming walks code points via the string iterator, so the cut can never
  * split a UTF-16 surrogate pair.
  */
-function truncateModelFacingOutput(output: string): string {
+function truncateModelFacingOutput(output: string, fullOutputNote = "Full output preserved in tool details."): string {
 	const byteLength = Buffer.byteLength(output, "utf8");
 	if (byteLength <= PER_TASK_OUTPUT_CAP) return output;
 
@@ -319,7 +324,7 @@ function truncateModelFacingOutput(output: string): string {
 		keptLength += codePoint.length;
 	}
 	const truncated = output.slice(0, keptLength);
-	return `${truncated}\n\n[Output truncated: ${byteLength - keptBytes} bytes omitted. Full output preserved in tool details.]`;
+	return `${truncated}\n\n[Output truncated: ${byteLength - keptBytes} bytes omitted.${fullOutputNote ? ` ${fullOutputNote}` : ""}]`;
 }
 
 function specFromInput(input: {
@@ -479,6 +484,39 @@ export function createSubagentToolDefinition(
 				} else {
 					const ids = chain.map(() => registry.makeTaskId());
 					taskIds.push(...ids);
+					// Best-effort bookkeeping for a chain step the up-front summary
+					// already promised but that can never start (its dispatch threw).
+					// update() can throw RegistryLockError and this runs inside a settle
+					// callback that background.ts guards against throws — nothing may
+					// propagate, and the dead step must settle explicitly instead of
+					// leaving its promised id dangling.
+					const failDeadStep = (next: number, message: string): void => {
+						try {
+							registry.update(ids[next], {
+								status: "failed",
+								errorMessage: `chain step ${next + 1} could not be dispatched: ${message}`,
+								finishedAt: new Date().toISOString(),
+							});
+						} catch {
+							/* best-effort */
+						}
+						registry.appendLog(ids[next], { type: "CHAIN_STEP_DISPATCH_FAILED", error: message });
+						try {
+							options?.onBackgroundSettled?.(ids[next], {
+								role: chain[next].role,
+								task: chain[next].instructions,
+								exitCode: -1,
+								aborted: false,
+								finalOutput: "",
+								stderr: message,
+								usage: createEmptyUsage(),
+								messages: [],
+								errorMessage: `chain step ${next + 1} could not be dispatched: ${message}`,
+							});
+						} catch {
+							/* best-effort */
+						}
+					};
 					const fireStep = (index: number, previousOutput: string): void => {
 						const stepInput = chain[index];
 						const spec = specFromInput({
@@ -495,10 +533,22 @@ export function createSubagentToolDefinition(
 						// reassigns on a collision) so every later report and the
 						// onSettled callback line up with the registry.
 						const finalId = fire(spec, ids[index], (taskId, result) => {
-							options?.onBackgroundSettled?.(taskId, result);
-							const next = index + 1;
-							if (next >= chain.length || isFailedSubagentResult(result)) return;
-							fireStep(next, result.finalOutput);
+							// background.ts swallows an onSettled throw as a warn and never
+							// fires the remaining steps, so a sync throw here (a throwing
+							// onBackgroundSettled, or fireStep dispatching the next step)
+							// would silently orphan the ids the up-front summary promised.
+							// Guard the whole continuation and settle the dead step instead.
+							try {
+								options?.onBackgroundSettled?.(taskId, result);
+								const next = index + 1;
+								if (next >= chain.length || isFailedSubagentResult(result)) return;
+								fireStep(next, result.finalOutput);
+							} catch (err) {
+								const message = err instanceof Error ? err.message : String(err);
+								const next = index + 1;
+								if (next >= chain.length || isFailedSubagentResult(result)) return;
+								failDeadStep(next, message);
+							}
 						});
 						ids[index] = finalId;
 						taskIds[index] = finalId;
@@ -540,8 +590,11 @@ export function createSubagentToolDefinition(
 					});
 					results.push(result);
 					if (isFailedSubagentResult(result)) {
+						// A thrown error becomes tool-error content verbatim (agent-loop
+						// contract) and carries no tool details — the embedded output must
+						// respect the model-facing cap just like resolved output.
 						throw new Error(
-							`Chain stopped at step ${i + 1} (${stepInput.role}): ${getSubagentResultOutput(result)}`,
+							`Chain stopped at step ${i + 1} (${stepInput.role}): ${truncateModelFacingOutput(getSubagentResultOutput(result), "")}`,
 						);
 					}
 					previousOutput = result.finalOutput;
@@ -574,9 +627,14 @@ export function createSubagentToolDefinition(
 					usage: createEmptyUsage(),
 					messages: [],
 				}));
+				// Settled flags — not exit codes — mark completion in progress text:
+				// a failed spawn settles with exitCode -1 while live snapshots stream
+				// with exitCode -1 too, so the code alone cannot tell "running" from
+				// "done and failed to start".
+				const settled = tasks.map(() => false);
 				const emitParallelUpdate = () => {
 					if (!onUpdate) return;
-					const done = allResults.filter((r) => r.exitCode !== -1).length;
+					const done = settled.filter(Boolean).length;
 					const running = allResults.length - done;
 					onUpdate({
 						content: [
@@ -603,6 +661,7 @@ export function createSubagentToolDefinition(
 							},
 						);
 						allResults[index] = result;
+						settled[index] = true;
 						emitParallelUpdate();
 						return result;
 					},
@@ -641,8 +700,10 @@ export function createSubagentToolDefinition(
 				});
 			});
 			if (isFailedSubagentResult(result)) {
+				// Same cap as the chain throw above: thrown error.message becomes
+				// tool-error content verbatim and has no tool details attached.
 				throw new Error(
-					`Subagent ${result.role} ${result.stopReason || "failed"}: ${getSubagentResultOutput(result)}`,
+					`Subagent ${result.role} ${result.stopReason || "failed"}: ${truncateModelFacingOutput(getSubagentResultOutput(result), "")}`,
 				);
 			}
 			return {

@@ -30,6 +30,8 @@ import {
 	openSync,
 	readFileSync,
 	renameSync,
+	rmSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
@@ -37,7 +39,9 @@ import {
 import { join } from "node:path";
 import { getAgentDir } from "../../config.ts";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
+import { getBun } from "./runtime.ts";
 import {
+	createEmptyUsage,
 	isFailedSubagentResult,
 	type SubagentResult,
 	type SubagentRunner,
@@ -54,6 +58,8 @@ export const BG_LOCK_RETRY_MS = 100;
 export const BG_LOCK_MAX_RETRIES = 50; // 5s total
 /** A lock older than this is broken even when its recorded pid is alive. */
 export const BG_LOCK_STALE_MS = 30_000;
+/** Crash evidence recorded on a row is clamped to this many chars (bounded tail). */
+const MAX_CRASH_EVIDENCE_CHARS = 2048;
 /** Terminal rows older than this are pruned. */
 const PRUNE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /** At most this many terminal rows are kept, even when all are recent. */
@@ -85,7 +91,10 @@ export interface BackgroundTask {
 	/** Pid of the spawned child process, when known. */
 	pid?: number;
 	/**
-	 * Pid of the session process that created the task (stamped by add()).
+	 * Pid of the session process that created the task. add() stamps it in the
+	 * same object construction as the row, so the stored row is never
+	 * observable without it (update() can explicitly clear it, which makes the
+	 * row ownerless-legacy; see markAllRunningAsCrashed).
 	 * markAllRunningAsCrashed() uses it to tell orphans of a dead session apart
 	 * from another live session's in-flight tasks.
 	 */
@@ -113,13 +122,31 @@ export interface BackgroundRegistry {
 	 * duplicate id is a namespace clash — not a duplicate delivery: add()
 	 * assigns a fresh id on `task` in place and stores the row under it instead
 	 * of silently dropping it (which let one session overwrite another's row).
+	 * The stored row is built with ownerPid already stamped in the same object
+	 * construction (before the row joins the file), so a persisted running row
+	 * never exists in a window without an owner.
 	 */
 	add(task: BackgroundTask): void;
 	update(taskId: string, partial: Partial<BackgroundTask>): void;
 	appendLog(taskId: string, event: BackgroundLogEvent | Record<string, unknown>): void;
 	listRunning(): BackgroundTask[];
 	snapshot(): { tasks: BackgroundTask[] };
+	/**
+	 * Crash every running/pending row whose owning session is gone and return
+	 * how many were crashed. A row whose ownerPid is alive is left alone — any
+	 * session may call this at startup without crashing another live session's
+	 * in-flight tasks. Legacy-row semantics: a row with no ownerPid (written
+	 * before ownerPid existed, or cleared via update(taskId, { ownerPid:
+	 * undefined })) cannot prove a live owner and always counts as an orphan;
+	 * crashing it is the safe default.
+	 */
 	markAllRunningAsCrashed(): Promise<number>;
+	/**
+	 * Drop over-retention terminal rows and delete their `<taskId>/` log dirs
+	 * (best-effort: row removal is persisted before any dir delete, so a failed
+	 * delete only leaks — it never orphans a log the registry still references).
+	 * Returns the number of rows removed.
+	 */
 	prune(): Promise<number>;
 	cancel(taskId: string, reason: string): Promise<void>;
 }
@@ -197,10 +224,34 @@ function parseLockRecord(text: string): LockRecord | undefined {
 	}
 }
 
-type LockInspection = { state: "gone" } | { state: "stale"; text: string } | { state: "fresh" };
+/** Identity of one lock file at one moment: content plus a cheap stat stamp. */
+interface LockSnapshot {
+	text: string;
+	size: number;
+	mtimeMs: number;
+}
 
-/** Decide whether a contended lock is breakable. `text` backs that decision. */
-function inspectLock(path: string): LockInspection {
+type LockInspection = { state: "gone" } | { state: "stale"; snapshot: LockSnapshot } | { state: "fresh" };
+
+/** Cheap identity stamp (size + mtime) for the break comparison. */
+function fileStamp(path: string): { size: number; mtimeMs: number } | undefined {
+	try {
+		const st = statSync(path);
+		return { size: st.size, mtimeMs: st.mtimeMs };
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Decide whether a contended lock is breakable. The returned snapshot is the
+ * evidence for that decision — it is what breakLockIfUnchanged verifies before
+ * unlinking.
+ *
+ * Exported for the pins in test/subagent-background-registry.test.ts; not part
+ * of the supported API.
+ */
+export function inspectLock(path: string): LockInspection {
 	let text = readLockText(path);
 	if (text === undefined) return { state: "gone" };
 	for (let i = 0; i < LOCK_PARSE_GRACE_ATTEMPTS && parseLockRecord(text) === undefined; i++) {
@@ -209,16 +260,44 @@ function inspectLock(path: string): LockInspection {
 		if (reread === undefined) return { state: "gone" };
 		text = reread;
 	}
+	const stamp = fileStamp(path);
+	if (stamp === undefined) return { state: "gone" };
+	// The stamp is read after the content: if a replacement slips in between,
+	// the mixed snapshot can only fail the later verification (content and
+	// stamp cannot both re-match), so it fails closed.
+	const snapshot: LockSnapshot = { text, ...stamp };
 	const record = parseLockRecord(text);
-	if (!record) return { state: "stale", text };
-	if (Date.now() - record.createdAt > BG_LOCK_STALE_MS) return { state: "stale", text };
-	if (!isProcessAlive(record.pid)) return { state: "stale", text };
+	if (!record) return { state: "stale", snapshot };
+	if (Date.now() - record.createdAt > BG_LOCK_STALE_MS) return { state: "stale", snapshot };
+	if (!isProcessAlive(record.pid)) return { state: "stale", snapshot };
 	return { state: "fresh" };
 }
 
-/** Unlink a stale lock, but only while it still holds the exact content the staleness decision was made on. */
-function breakLockIfUnchanged(path: string, decidedText: string): void {
-	if (readLockText(path) !== decidedText) return;
+/**
+ * Unlink a stale lock, but only while the path provably still holds the exact
+ * lock the staleness decision was made on: identical content, size and mtime.
+ *
+ * Why: the staleness decision and this unlink are two syscalls, so competitor
+ * A can judge T1 stale and unlink it while competitor C acquires a fresh lock
+ * T2 before our unlink runs — an unverified unlink then deletes C's LIVE lock
+ * and two writers sit in the critical section together. Content alone catches
+ * every realistic swap (a valid lock carries a fresh randomUUID token); size
+ * and mtime discriminate where content cannot — a recreated foreign-format or
+ * empty lock file with identical bytes.
+ *
+ * Residual micro-window (accepted): the checks and unlinkSync are still
+ * separate syscalls and win32 has no portable compare-and-swap delete
+ * (renameat2/link-directory tricks are Unix-only), so a replacement landing
+ * exactly in that one-syscall gap is still deleted. The window is minimal
+ * without OS-level atomicity and is documented rather than hidden.
+ *
+ * Exported for the pins in test/subagent-background-registry.test.ts; not part
+ * of the supported API.
+ */
+export function breakLockIfUnchanged(path: string, decided: LockSnapshot): void {
+	const stamp = fileStamp(path);
+	if (stamp === undefined || stamp.size !== decided.size || stamp.mtimeMs !== decided.mtimeMs) return;
+	if (readLockText(path) !== decided.text) return;
 	try {
 		unlinkSync(path);
 	} catch {
@@ -226,7 +305,15 @@ function breakLockIfUnchanged(path: string, decidedText: string): void {
 	}
 }
 
-/** Release our lock — never remove one that changed hands while we held it. */
+/**
+ * Release our lock — never remove one that changed hands while we held it.
+ *
+ * The token is a per-acquisition crypto UUID, so unlike breakLockIfUnchanged's
+ * decided content (foreign/empty bytes that can legitimately recur) token
+ * comparison is exact: no other lock can ever carry our token, so no stat
+ * stamp is needed here. The same one-syscall check/unlink micro-window as in
+ * breakLockIfUnchanged applies and is accepted for the same reason.
+ */
 function releaseLock(path: string, token: string): void {
 	const record = parseLockRecord(readLockText(path) ?? "");
 	if (record?.token !== token) return;
@@ -278,7 +365,7 @@ export function withLock<T>(lockPath: string, fn: () => T): T {
 		}
 		if (inspection.state === "stale" && !brokeStaleLock) {
 			brokeStaleLock = true;
-			breakLockIfUnchanged(lockPath, inspection.text);
+			breakLockIfUnchanged(lockPath, inspection.snapshot);
 			continue;
 		}
 		const waitStart = Date.now();
@@ -330,8 +417,36 @@ function parseRegistry(raw: string): RegistryFile | null {
  * Rename an unreadable registry aside (`registry.json.corrupt-<timestamp>`)
  * instead of letting the next locked write persist `[]` over it and destroy
  * every row. renameSync is the sanctioned atomic-rename primitive.
+ *
+ * The read path is unlocked (snapshot()/listRunning()), so between the corrupt
+ * read at t0 and this rename at t2 a writer inside withLock can replace
+ * registry.json with valid rows at t1. Renaming whatever is at the path would
+ * move that FRESH registry aside and the next locked write would persist a
+ * registry without the writer's rows — silent row loss. So, like
+ * breakLockIfUnchanged, verify before renaming: only the exact corrupt payload
+ * (`corruptRaw`) that triggered preservation is ever moved. String equality is
+ * the right test — preservation cares about parseability, and identical
+ * decoded bytes parse identically. (The alternative fix — preserving only
+ * under the write lock — was rejected: it forces the intentionally lock-free
+ * read path to contend on the write lock.)
+ *
+ * Residual micro-window (accepted): the verification and renameSync are two
+ * syscalls, so a writer replacing the file exactly in between still gets its
+ * fresh registry moved aside. win32 has no compare-and-swap rename to close
+ * it; the window is one syscall wide (same accepted class as
+ * breakLockIfUnchanged's).
+ *
+ * Exported for the interleaving pin in
+ * test/subagent-background-registry.test.ts; not part of the supported API.
  */
-function preserveCorruptRegistry(path: string): void {
+export function preserveCorruptRegistry(path: string, corruptRaw: string): void {
+	let current: string | undefined;
+	try {
+		current = readFileSync(path, "utf8");
+	} catch {
+		return; // gone — nothing left to preserve
+	}
+	if (current !== corruptRaw) return; // replaced by a writer — its rows win
 	const target = `${path}.corrupt-${Date.now()}`;
 	try {
 		renameSync(path, target);
@@ -355,7 +470,7 @@ function readRegistry(): RegistryFile {
 	}
 	const parsed = parseRegistry(raw);
 	if (parsed) return parsed;
-	preserveCorruptRegistry(p);
+	preserveCorruptRegistry(p, raw);
 	return { version: BG_REGISTRY_VERSION, tasks: [] };
 }
 
@@ -382,6 +497,120 @@ function makeTaskIdImpl(): string {
 	// by every concurrently-dispatching session process. add() additionally
 	// regenerates on the (astronomically unlikely) residual collision.
 	return `bg_${Date.now().toString(36)}_${crypto.randomUUID()}`;
+}
+
+/**
+ * The only directory names deleteTaskLogDir() may remove: our own task-id
+ * shape (`bg_<base36 ms>_<uuid>`). A registry row is untrusted input — a row
+ * with any other id (legacy ids, hand-edited rows, or a traversal attempt like
+ * `..`) leaks its dir rather than risking a deletion outside the background
+ * dir.
+ */
+const TASK_ID_DIR_PATTERN = /^bg_[0-9a-z]+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Best-effort GC of one pruned task's `<taskId>/` dir (log.jsonl). Called only
+ * after the row's removal is persisted: a failed delete leaks the dir but can
+ * never orphan a log the registry still references. rmSync (node:fs) because
+ * Bun has no recursive directory-remove primitive (verified under Bun:
+ * `Bun.file(dir).delete()` is unlink-based and fails with EPERM on
+ * directories; `rmSync(..., { recursive: true })` works).
+ */
+function deleteTaskLogDir(taskId: string): void {
+	if (!TASK_ID_DIR_PATTERN.test(taskId)) return;
+	const dir = join(backgroundDir(), taskId);
+	try {
+		rmSync(dir, { recursive: true, force: true });
+	} catch (err) {
+		// Best-effort: leaking a log dir must never fail prune().
+		console.warn(`[subagent-bg] failed to delete task log dir for ${taskId}:`, (err as Error).message);
+	}
+}
+
+/**
+ * Whether a row is an orphan candidate for crash reconciliation: still
+ * in-flight, and its owning session is gone (or it predates ownerPid and so
+ * cannot prove a live owner — the safe default is to treat it as orphaned).
+ * A row whose owner is alive may still be mid-flight, so any session can call
+ * markAllRunningAsCrashed() at startup without crashing another live session's
+ * tasks.
+ */
+function isOrphanCandidate(t: BackgroundTask): boolean {
+	const inFlight = t.status === "running" || t.status === "pending";
+	return inFlight && (t.ownerPid === undefined || !isProcessAlive(t.ownerPid));
+}
+
+/** Clamp evidence to MAX_CRASH_EVIDENCE_CHARS, keeping the head or the tail. */
+function clampEvidence(text: string, keepEnd: boolean): string {
+	if (text.length <= MAX_CRASH_EVIDENCE_CHARS) return text;
+	return keepEnd
+		? `... [truncated]${text.slice(-MAX_CRASH_EVIDENCE_CHARS)}`
+		: `${text.slice(0, MAX_CRASH_EVIDENCE_CHARS)}... [truncated]`;
+}
+
+/**
+ * Pull the last meaningful evidence out of a task's JSONL event log: the final
+ * `exitCode`, the last `errorMessage`/`error`, or — when the log carries no
+ * structured signal (e.g. it was cut off mid-write) — a bounded raw tail. The
+ * log format is produced by bun-process-runner's EventLog; if that format
+ * changes, this extractor needs updating. Line-parse tolerant: a mid-write
+ * crash can leave a partial tail line.
+ */
+function extractEvidenceFromLogText(text: string): string | undefined {
+	let lastExitCode: number | undefined;
+	let lastErrorMessage: string | undefined;
+	for (const line of text.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		let event: Record<string, unknown>;
+		try {
+			event = JSON.parse(trimmed) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+		if (typeof event.exitCode === "number") lastExitCode = event.exitCode;
+		const message = event.errorMessage ?? event.error;
+		if (typeof message === "string" && message.trim()) lastErrorMessage = message;
+	}
+	const parts: string[] = [];
+	if (lastExitCode !== undefined) parts.push(`exit code ${lastExitCode}`);
+	if (lastErrorMessage !== undefined) parts.push(`error: ${clampEvidence(lastErrorMessage, false)}`);
+	if (parts.length > 0) return parts.join("; ");
+	const tail = text.trim();
+	return tail ? clampEvidence(tail, true) : undefined;
+}
+
+/**
+ * Best-effort crash evidence from a task's `log.jsonl`, read at startup
+ * reconciliation. The log is written by the DETACHED child (bun-process-runner's
+ * EventLog flushes it) — this only ever READS it. Any failure (missing file,
+ * permissions, unreadable bytes) yields `undefined`, which crashMessage()
+ * renders as the generic "no log available" note. Read via `Bun.file().text()`
+ * per the Bun-only file-IO rule; the call is async, which is why the caller
+ * gathers evidence before entering the (synchronous) registry lock.
+ */
+async function readCrashEvidence(logFile: string): Promise<string | undefined> {
+	try {
+		const bun = getBun();
+		if (!(await bun.file(logFile).exists())) return undefined;
+		return extractEvidenceFromLogText(await bun.file(logFile).text());
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The crash note for one orphaned row. ALWAYS returns a defined, non-empty
+ * string — this is the guard that keeps the note in the stored row: the
+ * registry is persisted with JSON.stringify, which silently strips `undefined`
+ * fields, so a `t.errorMessage = undefined` here would drop the evidence on the
+ * floor. crashMessage's guaranteed string (the extracted evidence, or the
+ * "no log available" fallback) round-trips through the JSON store intact.
+ */
+function crashMessage(evidence: string | undefined): string {
+	return evidence
+		? `crashed (parent process died) — last known state: ${evidence}`
+		: "crashed (parent process died; no log available)";
 }
 
 function createRegistry(): BackgroundRegistry {
@@ -443,20 +672,30 @@ function createRegistry(): BackgroundRegistry {
 		},
 
 		async markAllRunningAsCrashed() {
+			// Startup reconciliation is best-effort and read-only over the detached
+			// child's log. Gather evidence BEFORE the lock: Bun file reads are async
+			// and the lock callback below is synchronous. The extra lock-free
+			// readRegistry() only decides which logs to read — the authoritative
+			// orphan decision re-runs inside the lock.
+			const candidates = readRegistry().tasks.filter(isOrphanCandidate);
+			const evidence = new Map<string, string | undefined>();
+			await Promise.all(
+				candidates.map(async (t) => {
+					evidence.set(t.id, await readCrashEvidence(taskLogPath(t.id)));
+				}),
+			);
 			return withLock(lockPath(), () => {
 				const file = readRegistry();
 				const now = new Date().toISOString();
 				let count = 0;
 				for (const t of file.tasks) {
-					if (t.status !== "running" && t.status !== "pending") continue;
-					// Only orphans: a row whose owning session is alive may still
-					// be mid-flight, so any session can call this at startup
-					// without crashing another live session's tasks. Rows from
-					// before ownerPid existed carry no owner and count as orphans.
-					if (t.ownerPid !== undefined && isProcessAlive(t.ownerPid)) continue;
+					if (!isOrphanCandidate(t)) continue;
 					t.status = "crashed";
 					t.finishedAt = now;
-					t.errorMessage = t.errorMessage ?? "Parent session ended before task completed";
+					// Preserve any pre-existing result (not overwritten); otherwise
+					// record the crash with the extracted evidence. crashMessage always
+					// returns a defined string, so the JSON store can never strip it.
+					t.errorMessage = t.errorMessage ?? crashMessage(evidence.get(t.id));
 					t.lastEventAt = now;
 					count += 1;
 				}
@@ -468,8 +707,9 @@ function createRegistry(): BackgroundRegistry {
 		async prune() {
 			// Retention: keep terminal rows for at most PRUNE_MAX_AGE_MS (7 days)
 			// and at most PRUNE_MAX_TERMINAL_ROWS (200) of the newest ones; rows
-			// still in flight are never dropped. This bounds registry.json growth
-			// now that no startup wiring exists yet to call prune() regularly.
+			// still in flight are never dropped. The bounds keep registry.json
+			// small even though agent-session's constructor calls prune() on every
+			// startup (nothing prunes during a long-lived session).
 			return withLock(lockPath(), () => {
 				const file = readRegistry();
 				const cutoff = Date.now() - PRUNE_MAX_AGE_MS;
@@ -486,9 +726,14 @@ function createRegistry(): BackgroundRegistry {
 					if (row !== undefined && i < PRUNE_MAX_TERMINAL_ROWS && stamp(row) > cutoff) keep.add(row);
 				}
 				const before = file.tasks.length;
+				const prunedIds = file.tasks.filter((t) => terminal(t) && !keep.has(t)).map((t) => t.id);
 				file.tasks = file.tasks.filter((t) => !terminal(t) || keep.has(t));
 				const removed = before - file.tasks.length;
+				// Row removal first, dir deletion second: once writeRegistry has
+				// persisted the drop, a failed dir delete only leaks — it can never
+				// orphan a log the registry still references.
 				if (removed > 0) writeRegistry(file);
+				for (const id of prunedIds) deleteTaskLogDir(id);
 				return removed;
 			});
 		},
@@ -555,6 +800,24 @@ export interface BackgroundRunOptions {
 }
 
 /**
+ * Deliver the settle notification for a terminal task. onSettled "must not
+ * throw" — swallow a violation anyway: at both call sites the task is already
+ * terminal, and a throw escaping here would either become an unhandled
+ * rejection (crash path) or rewrite the terminal status to "crashed" (normal
+ * path).
+ */
+function notifySettled(onSettled: BackgroundRunOptions["onSettled"], taskId: string, result: SubagentResult): void {
+	try {
+		onSettled?.(taskId, result);
+	} catch (err) {
+		console.warn(
+			`[subagent-bg] onSettled callback threw for ${taskId}:`,
+			err instanceof Error ? err.message : String(err),
+		);
+	}
+}
+
+/**
  * Start a subagent that outlives the current tool call.
  *
  * The call returns as soon as the task is recorded, so the tool can hand the
@@ -597,10 +860,11 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 		.catch((err: unknown) => {
 			const message = err instanceof Error ? err.message : String(err);
 			endSubagentTask(spanId, false, message);
+			const errorMessage = `runner crashed: ${message}`;
 			try {
 				registry.update(taskId, {
 					status: "crashed",
-					errorMessage: `runner crashed: ${message}`,
+					errorMessage,
 					finishedAt: new Date().toISOString(),
 				});
 			} catch (updateErr) {
@@ -611,6 +875,24 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 					updateErr instanceof Error ? updateErr.message : String(updateErr),
 				);
 			}
+			// The task is terminal, so the settle notification must fire here
+			// too — without it the model gets no subagent-background-result
+			// message and dependent chain steps just vanish, while inline mode
+			// reports the same failure as a tool error. Synthesize the failed
+			// result the runner never produced (exit code 1, stopReason "error")
+			// so consumers treat it exactly like a failed run.
+			notifySettled(options.onSettled, taskId, {
+				role: options.spec.role,
+				task: options.task,
+				exitCode: 1,
+				aborted: false,
+				finalOutput: "",
+				stderr: "",
+				usage: createEmptyUsage(),
+				messages: [],
+				stopReason: "error",
+				errorMessage,
+			});
 		});
 	return { taskId };
 }
@@ -669,17 +951,9 @@ async function runDetached(
 		...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
 	});
 	registry.appendLog(taskId, { type: "EXIT", exitCode: result.exitCode, status: failed ? "failed" : "completed" });
-	try {
-		options.onSettled?.(taskId, result);
-	} catch (err) {
-		// onSettled "must not throw" — swallow a violation anyway: the task is
-		// already terminal here, and letting the throw reach the outer catch
-		// would rewrite its completed status to "crashed".
-		console.warn(
-			`[subagent-bg] onSettled callback threw for ${taskId}:`,
-			err instanceof Error ? err.message : String(err),
-		);
-	}
+	// Guarded: a throwing onSettled must not reach the outer catch, which would
+	// rewrite this terminal status to "crashed".
+	notifySettled(options.onSettled, taskId, result);
 	return {
 		failed,
 		...(failed ? { errorMessage: result.errorMessage ?? `exit code ${result.exitCode}` } : {}),

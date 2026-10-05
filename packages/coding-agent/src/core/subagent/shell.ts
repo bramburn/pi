@@ -105,7 +105,7 @@ export const HARD_KILL_EXIT_CODE = 128 + 9;
 /** Grace for draining pipes AFTER the child has exited. */
 const POST_EXIT_DRAIN_GRACE_MS = 500;
 
-/** How long a first kill gets before the tree is force-killed. */
+/** How long the graceful first kill gets before the tree is force-killed. */
 const KILL_GRACE_MS = 5_000;
 
 const decoder = new TextDecoder();
@@ -130,16 +130,19 @@ function mergeEnv(overrides: Record<string, string | undefined>): Record<string,
 /**
  * Kill escalation and bounded exit waiting for one spawned child.
  *
- * `killOnce` is the idempotent first kill (whole tree when addressable);
- * `killHard` deliberately bypasses that idempotence so the SIGKILL escalation
- * scheduled by the first kill actually fires. `waitForExit` stops being
- * unbounded once a kill was requested: a child that survives even `killHard`
- * resolves to `null` instead of hanging the caller forever.
+ * `killOnce` is the idempotent GRACEFUL first kill: SIGTERM to the child and,
+ * where the detached child leads a process group (POSIX), SIGTERM to that
+ * group so grandchildren get the same grace. `killHard` is the hard
+ * escalation (SIGKILL / `taskkill /F` through the tree where addressable) and
+ * deliberately bypasses that idempotence so the escalation scheduled by the
+ * first kill actually fires. `waitForExit` stops being unbounded once a kill
+ * was requested: a child that survives even `killHard` resolves to `null`
+ * instead of hanging the caller forever.
  */
 export interface KillController {
-	/** Idempotent first kill. Schedules the `killHard` escalation. */
+	/** Idempotent graceful first kill (SIGTERM). Schedules the `killHard` escalation. */
 	killOnce(): void;
-	/** Force-kill (SIGKILL / `taskkill /F`). Runs even after `killOnce`. */
+	/** Hard escalation (SIGKILL / `taskkill /F`). Runs even after `killOnce`. */
 	killHard(): void;
 	/** Wait for the exit code; `null` means the child outlived a force-kill. */
 	waitForExit(): Promise<number | null>;
@@ -158,7 +161,7 @@ export function createKillController(proc: BunSubprocess, graceMs: number = KILL
 
 	const killTree = () => {
 		// The child runs its own tools, so its real descendants are
-		// grandchildren. Signal the whole tree when we can address it.
+		// grandchildren. Hard-kill the whole tree when we can address it.
 		// Windows residual limitation: `taskkill /F /T` walks the tree only
 		// through the live direct child; grandchildren that outlive it are
 		// orphaned and unreachable.
@@ -185,17 +188,31 @@ export function createKillController(proc: BunSubprocess, graceMs: number = KILL
 		giveUpTimer.unref?.();
 	};
 
+	const killGracefully = () => {
+		// Graceful first, on every platform: SIGTERM to the child itself.
+		try {
+			proc.kill("SIGTERM");
+		} catch {
+			// Already gone.
+		}
+		// The child is spawned detached, so on POSIX it leads its own process
+		// group and a graceful group signal extends the same grace to its
+		// grandchildren. Windows has no signal groups (detached is ignored
+		// there), so the direct child is all the grace the tree gets before
+		// `killHard` force-kills it.
+		if (proc.pid !== undefined && process.platform !== "win32") {
+			try {
+				process.kill(-proc.pid, "SIGTERM");
+			} catch {
+				// No group to signal, or it is already gone.
+			}
+		}
+	};
+
 	const killOnce = () => {
 		if (killed) return;
 		killed = true;
-		killTree();
-		if (proc.pid === undefined) {
-			try {
-				proc.kill("SIGTERM");
-			} catch {
-				// Already gone.
-			}
-		}
+		killGracefully();
 		escalationTimer = setTimeout(killHard, graceMs);
 		escalationTimer.unref?.();
 	};

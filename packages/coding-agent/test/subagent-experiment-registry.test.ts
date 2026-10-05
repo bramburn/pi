@@ -4,7 +4,16 @@
  * log creation (no TOCTOU truncation), and collision-free experiment ids.
  * Every test uses a temp repoRoot — never a real checkout.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,14 +21,18 @@ import {
 	acquireLock,
 	addExperiment,
 	appendExperimentLogEvent,
+	breakLockIfUnchanged,
 	EXPERIMENTS_DIR_NAME,
 	ExperimentRegistryLockError,
 	type ExperimentRow,
 	ensureExperimentLog,
 	getExperiment,
+	inspectLock,
 	LOCK_FILE_NAME,
 	makeExperimentId,
+	preserveCorruptRegistry,
 	REGISTRY_FILE_NAME,
+	REGISTRY_VERSION,
 	readRegistry,
 	updateExperiment,
 } from "../src/core/subagent/experiment-registry.ts";
@@ -65,6 +78,10 @@ describe("experiment registry", () => {
 	function seedRegistry(contents: string): void {
 		mkdirSync(expDir(), { recursive: true });
 		writeFileSync(registryFile(), contents, "utf8");
+	}
+
+	function lockSnapshot(path: string): { text: string; size: number; mtimeMs: number } {
+		return { text: readFileSync(path, "utf8"), size: statSync(path).size, mtimeMs: statSync(path).mtimeMs };
 	}
 
 	function makeRow(id: string, overrides: Partial<ExperimentRow> = {}): ExperimentRow {
@@ -130,6 +147,67 @@ describe("experiment registry", () => {
 			// The live holder's lock must not have been broken.
 			expect(JSON.parse(readFileSync(lockFile(), "utf8"))).toMatchObject({ pid: process.pid, token: "theirs" });
 		});
+
+		it("a fresh valid lock with a live pid is never judged breakable", () => {
+			seedLock(JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: "theirs" }));
+			expect(inspectLock(lockFile()).state).toBe("fresh");
+		});
+
+		it("breakLockIfUnchanged removes the exact stale lock the decision was made on", () => {
+			seedLock(JSON.stringify({ pid: DEAD_PID, createdAt: Date.now(), token: "theirs" }));
+			const decided = lockSnapshot(lockFile());
+			breakLockIfUnchanged(lockFile(), decided);
+			expect(existsSync(lockFile())).toBe(false);
+		});
+
+		it("breakLockIfUnchanged never removes a fresh lock that replaced the stale one", () => {
+			// The finding-2 interleaving: A judges T1 stale, C acquires a fresh
+			// lock T2 before A's unlink runs — T2 must survive.
+			const stale = JSON.stringify({ pid: DEAD_PID, createdAt: Date.now(), token: "theirs" });
+			seedLock(stale);
+			const decided = lockSnapshot(lockFile());
+			const fresh = JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: "fresh" });
+			writeFileSync(lockFile(), fresh, "utf8");
+			breakLockIfUnchanged(lockFile(), decided);
+			expect(existsSync(lockFile())).toBe(true);
+			expect(readFileSync(lockFile(), "utf8")).toBe(fresh);
+		});
+
+		it("breakLockIfUnchanged requires content, size and mtime to all match", () => {
+			const text = JSON.stringify({ pid: DEAD_PID, createdAt: Date.now(), token: "theirs" });
+			seedLock(text);
+			const stamp = statSync(lockFile());
+			// Different content, matching stat — the content limb rejects.
+			breakLockIfUnchanged(lockFile(), {
+				text: "an earlier lock with different content",
+				size: stamp.size,
+				mtimeMs: stamp.mtimeMs,
+			});
+			expect(existsSync(lockFile())).toBe(true);
+			// Matching content, mismatched size — the stat limb rejects.
+			breakLockIfUnchanged(lockFile(), { text, size: stamp.size + 1, mtimeMs: stamp.mtimeMs });
+			expect(existsSync(lockFile())).toBe(true);
+			// Matching content and size, mismatched mtime — also rejects.
+			breakLockIfUnchanged(lockFile(), { text, size: stamp.size, mtimeMs: stamp.mtimeMs + 1 });
+			expect(existsSync(lockFile())).toBe(true);
+			// All three match — removed.
+			breakLockIfUnchanged(lockFile(), { text, size: stamp.size, mtimeMs: stamp.mtimeMs });
+			expect(existsSync(lockFile())).toBe(false);
+		});
+
+		it("release with a foreign token does not unlink the current lock", () => {
+			const handle = acquireLock(root());
+			// Our lock changes hands mid-hold (stale break + new owner): release
+			// must leave the new owner's lock alone.
+			writeFileSync(
+				lockFile(),
+				JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: "theirs" }),
+				"utf8",
+			);
+			handle.release();
+			expect(existsSync(lockFile())).toBe(true);
+			expect(JSON.parse(readFileSync(lockFile(), "utf8"))).toMatchObject({ token: "theirs" });
+		});
 	});
 
 	describe("corrupt registry preservation", () => {
@@ -169,6 +247,38 @@ describe("experiment registry", () => {
 			expect(readRegistry(root()).experiments).toEqual([]);
 			const preserved = readdirSync(expDir()).filter((f) => f.startsWith(`${REGISTRY_FILE_NAME}.corrupt-`));
 			expect(preserved.length).toBe(0);
+		});
+
+		it("does not rename a fresh registry that replaced the corrupt one mid-read", () => {
+			// Interleaving pin: P1's unlocked read sees garbage at t0, a writer's
+			// locked write lands valid rows at t1, P1's preserve step runs at t2.
+			const garbage = "not json{{{";
+			seedRegistry(garbage);
+			const raw = readFileSync(registryFile(), "utf8"); // P1's corrupt read at t0
+			const fresh = `${JSON.stringify({ version: REGISTRY_VERSION, experiments: [makeRow("exp_writers_row")] }, null, 2)}\n`;
+			writeFileSync(registryFile(), fresh, "utf8"); // W's write at t1
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			preserveCorruptRegistry(registryFile(), raw); // P1's preserve step at t2
+			// The fresh registry must NOT be renamed away and its rows survive.
+			expect(warn).not.toHaveBeenCalled();
+			warn.mockRestore();
+			expect(existsSync(registryFile())).toBe(true);
+			expect(readdirSync(expDir()).filter((f) => f.startsWith(`${REGISTRY_FILE_NAME}.corrupt-`))).toEqual([]);
+			expect(readRegistry(root()).experiments.map((r) => r.id)).toEqual(["exp_writers_row"]);
+		});
+
+		it("preserveCorruptRegistry still renames when the corrupt payload is unchanged", () => {
+			const garbage = "not json{{{";
+			seedRegistry(garbage);
+			const raw = readFileSync(registryFile(), "utf8");
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			preserveCorruptRegistry(registryFile(), raw);
+			expect(warn).toHaveBeenCalledTimes(1);
+			warn.mockRestore();
+			expect(existsSync(registryFile())).toBe(false);
+			const preserved = readdirSync(expDir()).filter((f) => f.startsWith(`${REGISTRY_FILE_NAME}.corrupt-`));
+			expect(preserved.length).toBe(1);
+			expect(readFileSync(join(expDir(), preserved[0] ?? ""), "utf8")).toBe(garbage);
 		});
 	});
 

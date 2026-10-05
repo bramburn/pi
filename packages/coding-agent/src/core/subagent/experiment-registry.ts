@@ -19,9 +19,9 @@
  * File IO uses `node:fs` deliberately: the lock needs exclusive-create
  * (`openSync(path, "wx")`) plus a write through the held fd (`writeSync`), and
  * the registry write needs atomic rename, none of which `Bun.write`/`Bun.file`
- * provide. The synchronous lock API also needs synchronous reads. Everything
- * else in this module tree prefers the Bun-native surface (see AGENTS.md
- * "Runtime: Bun only").
+ * provide. The synchronous lock API also needs synchronous reads and stat
+ * stamps (statSync). Everything else in this module tree prefers the
+ * Bun-native surface (see AGENTS.md "Runtime: Bun only").
  */
 
 import {
@@ -32,6 +32,7 @@ import {
 	openSync,
 	readFileSync,
 	renameSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
@@ -187,10 +188,34 @@ function parseLockRecord(text: string): LockRecord | undefined {
 	}
 }
 
-type LockInspection = { state: "gone" } | { state: "stale"; text: string } | { state: "fresh" };
+/** Identity of one lock file at one moment: content plus a cheap stat stamp. */
+interface LockSnapshot {
+	text: string;
+	size: number;
+	mtimeMs: number;
+}
 
-/** Decide whether a contended lock is breakable. `text` backs that decision. */
-function inspectLock(path: string): LockInspection {
+type LockInspection = { state: "gone" } | { state: "stale"; snapshot: LockSnapshot } | { state: "fresh" };
+
+/** Cheap identity stamp (size + mtime) for the break comparison. */
+function fileStamp(path: string): { size: number; mtimeMs: number } | undefined {
+	try {
+		const st = statSync(path);
+		return { size: st.size, mtimeMs: st.mtimeMs };
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Decide whether a contended lock is breakable. The returned snapshot is the
+ * evidence for that decision — it is what breakLockIfUnchanged verifies before
+ * unlinking.
+ *
+ * Exported for the pins in test/subagent-experiment-registry.test.ts; not part
+ * of the supported API.
+ */
+export function inspectLock(path: string): LockInspection {
 	let text = readLockText(path);
 	if (text === undefined) return { state: "gone" };
 	for (let i = 0; i < LOCK_PARSE_GRACE_ATTEMPTS && parseLockRecord(text) === undefined; i++) {
@@ -199,16 +224,44 @@ function inspectLock(path: string): LockInspection {
 		if (reread === undefined) return { state: "gone" };
 		text = reread;
 	}
+	const stamp = fileStamp(path);
+	if (stamp === undefined) return { state: "gone" };
+	// The stamp is read after the content: if a replacement slips in between,
+	// the mixed snapshot can only fail the later verification (content and
+	// stamp cannot both re-match), so it fails closed.
+	const snapshot: LockSnapshot = { text, ...stamp };
 	const record = parseLockRecord(text);
-	if (!record) return { state: "stale", text };
-	if (Date.now() - record.createdAt > LOCK_STALE_MS) return { state: "stale", text };
-	if (!isProcessAlive(record.pid)) return { state: "stale", text };
+	if (!record) return { state: "stale", snapshot };
+	if (Date.now() - record.createdAt > LOCK_STALE_MS) return { state: "stale", snapshot };
+	if (!isProcessAlive(record.pid)) return { state: "stale", snapshot };
 	return { state: "fresh" };
 }
 
-/** Unlink a stale lock, but only while it still holds the exact content the staleness decision was made on. */
-function breakLockIfUnchanged(path: string, decidedText: string): void {
-	if (readLockText(path) !== decidedText) return;
+/**
+ * Unlink a stale lock, but only while the path provably still holds the exact
+ * lock the staleness decision was made on: identical content, size and mtime.
+ *
+ * Why: the staleness decision and this unlink are two syscalls, so competitor
+ * A can judge T1 stale and unlink it while competitor C acquires a fresh lock
+ * T2 before our unlink runs — an unverified unlink then deletes C's LIVE lock
+ * and two writers sit in the critical section together. Content alone catches
+ * every realistic swap (a valid lock carries a fresh randomUUID token); size
+ * and mtime discriminate where content cannot — a recreated foreign-format or
+ * empty lock file with identical bytes.
+ *
+ * Residual micro-window (accepted): the checks and unlinkSync are still
+ * separate syscalls and win32 has no portable compare-and-swap delete
+ * (renameat2/link-directory tricks are Unix-only), so a replacement landing
+ * exactly in that one-syscall gap is still deleted. The window is minimal
+ * without OS-level atomicity and is documented rather than hidden.
+ *
+ * Exported for the pins in test/subagent-experiment-registry.test.ts; not part
+ * of the supported API.
+ */
+export function breakLockIfUnchanged(path: string, decided: LockSnapshot): void {
+	const stamp = fileStamp(path);
+	if (stamp === undefined || stamp.size !== decided.size || stamp.mtimeMs !== decided.mtimeMs) return;
+	if (readLockText(path) !== decided.text) return;
 	try {
 		unlinkSync(path);
 	} catch {
@@ -216,7 +269,15 @@ function breakLockIfUnchanged(path: string, decidedText: string): void {
 	}
 }
 
-/** Release our lock — never remove one that changed hands while we held it. */
+/**
+ * Release our lock — never remove one that changed hands while we held it.
+ *
+ * The token is a per-acquisition crypto UUID, so unlike breakLockIfUnchanged's
+ * decided content (foreign/empty bytes that can legitimately recur) token
+ * comparison is exact: no other lock can ever carry our token, so no stat
+ * stamp is needed here. The same one-syscall check/unlink micro-window as in
+ * breakLockIfUnchanged applies and is accepted for the same reason.
+ */
 function releaseLock(path: string, token: string): void {
 	const record = parseLockRecord(readLockText(path) ?? "");
 	if (record?.token !== token) return;
@@ -269,7 +330,7 @@ export function acquireLock(repoRoot: string): LockHandle {
 		}
 		if (inspection.state === "stale" && !brokeStaleLock) {
 			brokeStaleLock = true;
-			breakLockIfUnchanged(path, inspection.text);
+			breakLockIfUnchanged(path, inspection.snapshot);
 			continue;
 		}
 		sleepMs(LOCK_RETRY_MS);
@@ -306,8 +367,36 @@ function parseRegistry(text: string): RegistryFile | null {
  * Rename an unreadable registry aside (`registry.json.corrupt-<timestamp>`)
  * instead of letting the next locked write persist `[]` over it and destroy
  * every row. renameSync is the sanctioned atomic-rename primitive.
+ *
+ * The read path is unlocked (listExperiments/getExperiment), so between the
+ * corrupt read at t0 and this rename at t2 a writer inside withWriteLock can
+ * replace registry.json with valid rows at t1. Renaming whatever is at the
+ * path would move that FRESH registry aside and the next locked write would
+ * persist a registry without the writer's rows — silent row loss. So, like
+ * breakLockIfUnchanged, verify before renaming: only the exact corrupt payload
+ * (`corruptRaw`) that triggered preservation is ever moved. String equality is
+ * the right test — preservation cares about parseability, and identical
+ * decoded bytes parse identically. (The alternative fix — preserving only
+ * under the write lock — was rejected: it forces the intentionally lock-free
+ * read path to contend on the write lock.)
+ *
+ * Residual micro-window (accepted): the verification and renameSync are two
+ * syscalls, so a writer replacing the file exactly in between still gets its
+ * fresh registry moved aside. win32 has no compare-and-swap rename to close
+ * it; the window is one syscall wide (same accepted class as
+ * breakLockIfUnchanged's).
+ *
+ * Exported for the interleaving pin in
+ * test/subagent-experiment-registry.test.ts; not part of the supported API.
  */
-function preserveCorruptRegistry(path: string): void {
+export function preserveCorruptRegistry(path: string, corruptRaw: string): void {
+	let current: string | undefined;
+	try {
+		current = readFileSync(path, "utf-8");
+	} catch {
+		return; // gone — nothing left to preserve
+	}
+	if (current !== corruptRaw) return; // replaced by a writer — its rows win
 	const target = `${path}.corrupt-${Date.now()}`;
 	try {
 		renameSync(path, target);
@@ -323,7 +412,7 @@ export function readRegistry(repoRoot: string): RegistryFile {
 	const text = readFileSync(path, "utf-8");
 	const parsed = parseRegistry(text);
 	if (parsed) return parsed;
-	preserveCorruptRegistry(path);
+	preserveCorruptRegistry(path, text);
 	return emptyRegistry();
 }
 

@@ -418,6 +418,9 @@ class AnalyticsStore {
 		const endTime = Date.now();
 		const row = this._pendingSubagentTasks.get(spanId);
 		if (row) {
+			// First settle wins: a double settle must not rewrite the outcome or
+			// extend the duration.
+			if (row.endTime !== null) return;
 			// Fast path: no DB write here — the row is inserted by flushRun together
 			// with its pi_runs parent (see the foreign-key note there).
 			this._pendingSubagentTasks.set(spanId, {
@@ -432,13 +435,15 @@ class AnalyticsStore {
 		// The span was already flushed (e.g. a background task settling after
 		// flushRun): close its row in place so the outcome is not lost.
 		if (!this.db) return;
+		// First settle wins here too: `AND end_time IS NULL` makes a late double
+		// settle a no-op instead of inflating the duration with a new timestamp.
 		const update = this.db.prepare(`
 			UPDATE pi_subagent_tasks
 			SET end_time = @endTime,
 				success = @success,
 				error_message = @errorMessage,
 				duration_ms = @endTime - start_time
-			WHERE span_id = @spanId
+			WHERE span_id = @spanId AND end_time IS NULL
 		`);
 		update.run({
 			spanId,

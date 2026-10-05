@@ -19,7 +19,7 @@ A call must use exactly one of the three shapes.
 }
 ```
 
-Runs one subagent and returns its final output as the tool result.
+Runs one subagent and returns its final output as the tool result. A failed run throws instead of resolving: the call surfaces as a tool error `Subagent <role> failed: <output>` (the embedded output is capped like any model-facing text).
 
 ### Parallel
 
@@ -32,7 +32,7 @@ Runs one subagent and returns its final output as the tool result.
 }
 ```
 
-Independent tasks dispatched together. At most `subagent.maxParallelTasks` tasks per call (default 8), with at most `subagent.maxConcurrent` running at once (default 4). The tool result carries one `[role] completed` / `[role] failed` line per task and marks the call as an error if any task failed; full per-task outputs stay in the result `details` for the UI.
+Independent tasks dispatched together. At most `subagent.maxParallelTasks` tasks per call (default 8), with at most `subagent.maxConcurrent` running at once (default 4). The tool result is a resolved outcome even when some tasks fail: a `Parallel: <succeeded>/<total> succeeded` summary followed by one `### [role] completed` or `### [role] failed (reason)` section per task with that task's capped output. Full per-task outputs stay in the result `details` for the UI. Only dispatch failures (invalid parameters, an unknown `model` id, or too many tasks) throw.
 
 ### Chain
 
@@ -45,7 +45,7 @@ Independent tasks dispatched together. At most `subagent.maxParallelTasks` tasks
 }
 ```
 
-Sequential steps. Every occurrence of `{previous}` in a step's `instructions` is replaced with the previous step's output. The chain stops at the first failing step (the error names the step number and role) and otherwise returns the last step's output.
+Sequential steps. Every occurrence of `{previous}` in a step's `instructions` is replaced with the previous step's output. A failing step throws instead of resolving: the chain stops and the call surfaces as a tool error `Chain stopped at step <n> (<role>): <output>`. Otherwise the call returns the last step's output.
 
 ## Spec fields
 
@@ -61,9 +61,11 @@ Sequential steps. Every occurrence of `{previous}` in a step's `instructions` is
 
 Pass `"background": true` with any mode to detach: the call returns task ids immediately instead of waiting. Background chain steps still run sequentially so `{previous}` keeps working. When a task settles, pi posts a `subagent-background-result` custom message with the outcome and output, queued for the next turn (`deliverAs: "nextTurn"`, `triggerTurn: true`). Background task state lives in an on-disk registry; check it after a restart before assuming a task is still running.
 
+Background dispatch is intentionally not parallel-capped or concurrency-limited: `subagent.maxParallelTasks` and `subagent.maxConcurrent` bound the inline work of one call, while a detached task outlives the turn. The registry is the record of what is running.
+
 ## Output and limits
 
-Each subagent's output is capped at 50 KB in the tool result text (`Output truncated: ...` when hit); the `details` object keeps the full output for renderers. Child transcripts stream as JSONL to a per-run artifact, and aborting the call kills the child's whole process tree.
+Each subagent's output is capped at 50 KB in the model-facing text (`Output truncated: ...` when hit), including the output embedded in thrown single/chain failure errors; the `details` object keeps the full output for renderers. Child transcripts stream as JSONL to a per-run artifact, and aborting the call kills the child's whole process tree.
 
 ## Analytics
 

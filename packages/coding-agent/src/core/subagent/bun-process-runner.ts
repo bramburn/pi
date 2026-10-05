@@ -47,7 +47,7 @@ export interface BunProcessRunnerOptions {
 	resolveInvocation?: (args: string[]) => { command: string; args: string[] };
 	/** Bun API override, for tests. Defaults to the real runtime. */
 	bun?: BunApi;
-	/** Kill escalation grace: first kill → SIGKILL → give up, each after this long. Default 5000ms. */
+	/** Kill escalation grace: graceful SIGTERM → SIGKILL → give up, each after this long. Default 5000ms. */
 	killGraceMs?: number;
 }
 
@@ -474,10 +474,13 @@ async function runChild(
 	const exitCode = await kills.waitForExit();
 	clearTimeout(timer);
 	detachAbort();
-	parser.flush((event) => applyJsonEvent(event, streams, emit));
 	// Only now do we stop waiting for EOF: a surviving grandchild may still hold
 	// the pipe open, and it must not stall the parent after the child is gone.
 	await Promise.all([stdoutPump.release(POST_EXIT_DRAIN_GRACE_MS), stderrPump.release(POST_EXIT_DRAIN_GRACE_MS)]);
+	// Flush AFTER the drain, not before: a final JSONL line without a trailing
+	// newline that completes during the drain window sits in the parser buffer
+	// past a pre-release flush, and the run's last event would be dropped.
+	parser.flush((event) => applyJsonEvent(event, streams, emit));
 	kills.dispose();
 	if (proc.pid) untrackDetachedChildPid(proc.pid);
 

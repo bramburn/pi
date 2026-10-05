@@ -3499,6 +3499,13 @@ export class InteractiveMode {
 				break;
 			}
 
+			case "background_task_settled":
+				// A detached task settles with no tool execution in flight, so the
+				// tool_execution_end refresh above never fires for it (see the emit in
+				// AgentSession's onBackgroundSettled). Refresh the pills at settle time.
+				this.updateSubagentStatusPills();
+				break;
+
 			case "agent_end":
 				if (this.settingsManager.getShowTerminalProgress()) {
 					this.ui.terminal.setProgress(false);
@@ -4429,7 +4436,9 @@ export class InteractiveMode {
 
 	/** Footer pills for experiments and background tasks (plan 4.6 surface). */
 	private updateSubagentStatusPills(): void {
-		const cwd = this.sessionManager.getCwd();
+		// path.resolve on both sides: task rows record the dispatch cwd, which can
+		// differ from getCwd() in slash or drive-letter form on Windows.
+		const cwd = path.resolve(this.sessionManager.getCwd());
 		// Undefined clears the pill: nothing to show when the feature is off or the
 		// current project has no experiments.
 		this.setExtensionStatus(
@@ -4443,7 +4452,7 @@ export class InteractiveMode {
 		// zero total, which clears the pill.
 		const tasks = getBackgroundRegistry()
 			.snapshot()
-			.tasks.filter((t) => t.cwd === cwd);
+			.tasks.filter((t) => path.resolve(t.cwd) === cwd);
 		this.setExtensionStatus(
 			UI_KEYS.BG_STATUS_KEY,
 			renderBackgroundPill(

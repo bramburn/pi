@@ -52,6 +52,41 @@ function createFakePipe(
 	};
 }
 
+/**
+ * A stand-in for a pipe that delivers raw byte chunks. Needed to split a
+ * multibyte character across a chunk boundary, which {@link createFakePipe}
+ * (a string encoded per chunk) cannot express. `close: false` models a
+ * surviving grandchild (the pipe stays open forever); `close: true` models a
+ * clean EOF.
+ */
+function createFakeBytePipe(
+	chunks: Uint8Array[],
+	close: boolean,
+): {
+	getReader: () => {
+		read: () => Promise<{ done: boolean; value?: Uint8Array }>;
+		cancel: (reason?: unknown) => Promise<void>;
+		releaseLock: () => void;
+	};
+} {
+	let index = 0;
+	return {
+		getReader: () => ({
+			read: () => {
+				if (index < chunks.length) {
+					const value = chunks[index];
+					index += 1;
+					return Promise.resolve({ done: false, value });
+				}
+				if (close) return Promise.resolve({ done: true });
+				return new Promise<{ done: boolean; value?: Uint8Array }>(() => {});
+			},
+			cancel: () => Promise.resolve(),
+			releaseLock: () => {},
+		}),
+	};
+}
+
 describe("subagent stream lifetime", () => {
 	it("collectStream returns partial output when the writer never closes", async () => {
 		const pipe = createFakePipe(["first", "second"], false);
@@ -92,6 +127,60 @@ describe("subagent stream lifetime", () => {
 		await pump.release(20);
 		await pump.release(20);
 		expect(pump.text).toBe("x");
+	});
+
+	it("a multibyte character split across two chunks arrives intact", async () => {
+		// "a\u20ACb" with the euro sign's three UTF-8 bytes split across the chunk
+		// boundary (chunk 1 ends mid-character). Verified under Bun: the streaming
+		// decode buffers the partial sequence and the completing bytes in chunk 2
+		// deliver the character.
+		const bytes = new TextEncoder().encode("a\u20ACb");
+		const pipe = createFakeBytePipe([bytes.slice(0, 3), bytes.slice(3)], true);
+		const result = await collectStream(pipe, 100);
+		expect(result.text).toBe("a\u20ACb");
+		expect(result.complete).toBe(true);
+	});
+
+	it("a trailing partial multibyte character surfaces at EOF (decoder flush)", async () => {
+		// The stream ENDS mid-character ("a" plus 2 of the euro sign's 3 UTF-8
+		// bytes): only the EOF flush can emit anything for the buffered bytes.
+		// Verified under Bun: `decoder.decode()` flushes them as U+FFFD, so they
+		// surface instead of vanishing — without the flush the text is just "a".
+		// (A character COMPLETED by a later chunk does not depend on the flush:
+		// the streaming decode already delivers it, pinned by the test above.)
+		const bytes = new TextEncoder().encode("a\u20AC");
+		const pipe = createFakeBytePipe([bytes.slice(0, 3)], true);
+		const result = await collectStream(pipe, 100);
+		expect(result.text).toBe("a\uFFFD");
+		expect(result.complete).toBe(true);
+	});
+
+	it("release resolves cleanly when releaseLock throws with a pending read", async () => {
+		// The cancel-with-pending-read shape: `cancel()` does not settle the
+		// pending `read()` and `releaseLock()` throws like a real locked reader.
+		// Pre-guard this rejected `release()` from inside its finally; now the
+		// lock teardown is best-effort and the partial output is kept.
+		const encoder = new TextEncoder();
+		let sent = false;
+		const pipe = {
+			getReader: () => ({
+				read: () => {
+					if (!sent) {
+						sent = true;
+						return Promise.resolve({ done: false, value: encoder.encode("kept") });
+					}
+					return new Promise<{ done: boolean; value?: Uint8Array }>(() => {});
+				},
+				cancel: () => Promise.resolve(),
+				releaseLock: () => {
+					throw new Error("Cannot release a locked stream");
+				},
+			}),
+		};
+		const pump = createStreamPump(pipe);
+		await expect(pump.release(20)).resolves.toBeUndefined();
+		expect(pump.text).toBe("kept");
+		expect(pump.complete).toBe(false);
 	});
 
 	it.runIf(isBunRuntime())(

@@ -9,6 +9,10 @@
  *    on both backends, and a non-zero exit resolves instead of throwing.
  * 4. `shell: true` with a non-empty `args` array rejects instead of silently
  *    dropping the args.
+ * 5. Kill escalation is graceful-first with a known pid: SIGTERM precedes any
+ *    SIGKILL, and SIGKILL fires only on the escalation.
+ * 6. (Real Bun) the post-exit drain keeps partial output from a
+ *    grandchild-held pipe and reports `complete: false`.
  *
  * The suite runs under Node vitest, where no Bun global exists, so a fake
  * `BunApi` backed by `node:child_process` is injected through `ShellOptions.bun`.
@@ -30,7 +34,7 @@ import {
 	type BunSubprocess,
 	isBunRuntime,
 } from "../src/core/subagent/runtime.ts";
-import { runShell } from "../src/core/subagent/shell.ts";
+import { createKillController, runShell } from "../src/core/subagent/shell.ts";
 import { createStreamPump } from "../src/core/subagent/stream.ts";
 
 /** Prints its own argv (minus node and the -e script) as JSON. */
@@ -40,7 +44,19 @@ function signalNumber(signal: NodeJS.Signals): number {
 	return constants.signals[signal] ?? 9;
 }
 
-/** Adapt a node child stream to the `BunReadableStream` reader shape. */
+/**
+ * Adapt a node child stream to the `BunReadableStream` reader shape.
+ *
+ * Fidelity gap vs real Bun (deliberate, documented): this fake resolves
+ * `exited` on the child's 'close' event, which fires AFTER its stdio has
+ * closed. Real Bun resolves `exited` at process exit while the pipes may still
+ * be open (grandchildren inherit them), so process-level tests built on this
+ * fake never exercise the post-exit drain — that path is pinned by the
+ * synthetic never-closing pipe below and by the real-Bun grandchild test in
+ * this file. Second divergence: a real stream's `cancel()` resolves a pending
+ * `read()` with `{ done: true }`, while this fake's `cancel()` leaves the read
+ * pending forever; `stream.ts` handles both shapes.
+ */
 function wrapNodeStream(stream: Readable | null): BunReadableStream | null {
 	if (!stream) return null;
 	return {
@@ -312,6 +328,64 @@ describe("subagent shell argv and output", () => {
 			const printed = JSON.parse(result.stdout) as string[];
 			expect(printed.slice(-2)).toEqual(["a b", "c;echo injected"]);
 		}
+	});
+
+	it.runIf(isBunRuntime())(
+		"real Bun: a grandchild holding the pipes open past exit is drained and cut at the grace",
+		async () => {
+			const started = Date.now();
+			// bash exits immediately; the backgrounded sleep inherits both pipes
+			// and holds them open past the child's exit — the real-Bun shape the
+			// node fakes cannot produce (their `exited` resolves post-stdio).
+			const result = await runShell("bash", ["-c", "sleep 5 & echo leaked-partial; exit 0"], {
+				cwd: process.cwd(),
+				timeoutMs: 5_000,
+			});
+			expect(result.exitCode).toBe(0);
+			// Output written before the exit and read during the post-exit drain
+			// is kept: the drain grace bounds the wait, not the child's lifetime.
+			expect(result.stdout).toContain("leaked-partial");
+			// The grandchild held the pipe, so the drain was cut short at the
+			// grace instead of reaching EOF on its own.
+			expect(result.complete).toBe(false);
+			expect(result.timedOut).toBe(false);
+			expect(Date.now() - started).toBeLessThan(5_000);
+		},
+		15_000,
+	);
+});
+
+describe("subagent kill escalation", () => {
+	it("killOnce is graceful-first and SIGKILL fires only on escalation", async () => {
+		// A KNOWN pid, so graceful-first is pinned end to end: pre-fix the first
+		// kill was already the hard tree kill (SIGKILL / `taskkill /F`) whenever
+		// the pid was known, and `proc.kill("SIGTERM")` only ran otherwise.
+		const killCalls: string[] = [];
+		const proc: BunSubprocess = {
+			// Known but bogus (far above any OS pid range): the tree-kill syscalls
+			// `killHard` fires fail harmlessly with "no such process".
+			pid: 99_999_999,
+			stdout: null,
+			stderr: null,
+			signalCode: new Promise<string | null>(() => {}),
+			exited: new Promise<number>(() => {}),
+			kill: (signal?: number | NodeJS.Signals) => {
+				killCalls.push(String(signal ?? "SIGTERM"));
+			},
+		};
+		const kills = createKillController(proc, 600);
+		// Graceful first: SIGTERM only, and a second killOnce stays idempotent.
+		kills.killOnce();
+		expect(killCalls).toEqual(["SIGTERM"]);
+		kills.killOnce();
+		expect(killCalls).toEqual(["SIGTERM"]);
+		// Still no SIGKILL before the grace expires.
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(killCalls).toEqual(["SIGTERM"]);
+		// The escalation is the only source of SIGKILL, and it comes after SIGTERM.
+		await new Promise((resolve) => setTimeout(resolve, 600));
+		expect(killCalls).toEqual(["SIGTERM", "SIGKILL"]);
+		kills.dispose();
 	});
 });
 

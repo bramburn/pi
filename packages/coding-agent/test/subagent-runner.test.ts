@@ -28,7 +28,20 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
-/** Adapt a node child stream to the `BunReadableStream` reader shape. */
+/**
+ * Adapt a node child stream to the `BunReadableStream` reader shape.
+ *
+ * Fidelity gap vs real Bun (deliberate, documented): this fake resolves
+ * `exited` on the child's 'close' event, which fires AFTER its stdio has
+ * closed. Real Bun resolves `exited` at process exit while the pipes may still
+ * be open (grandchildren inherit them), so process-level tests built on this
+ * fake never exercise the post-exit drain — that path is pinned by the
+ * synthetic scheduled-output fake below and by real-Bun tests in
+ * subagent-shell.test.ts / subagent-stream.test.ts. Second divergence: a real
+ * stream's `cancel()` resolves a pending `read()` with `{ done: true }`, while
+ * this fake's `cancel()` leaves the read pending forever; `stream.ts` handles
+ * both shapes.
+ */
 function wrapNodeStream(stream: Readable | null): BunReadableStream | null {
 	if (!stream) return null;
 	return {
@@ -85,7 +98,8 @@ interface FakeRunnerBun {
  * A `BunApi` over `node:child_process` for the kill paths. `unkillable` models
  * a child that survives every signal (`exited` never resolves and `kill` only
  * records) so the bounded post-kill wait is pinned without needing a real
- * unkillable process.
+ * unkillable process. It carries a KNOWN bogus pid so the graceful-first kill
+ * sequence is pinned against a real pid, not skipped as the pid-less shape.
  */
 function createFakeRunnerBun(options: { unkillable?: boolean } = {}): FakeRunnerBun {
 	const spawnedPids: number[] = [];
@@ -97,7 +111,10 @@ function createFakeRunnerBun(options: { unkillable?: boolean } = {}): FakeRunner
 			const detached = (spawnOptions as { detached?: boolean } | undefined)?.detached;
 			if (options.unkillable) {
 				return {
-					pid: undefined,
+					// Known but bogus (far above any OS pid range): the recorded kill
+					// calls see a real pid, while the tree-kill syscalls the
+					// escalation fires fail harmlessly with "no such process".
+					pid: 99_999_999,
 					stdout: null,
 					stderr: null,
 					signalCode: Promise.resolve(null),
@@ -161,6 +178,60 @@ function createFakeRunnerBun(options: { unkillable?: boolean } = {}): FakeRunner
 		),
 	};
 	return { api, spawnedPids, killCalls };
+}
+
+/**
+ * A stdout stand-in whose chunks arrive on a schedule and whose pipe then
+ * never closes (a surviving grandchild holds it). Unlike `wrapNodeStream`, the
+ * `exited` promise resolves on its own schedule while chunks are still in
+ * flight — the real-Bun shape where process exit precedes pipe EOF.
+ */
+function createScheduledPipe(chunks: Array<{ text: string; afterMs: number }>): BunReadableStream {
+	const encoder = new TextEncoder();
+	let index = 0;
+	const started = Date.now();
+	return {
+		getReader: () => ({
+			read: () => {
+				if (index >= chunks.length) {
+					// A surviving grandchild: the pipe never reaches EOF.
+					return new Promise<{ done: boolean; value?: Uint8Array }>(() => {});
+				}
+				const chunk = chunks[index];
+				index += 1;
+				const wait = Math.max(0, chunk.afterMs - (Date.now() - started));
+				return new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => {
+					setTimeout(() => resolve({ done: false, value: encoder.encode(chunk.text) }), wait);
+				});
+			},
+			cancel: async () => {},
+			releaseLock: () => {},
+		}),
+	};
+}
+
+/**
+ * A `BunApi` whose spawn produces the scheduled-output fake above. Reuses the
+ * boring file/write/$ surface of {@link createFakeRunnerBun}; only `spawn`
+ * differs.
+ */
+function createScheduledOutputFake(output: Array<{ text: string; afterMs: number }>, exitAfterMs: number): BunApi {
+	const { api } = createFakeRunnerBun({ unkillable: true });
+	return {
+		...api,
+		spawn: () => ({
+			pid: undefined,
+			stdout: createScheduledPipe(output),
+			stderr: null,
+			signalCode: new Promise<string | null>((resolve) => {
+				setTimeout(() => resolve(null), exitAfterMs);
+			}),
+			exited: new Promise<number>((resolve) => {
+				setTimeout(() => resolve(0), exitAfterMs);
+			}),
+			kill: () => {},
+		}),
+	};
 }
 
 describe("BunProcessRunner", () => {
@@ -255,8 +326,50 @@ describe("BunProcessRunner", () => {
 		expect(result.aborted).toBe(true);
 		expect(result.errorMessage).toMatch(/timed out/i);
 		expect(result.exitCode).toBe(HARD_KILL_EXIT_CODE);
-		// The SIGKILL escalation must fire even though the first kill already ran.
-		expect(fake.killCalls).toContain("SIGTERM");
-		expect(fake.killCalls).toContain("SIGKILL");
+		// The signal sequence pins graceful-first WITH a known pid: SIGTERM goes
+		// first (pre-fix the first kill was already the hard tree kill when the
+		// pid was known) and SIGKILL appears exactly once, from the escalation.
+		expect(fake.killCalls).toEqual(["SIGTERM", "SIGKILL"]);
 	}, 15_000);
+
+	it("a final JSONL line without a trailing newline arriving during the drain is not dropped", async () => {
+		// The real-Bun shape the node fakes cannot produce: `exited` resolves
+		// while the pipe is still delivering. The first event is a complete line;
+		// the second lacks the trailing newline and arrives inside the post-exit
+		// drain window, so it sits in the parser buffer until `flush`. The old
+		// ordering (flush before the pump release) saw an empty buffer and
+		// dropped the run's last event: messages would be 1 and finalOutput
+		// "first".
+		const line = (text: string) =>
+			JSON.stringify({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text }],
+					usage: { input: 1, output: 1, totalTokens: 2 },
+					model: "fake/model",
+				},
+			});
+		const api = createScheduledOutputFake(
+			[
+				{ text: `${line("first")}\n`, afterMs: 0 },
+				{ text: line("second"), afterMs: 150 },
+			],
+			60,
+		);
+		const runner = createBunProcessRunner({
+			resolveInvocation: () => ({ command: "ghost", args: [] }),
+			bun: api,
+		});
+		const events: string[] = [];
+		const result = await runner.run(
+			{ spec: { role: "tail", instructions: "" }, task: "t", cwd: process.cwd() },
+			undefined,
+			(event) => events.push(event.type),
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.messages).toHaveLength(2);
+		expect(result.finalOutput).toBe("second");
+		expect(events).toEqual(["spawned", "message_end", "message_end", "exit"]);
+	}, 10_000);
 });

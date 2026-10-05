@@ -87,7 +87,12 @@ const RunParams = Type.Object({
 
 const TestParams = Type.Object({
 	experiment_id: Type.String({ description: "ID returned by experiment_start." }),
-	filter: Type.Optional(Type.String({ description: "Test name pattern (passed to the runner)." })),
+	filter: Type.Optional(
+		Type.String({
+			description:
+				"Test filter passed to the runner: a test-name pattern (-t) for bun/vitest/jest, or a file/path filter after `--` for npm.",
+		}),
+	),
 });
 
 const DiffParams = Type.Object({
@@ -213,9 +218,9 @@ export function buildTestArgv(plan: TestRunnerPlan, filter: string | undefined):
 
 async function detectTestRunner(cwd: string): Promise<TestRunnerPlan | null> {
 	const bun = getBun();
-	if ((await bun.file(join(cwd, "bun.lockb")).exists()) || (await bun.file(join(cwd, "bun.lock")).exists())) {
-		return { name: "bun", argv: ["bun", "test"], filterFlag: "-t" };
-	}
+	// Explicit test-runner config wins over lockfiles: a mixed repo with both
+	// vitest.config.* and bun.lock (like this monorepo) must run vitest, not
+	// bun test. Lockfiles decide only when no runner config names one.
 	if (
 		(await bun.file(join(cwd, "vitest.config.ts")).exists()) ||
 		(await bun.file(join(cwd, "vitest.config.js")).exists())
@@ -227,6 +232,9 @@ async function detectTestRunner(cwd: string): Promise<TestRunnerPlan | null> {
 		(await bun.file(join(cwd, "jest.config.js")).exists())
 	) {
 		return { name: "jest", argv: ["npx", "jest"], filterFlag: "-t" };
+	}
+	if ((await bun.file(join(cwd, "bun.lockb")).exists()) || (await bun.file(join(cwd, "bun.lock")).exists())) {
+		return { name: "bun", argv: ["bun", "test"], filterFlag: "-t" };
 	}
 	if (await bun.file(join(cwd, "package.json")).exists()) {
 		return { name: "npm", argv: ["npm", "test"], filterFlag: "--" };
@@ -260,6 +268,21 @@ function tailOf(s: string, lines: number): string {
 
 function truncate(s: string, n: number): string {
 	return s.length > n ? `${s.slice(0, n - 3)}...` : s;
+}
+
+/**
+ * The file-wide git failure rule: `exitCode !== 0` or `complete === false` (a
+ * truncated read) makes a result untrustworthy — a failed or truncated check
+ * must never pass a gate. Prefer the producer's `error` context when present.
+ */
+function assertGitOk(
+	what: string,
+	res: { exitCode: number; complete?: boolean; error?: string; stdout: string; stderr: string },
+): void {
+	if (res.exitCode === 0 && res.complete !== false) return;
+	throw new Error(
+		res.error ?? `${what} (exit ${res.exitCode}): ${res.stderr.trim() || res.stdout.trim() || "(no output)"}`,
+	);
 }
 
 async function finalizeExperimentMerge(
@@ -501,6 +524,8 @@ export function createExperimentToolDefinitions(
 				`git status --porcelain -- . :!./.pi-experiments :!./.pi-experiments/ :!./${worktreeBase} :!./${worktreeBase}/`,
 				{ cwd },
 			);
+			// A failed or truncated status check must not pass the clean-tree gate.
+			assertGitOk("git status failed", status);
 			if (status.stdout.trim().length > 0) {
 				throw new Error(
 					`Main worktree has uncommitted changes. Commit or stash them before merging an experiment.\n${status.stdout}`,
@@ -509,9 +534,7 @@ export function createExperimentToolDefinitions(
 
 			if (params.strategy === "cherry-pick") {
 				const head = await runShell("git", ["rev-parse", row.branch], { cwd });
-				if (head.exitCode !== 0) {
-					throw new Error(`Could not resolve ${row.branch}: ${head.stderr.trim() || head.stdout.trim()}`);
-				}
+				assertGitOk(`Could not resolve ${row.branch}`, head);
 				const pick = await cherryPickFromBranch(cwd, row.branch, head.stdout.trim());
 				if (pick.exitCode !== 0 || pick.complete === false) {
 					throw new Error(
@@ -549,11 +572,10 @@ export function createExperimentToolDefinitions(
 				["merge", "--no-ff", row.branch, "-m", `Merge experiment ${row.id} (${row.approach})`],
 				{ cwd },
 			);
-			if (merge.exitCode !== 0) {
-				throw new Error(`Merge failed (exit ${merge.exitCode}): ${merge.stderr.trim() || merge.stdout.trim()}`);
-			}
+			assertGitOk("Merge failed", merge);
 			const head = await runShell("git", ["rev-parse", "HEAD"], { cwd });
-			const newCommit = head.exitCode === 0 ? head.stdout.trim() : undefined;
+			assertGitOk("Could not resolve HEAD after merge", head);
+			const newCommit = head.stdout.trim();
 			await finalizeExperimentMerge(cwd, row, "merge", newCommit, onRegistryChanged);
 			return successToolResult(`Merged ${row.branch} into main as ${newCommit?.slice(0, 7) ?? "(unknown)"}`);
 		},

@@ -200,7 +200,14 @@ export type AgentSessionEvent =
 	  }
 	| { type: "summarization_retry_finished" }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
-	| { type: "bash_execution_update"; id?: string; delta: string };
+	| { type: "bash_execution_update"; id?: string; delta: string }
+	| {
+			type: "background_task_settled";
+			/** Registry task id (or a chain step id whose dispatch failed). */
+			taskId: string;
+			role: string;
+			failed: boolean;
+	  };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -3020,6 +3027,17 @@ export class AgentSession {
 						},
 						onBackgroundSettled: (taskId, result) => {
 							const failed = isFailedSubagentResult(result);
+							// Settle-time seam for UI consumers: the custom message below is
+							// only delivered at the next turn, and a detached task settles with
+							// no tool execution in flight — so the tool_execution_end pill
+							// refresh never fires for it. Interactive mode refreshes its
+							// status pills on this event instead.
+							this._emit({
+								type: "background_task_settled",
+								taskId,
+								role: result.role,
+								failed,
+							});
 							const output = result.finalOutput || result.errorMessage || "(no output)";
 							const text = failed
 								? `Background task ${taskId} (${result.role}) failed${

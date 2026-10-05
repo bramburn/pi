@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { type BackgroundRegistry, type BackgroundTask, RegistryLockError } from "../src/core/subagent/background.ts";
 import {
 	createSubagentToolDefinition,
 	PER_TASK_OUTPUT_CAP,
@@ -434,5 +435,190 @@ describe("subagent dispatch modes", () => {
 		// on a lone surrogate half.
 		expect(body).toBe("x".repeat(PER_TASK_OUTPUT_CAP - 3));
 		expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(PER_TASK_OUTPUT_CAP);
+	});
+});
+
+describe("failure-throw output cap", () => {
+	it("caps embedded output in a thrown single-failure error at 50 KB", async () => {
+		const bigText = "x".repeat(60 * 1024);
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 1,
+					aborted: false,
+					finalOutput: "",
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+					errorMessage: bigText,
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		let message = "";
+		try {
+			await tool.execute("t13", { role: "bad", instructions: "go" }, undefined, undefined, undefined as never);
+		} catch (err) {
+			message = err instanceof Error ? err.message : String(err);
+		}
+		expect(message.startsWith("Subagent bad failed: ")).toBe(true);
+		expect(message).toContain("Output truncated:");
+		expect(message.length).toBeLessThan(52_000);
+	});
+
+	it("caps embedded output in a thrown chain-failure error at 50 KB", async () => {
+		const bigText = "x".repeat(60 * 1024);
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 1,
+					aborted: false,
+					finalOutput: "",
+					stderr: bigText,
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		let message = "";
+		try {
+			await tool.execute(
+				"t14",
+				{
+					chain: [
+						{ role: "s1", instructions: "a" },
+						{ role: "s2", instructions: "b" },
+					],
+				},
+				undefined,
+				undefined,
+				undefined as never,
+			);
+		} catch (err) {
+			message = err instanceof Error ? err.message : String(err);
+		}
+		expect(message.startsWith("Chain stopped at step 1 (s1): ")).toBe(true);
+		expect(message).toContain("Output truncated:");
+		expect(message.length).toBeLessThan(52_000);
+	});
+});
+
+describe("single-mode failure throw (Node pin)", () => {
+	it("rejects with the Subagent <role> failed: shape", async () => {
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 2,
+					aborted: false,
+					finalOutput: "",
+					stderr: "boom",
+					usage: createEmptyUsage(),
+					messages: [],
+					errorMessage: "boom",
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		await expect(
+			tool.execute("t15", { role: "scout", instructions: "go" }, undefined, undefined, undefined as never),
+		).rejects.toThrow("Subagent scout failed: boom");
+	});
+});
+
+describe("parallel progress counting", () => {
+	it("counts a failed spawn as done, not running", async () => {
+		const texts: string[] = [];
+		const runner: SubagentRunner = {
+			async run(): Promise<SubagentResult> {
+				throw new Error("spawn failed");
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), { runner });
+		const result = await tool.execute(
+			"t16",
+			{ tasks: [{ role: "dead", instructions: "go" }] },
+			undefined,
+			(update) => {
+				texts.push((update.content[0] as { text: string }).text);
+			},
+			undefined as never,
+		);
+		expect(texts.length).toBeGreaterThan(0);
+		expect(texts[texts.length - 1]).toBe("Parallel: 1/1 done, 0 running...");
+		expect((result.content[0] as { text: string }).text).toContain("Parallel: 0/1 succeeded");
+	});
+});
+
+describe("background chain continuation guard", () => {
+	it("settles a step whose dispatch throws instead of dropping it", async () => {
+		const updates: Array<{ taskId: string; partial: Partial<BackgroundTask> }> = [];
+		const settled: Array<{ taskId: string; result: SubagentResult }> = [];
+		const registry: BackgroundRegistry = {
+			makeTaskId: () => `bg_test_${Math.random().toString(36).slice(2)}`,
+			add(task) {
+				// Simulate RegistryLockError on the second dispatch.
+				if (task.role === "s2") throw new RegistryLockError("/fake/registry.lock");
+			},
+			update(taskId, partial) {
+				updates.push({ taskId, partial });
+			},
+			appendLog() {},
+			listRunning: () => [],
+			snapshot: () => ({ tasks: [] }),
+			markAllRunningAsCrashed: async () => 0,
+			prune: async () => 0,
+			cancel: async () => {},
+		};
+		const runner: SubagentRunner = {
+			async run(request): Promise<SubagentResult> {
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 0,
+					aborted: false,
+					finalOutput: "ok",
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+				};
+			},
+		};
+		const tool = createSubagentToolDefinition(process.cwd(), {
+			runner,
+			registry,
+			onBackgroundSettled: (taskId, result) => {
+				settled.push({ taskId, result });
+			},
+		});
+		const result = await tool.execute(
+			"t17",
+			{
+				background: true,
+				chain: [
+					{ role: "s1", instructions: "a" },
+					{ role: "s2", instructions: "b {previous}" },
+				],
+			},
+			undefined,
+			undefined,
+			undefined as never,
+		);
+		expect((result.content[0] as { text: string }).text).toContain("Started 2 background tasks");
+		// The continuation runs detached once s1 settles (microtasks + one tick).
+		await new Promise<void>((resolve) => {
+			setTimeout(() => resolve(), 25);
+		});
+		expect(settled).toHaveLength(2);
+		expect(settled[0]?.result.finalOutput).toBe("ok");
+		expect(settled[1]?.result.role).toBe("s2");
+		expect(settled[1]?.result.errorMessage).toContain("could not be dispatched");
+		expect(updates.some((u) => u.partial.status === "failed")).toBe(true);
 	});
 });
