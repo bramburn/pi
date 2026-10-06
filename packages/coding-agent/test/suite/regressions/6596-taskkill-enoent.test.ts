@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("issue #6596 taskkill spawn failures", () => {
-	it("uses System32 taskkill and consumes its asynchronous spawn error", () => {
+	it("uses System32 taskkill and consumes its asynchronous spawn error", async () => {
 		const child = new EventEmitter() as ChildProcess;
 		const previousSystemRoot = process.env.SystemRoot;
 		process.env.SystemRoot = "C:\\CustomWindows";
@@ -37,6 +37,10 @@ describe("issue #6596 taskkill spawn failures", () => {
 			withWindowsPlatform(() => {
 				killProcessTree(1234);
 			});
+			// The win32 path snapshots the process table first (a PowerShell
+			// round-trip) and only then fires the taskkill sweep, so the spawn is
+			// no longer synchronous. Flush the microtask queue before asserting.
+			await new Promise((resolve) => setImmediate(resolve));
 		} finally {
 			if (previousSystemRoot === undefined) delete process.env.SystemRoot;
 			else process.env.SystemRoot = previousSystemRoot;

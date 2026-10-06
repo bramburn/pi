@@ -34,9 +34,11 @@
  * POSIX and `killProcessTree`'s `kill(-pid)` reaches the whole tree instead of
  * failing with ESRCH and orphaning grandchildren. Verified under Bun on
  * Windows: the option is accepted and argv, pipes and kill behave as without
- * it. Windows residual limitation: `taskkill /F /T` walks the tree only
- * through a live direct child, so grandchildren that outlive the direct child
- * are orphaned; there is no spawn-side fix for that.
+ * it. Windows residual limitation: `killProcessTree` first snapshots the
+ * process table (`win32-tree.ts`) and force-kills each descendant by pid, then
+ * runs its `taskkill /F /T` sweep as the backstop, because `/T` alone walks the
+ * tree only through a live direct child. A descendant spawned AFTER the
+ * snapshot is still invisible to it.
  *
  * Environment: `ShellOptions.env` is MERGED over the inherited environment on
  * both backends. `undefined` values leave the inherited setting alone;
@@ -140,7 +142,8 @@ function mergeEnv(overrides: Record<string, string | undefined>): Record<string,
  * Windows residual limitation (same one `createKillController` documents):
  * there are no signal groups, and `process.kill` on win32 terminates
  * unconditionally, so a "graceful" SIGTERM is in fact an immediate TerminateProcess
- * and only `taskkill /F /T` reaches the tree. There is no spawn-side fix.
+ * and `killProcessTree` is the tree-wide form — it snapshots the process table
+ * for a per-pid descendant kill and then sweeps with `taskkill /F /T`.
  *
  * Recycles: pid liveness alone cannot distinguish a live child from an unrelated
  * process that inherited the number, so every caller must gate on its own
@@ -158,8 +161,9 @@ export function killPidTree(pid: number, graceMs: number = KILL_GRACE_MS): PidKi
 	if (process.platform === "win32") {
 		// No graceful tier exists on win32: process.kill maps every signal to
 		// TerminateProcess on the direct child only, orphaning its
-		// grandchildren. taskkill /F /T is the tree-wide form, so it is the
-		// first thing sent rather than the escalation.
+		// grandchildren. killProcessTree snapshots the descendants first and
+		// force-kills each by pid before its taskkill /F /T sweep, so it is the
+		// tree-wide form and the first thing sent rather than the escalation.
 		killProcessTree(pid);
 		return "signalled";
 	}
@@ -195,7 +199,8 @@ export function killPidTree(pid: number, graceMs: number = KILL_GRACE_MS): PidKi
  * `killOnce` is the idempotent GRACEFUL first kill: SIGTERM to the child and,
  * where the detached child leads a process group (POSIX), SIGTERM to that
  * group so grandchildren get the same grace. `killHard` is the hard
- * escalation (SIGKILL / `taskkill /F` through the tree where addressable) and
+ * escalation (SIGKILL / `taskkill /F` over the snapshot of descendants and
+ * then through the tree where addressable) and
  * deliberately bypasses that idempotence so the escalation scheduled by the
  * first kill actually fires. `waitForExit` stops being unbounded once a kill
  * was requested: a child that survives even `killHard` resolves to `null`
@@ -224,9 +229,10 @@ export function createKillController(proc: BunSubprocess, graceMs: number = KILL
 	const killTree = () => {
 		// The child runs its own tools, so its real descendants are
 		// grandchildren. Hard-kill the whole tree when we can address it.
-		// Windows residual limitation: `taskkill /F /T` walks the tree only
-		// through the live direct child; grandchildren that outlive it are
-		// orphaned and unreachable.
+		// Windows residual limitation: `killProcessTree` covers the descendants
+		// present in the process table snapshot it takes, then sweeps with
+		// `taskkill /F /T`; a descendant spawned after that snapshot can still
+		// outlive the direct child and be orphaned.
 		if (proc.pid !== undefined) killProcessTree(proc.pid);
 	};
 
