@@ -9,7 +9,11 @@
  * via { exitCode, stdout, stderr, error } — never thrown — so the experiment
  * tools can render a useful error message to the agent. `error` carries the
  * command plus stderr context whenever the command failed or its output was
- * cut short (`complete: false`).
+ * cut short (`complete: false`). The one exception is lock contention: the
+ * worktree mutations (`createWorktree`, `removeWorktree`, `pruneWorktrees`)
+ * run inside `withWorktreeLock` (worktree-lock.ts, issue #1054) and propagate
+ * `WorktreeLockError` when another run holds the repo lock past its wait
+ * budget — contention is not a git outcome that can be rendered as repo state.
  *
  * Worktrees live under `<repo>/<worktreeBase>/<slug>` where `worktreeBase`
  * comes from `subagent.worktreeBase` (default ".worktrees"). The registry and
@@ -20,6 +24,7 @@ import { existsSync } from "node:fs";
 import { basename, resolve as resolvePath } from "node:path";
 import { DEFAULT_SUBAGENT_SETTINGS } from "../defaults.ts";
 import { runShell } from "./shell.ts";
+import { withWorktreeLock } from "./worktree-lock.ts";
 
 export interface GitResult {
 	exitCode: number;
@@ -120,6 +125,19 @@ export function sanitizeSlug(slug: string): string {
 	return cleaned;
 }
 
+/**
+ * Create a worktree on a fresh `exp/<slug>` branch at `parentCommit`.
+ *
+ * The whole check-and-mutate body (path pre-check, branch pre-check, `git
+ * worktree add`, failure cleanup) runs under the repo worktree lock, so a
+ * concurrent create/remove/prune in the same repo can neither slip a
+ * duplicate `exp/<slug>` branch past the pre-checks nor tear down this call's
+ * admin directory mid-flight. The lock is not reentrant, which is why the
+ * cleanup below uses the raw `git` helper instead of `removeWorktree`/
+ * `pruneWorktrees`. Slug sanitising happens before the lock because it
+ * touches no repo state. Throws `WorktreeLockError` if the lock stays held
+ * past its wait budget.
+ */
 export async function createWorktree(
 	repoRoot: string,
 	approachSlug: string,
@@ -133,6 +151,15 @@ export async function createWorktree(
 		const message = err instanceof Error ? err.message : String(err);
 		return { exitCode: 1, stdout: "", stderr: message, complete: true, error: message, worktreePath: "", branch: "" };
 	}
+	return withWorktreeLock(repoRoot, () => createWorktreeLocked(repoRoot, slug, parentCommit, worktreeBase));
+}
+
+async function createWorktreeLocked(
+	repoRoot: string,
+	slug: string,
+	parentCommit: string,
+	worktreeBase: string,
+): Promise<WorktreeCreateResult> {
 	const worktreePath = resolvePath(repoRoot, worktreeBase, slug);
 	const branch = `exp/${slug}`;
 
@@ -171,8 +198,16 @@ export async function createWorktree(
  * name fails at `git worktree add -b`. The branch is only deleted when it is
  * exactly `exp/<basename>` and the worktree removal succeeded (the branch is
  * checked out in the worktree until then).
+ *
+ * Runs under the repo worktree lock (see `createWorktree`), so it cannot race
+ * a concurrent create or prune. Throws `WorktreeLockError` on lock contention
+ * timeout.
  */
 export async function removeWorktree(repoRoot: string, worktreePath: string, force: boolean): Promise<GitResult> {
+	return withWorktreeLock(repoRoot, () => removeWorktreeLocked(repoRoot, worktreePath, force));
+}
+
+async function removeWorktreeLocked(repoRoot: string, worktreePath: string, force: boolean): Promise<GitResult> {
 	const args = ["worktree", "remove", worktreePath];
 	if (force) args.push("--force");
 	const res = await git(args, repoRoot);
@@ -192,8 +227,14 @@ export async function removeWorktree(repoRoot: string, worktreePath: string, for
 	return res;
 }
 
+/**
+ * Drop admin data for worktrees whose directories are gone. Runs under the
+ * repo worktree lock: an unlocked prune could delete the admin directory of a
+ * worktree a concurrent `createWorktree` is mid-flight on (throws
+ * `WorktreeLockError` on contention timeout).
+ */
 export async function pruneWorktrees(repoRoot: string): Promise<GitResult> {
-	return git(["worktree", "prune"], repoRoot);
+	return withWorktreeLock(repoRoot, () => git(["worktree", "prune"], repoRoot));
 }
 
 export async function listWorktrees(repoRoot: string): Promise<GitResult> {
