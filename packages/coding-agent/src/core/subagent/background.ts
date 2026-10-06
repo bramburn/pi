@@ -5,8 +5,11 @@
  * can be inspected by a later session. On disk, under the agent dir:
  *
  * subagent-bg/
- *   registry.json   # array of BackgroundTask entries
- *   <taskId>/log.jsonl  # per-task append-only event log
+ *   registry.json                # array of BackgroundTask entries
+ *   registry.lock                # write lock guarding registry.json
+ *   failure-counters.json        # consecutive-failure streaks per role (#1051)
+ *   replay/<encoded taskId>.json # undelivered completion record (#1050)
+ *   <taskId>/log.jsonl           # per-task append-only event log
  *
  * Concurrency: a single *.lock file guards registry.json writes (5s retry,
  * then throw). The lock records its owner (pid + createdAt + token) so a
@@ -16,6 +19,13 @@
  * silently overwritten. Per-task logs are append-only.
  *
  * Lifecycle states: pending -> running -> (completed | failed | cancelled | crashed)
+ *
+ * Durable completion (#1050): a run started with an `onSettled` callback writes a result
+ * record under `replay/` before the callback fires, so a crash in between cannot swallow
+ * the notification. The record carries a claim token; the callback deletes it once the
+ * notification has been handed to the UI. A later session replays leftover records once,
+ * bounded by count, age, and attempt count, and never re-enters the settle path while
+ * doing so. Identical consecutive failure signatures escalate after a threshold (#1051).
  *
  * This is a direct port of the reference extension's `background.ts`, with the
  * `agentScope` field dropped: the native path has no agent files, so there is
@@ -39,7 +49,35 @@ import {
 import { join } from "node:path";
 import { getAgentDir } from "../../config.ts";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
+import {
+	applySettleToStreaks,
+	buildCompletionRecord,
+	type CompletionDelivery,
+	type CompletionEscalation,
+	type CompletionRecord,
+	type CompletionRecordInput,
+	type CompletionReplayReceipt,
+	type CompletionStatus,
+	claimRecord,
+	countersFile,
+	deleteRecordFile,
+	FAILURE_ESCALATION_THRESHOLD,
+	failureSignature,
+	isClaimFresh,
+	isRecordStale,
+	listRecordFiles,
+	REPLAY_MAX_AGE_MS,
+	REPLAY_MAX_ATTEMPTS,
+	REPLAY_MAX_RECORDS,
+	readFailureCounters,
+	readRecordFile,
+	recordFile,
+	replayDir,
+	writeFailureCounters,
+	writeRecordFile,
+} from "./result-record.ts";
 import { getBun } from "./runtime.ts";
+import { killPidTree } from "./shell.ts";
 import {
 	createEmptyUsage,
 	isFailedSubagentResult,
@@ -125,6 +163,22 @@ export interface BackgroundLogEvent {
 	[key: string]: unknown;
 }
 
+/**
+ * What a `cancel` request actually achieved. The tool's text is derived from
+ * this, so a cancellation that could not stop its child can never be reported
+ * as one that did (REQ-X01.5).
+ */
+export type CancelResult =
+	| {
+			kind: "cancelled" /** Pid that was signalled, or undefined in the spawn window. */;
+			pid?: number;
+			killed: boolean;
+	  }
+	| { kind: "cancelled-queued" }
+	| { kind: "not-found" }
+	| { kind: "already-terminal"; status: TaskStatus }
+	| { kind: "not-cancelled"; reason: string };
+
 export interface BackgroundRegistry {
 	makeTaskId(): string;
 	/**
@@ -149,6 +203,10 @@ export interface BackgroundRegistry {
 	 * before ownerPid existed, or cleared via update(taskId, { ownerPid:
 	 * undefined })) cannot prove a live owner and always counts as an orphan;
 	 * crashing it is the safe default.
+	 *
+	 * A crashed row's surviving child is KILLED in the same pass (REQ-X02), so
+	 * a parent SIGKILL cannot leave a live, write-capable orphan behind a row
+	 * that claims it is dead.
 	 */
 	markAllRunningAsCrashed(): Promise<number>;
 	/**
@@ -158,7 +216,21 @@ export interface BackgroundRegistry {
 	 * Returns the number of rows removed.
 	 */
 	prune(): Promise<number>;
-	cancel(taskId: string, reason: string): Promise<void>;
+	/**
+	 * Stop a task and report what happened.
+	 *
+	 * A queued row is cancelled with no signalling: it never reached the runner,
+	 * so there is no child. A running row is SIGNALLLED through its recorded pid
+	 * before the terminal write, escalating SIGTERM -> SIGKILL tree like
+	 * `killPidTree`.
+	 *
+	 * Signalling is gated on this process still being the row's owner: a pid
+	 * outlives its row, and once the owning session is gone the number may have
+	 * been recycled by an unrelated process. Killing on pid liveness alone would
+	 * let a `stop` reach into some other program. Rows whose owner is gone are
+	 * reaped by `markAllRunningAsCrashed` instead, which has the same gate.
+	 */
+	cancel(taskId: string, reason: string): Promise<CancelResult>;
 }
 
 export class RegistryLockError extends Error {
@@ -550,7 +622,66 @@ function isOrphanCandidate(t: BackgroundTask): boolean {
 	return inFlight && (t.ownerPid === undefined || !isProcessAlive(t.ownerPid));
 }
 
-/** Clamp evidence to MAX_CRASH_EVIDENCE_CHARS, keeping the head or the tail. */
+/** Whether a row has already been cancelled — the spawn-window kill's precondition. */
+function isRowCancelled(registry: BackgroundRegistry, taskId: string): boolean {
+	try {
+		return registry.snapshot().tasks.find((t) => t.id === taskId)?.status === "cancelled";
+	} catch {
+		// An unreadable registry is not evidence of a cancellation; leave the
+		// child alone rather than killing one nobody asked to stop.
+		return false;
+	}
+}
+
+/**
+ * Current row status, or undefined when the row is gone or unreadable. Used by
+ * the crash path to let an already-terminal row (a `stop` that wrote
+ * `cancelled`) outrank the synthesized `crashed`.
+ */
+function currentRowStatus(registry: BackgroundRegistry, taskId: string): TaskStatus | undefined {
+	try {
+		return registry.snapshot().tasks.find((t) => t.id === taskId)?.status;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Kill one orphaned row's surviving child, and describe what was done.
+ *
+ * This is the REQ-X02 half: `isOrphanCandidate` has already proved the owning
+ * session is gone, so a still-live `t.pid` is a write-capable process with no
+ * parent and no killer. Leaving it behind a row that says `crashed` is the leak.
+ *
+ * Recycled-pid gate (REQ-X01.3 applies here too). Pid liveness cannot
+ * distinguish our child from an unrelated process that inherited the number.
+ * Two facts narrow it, and neither is sufficient alone:
+ *
+ * 1. The row must be an orphan (owner dead) — proven by the caller.
+ * 2. The pid must still be alive AND must not be this process.
+ *
+ * A row that predates `pid` recording has nothing to kill, which is reported
+ * rather than silently skipped so the row's message says why no reap happened.
+ *
+ * Residual (accepted, documented rather than hidden): Windows offers no
+ * portable process start time, so a pid recycled within the same reconcile pass
+ * is indistinguishable from the original child. The window is one startup pass
+ * wide and only ever follows a parent crash, where the alternative — leaving a
+ * live orphan — is strictly worse.
+ */
+function reapOrphanChild(t: BackgroundTask): string | undefined {
+	const pid = t.pid;
+	if (pid === undefined) return undefined; // never recorded, or never reached the runner
+	if (!isProcessAlive(pid)) return undefined; // already exited on its own
+	const outcome = killPidTree(pid);
+	return outcome === "signalled"
+		? `reaped surviving child process (pid ${pid})`
+		: `could NOT reap surviving child process (pid ${pid}): the kill could not be delivered and the child may still be running`;
+}
+
+/**
+ * Clamp evidence to MAX_CRASH_EVIDENCE_CHARS, keeping the head or the tail.
+ */
 function clampEvidence(text: string, keepEnd: boolean): string {
 	if (text.length <= MAX_CRASH_EVIDENCE_CHARS) return text;
 	return keepEnd
@@ -694,6 +825,16 @@ function createRegistry(): BackgroundRegistry {
 					evidence.set(t.id, await readCrashEvidence(taskLogPath(t.id)));
 				}),
 			);
+			// Kill surviving children OUTSIDE the lock, for the same reason as
+			// cancel(): a wedged kill must not hold the registry lock against
+			// every other session. The child is killed before the row is rewritten
+			// to `crashed`, so no observer ever sees a crashed row whose child is
+			// still running (REQ-X02.3).
+			const reaps = new Map<string, string>();
+			for (const t of candidates) {
+				const note = reapOrphanChild(t);
+				if (note !== undefined) reaps.set(t.id, note);
+			}
 			return withLock(lockPath(), () => {
 				const file = readRegistry();
 				const now = new Date().toISOString();
@@ -706,6 +847,11 @@ function createRegistry(): BackgroundRegistry {
 					// record the crash with the extracted evidence. crashMessage always
 					// returns a defined string, so the JSON store can never strip it.
 					t.errorMessage = t.errorMessage ?? crashMessage(evidence.get(t.id));
+					// The reap outcome rides in the same message so a single read of
+					// the row explains both why the task ended and what happened to
+					// its process (REQ-X02.2).
+					const reap = reaps.get(t.id);
+					if (reap !== undefined) t.errorMessage = `${t.errorMessage}; ${reap}`;
 					t.lastEventAt = now;
 					count += 1;
 				}
@@ -749,16 +895,122 @@ function createRegistry(): BackgroundRegistry {
 		},
 
 		async cancel(taskId, reason) {
+			// Read outside the lock: the kill below must not hold the registry
+			// lock, or a wedged taskkill would block every other session's writes.
+			// The authoritative re-check happens again inside the lock below.
+			const current = readRegistry().tasks.find((t) => t.id === taskId);
+			if (current === undefined) return { kind: "not-found" };
+			if (current.status !== "running" && current.status !== "pending") {
+				return { kind: "already-terminal", status: current.status };
+			}
+
+			// Queued: never reached the runner, so no child exists and none can
+			// be signalled. This is the one case where the row alone is the whole
+			// story.
+			if (current.status === "pending") {
+				withLock(lockPath(), () => {
+					const file = readRegistry();
+					const idx = file.tasks.findIndex((t) => t.id === taskId);
+					if (idx === -1) return;
+					const row = file.tasks[idx];
+					if (!row || (row.status !== "running" && row.status !== "pending")) return;
+					const now = new Date().toISOString();
+					file.tasks[idx] = {
+						...row,
+						status: "cancelled",
+						finishedAt: now,
+						errorMessage: reason,
+						lastEventAt: now,
+					};
+					writeRegistry(file);
+				});
+				return { kind: "cancelled-queued" };
+			}
+
+			// Recycled-pid guard, checked BEFORE anything acts on the pid. A pid
+			// outlives its row, and pid liveness alone cannot tell our child from
+			// an unrelated process that inherited the number. The trustworthy fact
+			// is ownership: this session recorded that pid and is still the row's
+			// owner. A row belonging to another session is left alone entirely —
+			// including the harmless "mark a dead child cancelled" path below —
+			// because `stop` on a foreign row must never write state for it.
+			// markAllRunningAsCrashed handles genuinely abandoned rows, and applies
+			// the same rule from the other side: dead owner, then the pid is fair
+			// game to reap.
+			if (current.ownerPid !== undefined && current.ownerPid !== process.pid) {
+				return {
+					kind: "not-cancelled",
+					reason: `Refusing to act on pid ${current.pid ?? "unknown"}: the task is owned by session ${current.ownerPid}, not this one (${process.pid}). A pid outlives its row and may have been recycled by an unrelated process.`,
+				};
+			}
+
+			// Running. A row with no pid yet is the spawn window: the row is written
+			// before the runner resolves its invocation, so a `stop` issued right
+			// after dispatch lands here. Cancelling it is still honest — the child
+			// is killed the instant it spawns (see the `spawned` handler in
+			// runDetached), so no live child is ever left behind a cancelled row.
+			const pid = current.pid;
+			if (pid === undefined) {
+				withLock(lockPath(), () => {
+					const file = readRegistry();
+					const idx = file.tasks.findIndex((t) => t.id === taskId);
+					if (idx === -1) return;
+					const row = file.tasks[idx];
+					if (!row || (row.status !== "running" && row.status !== "pending")) return;
+					const now = new Date().toISOString();
+					file.tasks[idx] = {
+						...row,
+						status: "cancelled",
+						finishedAt: now,
+						errorMessage: `${reason} (cancelled during the spawn window: the child had not reported a pid yet and is killed as soon as it does)`,
+						lastEventAt: now,
+					};
+					writeRegistry(file);
+				});
+				return { kind: "cancelled", killed: false };
+			}
+			if (!isProcessAlive(pid)) {
+				// Already gone on its own: cancelling the row is then accurate,
+				// and this is the only path where no signal is needed.
+				withLock(lockPath(), () => {
+					const file = readRegistry();
+					const idx = file.tasks.findIndex((t) => t.id === taskId);
+					if (idx === -1) return;
+					const row = file.tasks[idx];
+					if (!row || (row.status !== "running" && row.status !== "pending")) return;
+					const now = new Date().toISOString();
+					file.tasks[idx] = {
+						...row,
+						status: "cancelled",
+						finishedAt: now,
+						errorMessage: reason,
+						lastEventAt: now,
+					};
+					writeRegistry(file);
+				});
+				return { kind: "cancelled", pid, killed: false };
+			}
+
+			const outcome = killPidTree(pid);
+			appendToTaskLog(taskId, { type: "KILL", pid, outcome, reason });
+			if (outcome === "failed") {
+				return {
+					kind: "not-cancelled",
+					reason: `Signalled pid ${pid} but the kill could not be delivered (permission or an invalid pid). The child may still be running; the row is left running rather than falsely marked cancelled.`,
+				};
+			}
+
 			withLock(lockPath(), () => {
 				const file = readRegistry();
 				const idx = file.tasks.findIndex((t) => t.id === taskId);
 				if (idx === -1) return;
-				const current = file.tasks[idx];
-				if (!current) return;
-				if (current.status !== "running" && current.status !== "pending") return;
+				const row = file.tasks[idx];
+				// The child may have settled while the kill was in flight; its own
+				// terminal status is the truth and must not be overwritten.
+				if (!row || (row.status !== "running" && row.status !== "pending")) return;
 				const now = new Date().toISOString();
 				file.tasks[idx] = {
-					...current,
+					...row,
 					status: "cancelled",
 					finishedAt: now,
 					errorMessage: reason,
@@ -766,6 +1018,7 @@ function createRegistry(): BackgroundRegistry {
 				};
 				writeRegistry(file);
 			});
+			return { kind: "cancelled", pid, killed: true };
 		},
 	};
 }
@@ -805,6 +1058,8 @@ export interface BackgroundRunOptions {
 	parentThinkingLevel?: SubagentRunRequest["parentThinkingLevel"];
 	/** Parent session file path; threaded into the runner so the child can nest under it. */
 	parentSessionFile?: string;
+	/** Delegation depth of the child to launch. Root session is 0, so its children are 1. */
+	depth?: number;
 	/** Called once the task reaches a terminal state. Must not throw. */
 	onSettled?: (taskId: string, result: SubagentResult) => void;
 	/** No hard limit by default: a background task is expected to outlive a turn. */
@@ -817,16 +1072,236 @@ export interface BackgroundRunOptions {
  * terminal, and a throw escaping here would either become an unhandled
  * rejection (crash path) or rewrite the terminal status to "crashed" (normal
  * path).
+ *
+ * Durable completion (#1050): when a notification is to be delivered, its
+ * record is written and claimed under the registry lock *before* the callback
+ * runs, and deleted only once the callback returned. A callback that throws —
+ * or a parent that dies mid-delivery — leaves the record behind for the next
+ * session's replay pass (`claimReplayDeliveries`). The consecutive-failure
+ * streak (#1051) is folded in the same lock hold, and a streak that just
+ * reached the escalation threshold rides out on `result.escalation`.
  */
-function notifySettled(onSettled: BackgroundRunOptions["onSettled"], taskId: string, result: SubagentResult): void {
+function notifySettled(
+	onSettled: BackgroundRunOptions["onSettled"],
+	taskId: string,
+	result: SubagentResult,
+	context: SettleContext = {},
+): void {
+	const status = context.status ?? deriveCompletionStatus(result);
+	const { escalation, delivery, skipped } = recordSettle(
+		{
+			taskId,
+			role: result.role,
+			status,
+			exitCode: result.exitCode,
+			...(result.errorMessage === undefined ? {} : { errorMessage: result.errorMessage }),
+			output: context.output ?? result.finalOutput,
+			task: result.task,
+			logPath: taskLogPath(taskId),
+		},
+		onSettled !== undefined,
+	);
+	// A fresh claim means this settle is already mid-delivery elsewhere;
+	// delivering again would report the same task twice.
+	if (onSettled === undefined || skipped) return;
+	if (escalation !== undefined) result.escalation = escalation;
 	try {
-		onSettled?.(taskId, result);
+		onSettled(taskId, result);
 	} catch (err) {
-		console.warn(
-			`[subagent-bg] onSettled callback threw for ${taskId}:`,
-			err instanceof Error ? err.message : String(err),
-		);
+		// The record stays on disk with its fresh claim: the next replay pass
+		// reclaims it once the claim goes stale or this pid dies. A best-effort
+		// delivery (no record) has nothing left to replay.
+		console.warn(`[subagent-bg] onSettled callback threw for ${taskId}:`, errorText(err));
+		return;
 	}
+	if (delivery !== undefined) completeReplayDelivery(delivery);
+}
+
+// ============================================================================
+// Durable completion + startup replay (#1050) and failure streaks (#1051)
+// ============================================================================
+
+/**
+ * Overrides for the durable record a settle writes. The terminal state a
+ * settle describes is not always derivable from the result: `runDetached`
+ * lets an already-terminal row win (a `stop` writes `cancelled` while the
+ * child is still running), and the crash path synthesizes a result the runner
+ * never produced.
+ */
+interface SettleContext {
+	status?: CompletionStatus;
+	/** Resolved display output; falls back to `result.finalOutput`. */
+	output?: string;
+}
+
+function deriveCompletionStatus(result: SubagentResult): CompletionStatus {
+	if (!isFailedSubagentResult(result)) return "completed";
+	return result.aborted ? "cancelled" : "failed";
+}
+
+/** `TaskStatus` narrowed to the terminal states a completion record accepts. */
+function terminalStatusOf(status: TaskStatus | undefined): CompletionStatus | undefined {
+	switch (status) {
+		case "completed":
+		case "failed":
+		case "cancelled":
+		case "crashed":
+			return status;
+		default:
+			return undefined;
+	}
+}
+
+function errorText(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Fold one settle into the failure-streak table and — for a settle that has a
+ * notification to deliver — write and claim its durable completion record.
+ *
+ * One `withLock` hold covers both writes: a claim on a record is only safe
+ * against a concurrent settle of the same task while the registry lock is
+ * held. A record already claimed by a live process belongs to another delivery
+ * of the same settle, so the caller is told to skip it (at-most-once per
+ * claim).
+ *
+ * Every failure here is swallowed: durable bookkeeping is best-effort, and a
+ * disk problem must never cost the model its settle notification.
+ */
+function recordSettle(
+	input: CompletionRecordInput,
+	durable: boolean,
+): { escalation?: CompletionEscalation; delivery?: CompletionDelivery; skipped: boolean } {
+	const bgDir = backgroundDir();
+	const now = Date.now();
+	const signature = failureSignature(input.status, input.exitCode, input.errorMessage);
+	let escalation: CompletionEscalation | undefined;
+	let delivery: CompletionDelivery | undefined;
+	let skipped = false;
+	try {
+		withLock(lockPath(), () => {
+			const countersPath = countersFile(bgDir);
+			const counters = readFailureCounters(countersPath);
+			escalation = applySettleToStreaks(counters, {
+				role: input.role,
+				taskId: input.taskId,
+				status: input.status,
+				signature,
+				threshold: FAILURE_ESCALATION_THRESHOLD,
+				now,
+			});
+			writeFailureCounters(countersPath, counters);
+
+			// Without a notification to deliver there is nothing to replay, and
+			// the streak table above is the whole record of this settle.
+			if (!durable) return;
+
+			const path = recordFile(bgDir, input.taskId);
+			const existing = readRecordFile(path);
+			if (existing !== undefined && isClaimFresh(existing, now, isProcessAlive)) {
+				skipped = true;
+				return;
+			}
+			const record = buildCompletionRecord(escalation === undefined ? input : { ...input, escalation });
+			// A leftover record for this task id is an earlier, undelivered
+			// settle (nothing delivered deletes it): the replay bounds are
+			// measured from its first write, so its age and attempt count carry
+			// over instead of restarting on every retry.
+			if (existing !== undefined) {
+				record.createdAt = existing.createdAt;
+				record.attempts = existing.attempts;
+			}
+			const token = crypto.randomUUID();
+			claimRecord(record, token, now, process.pid);
+			writeRecordFile(path, record);
+			delivery = { record, token };
+		});
+	} catch (err) {
+		console.warn(`[subagent-bg] failed to persist settle record for ${input.taskId}:`, errorText(err));
+	}
+	return { escalation, delivery, skipped };
+}
+
+/**
+ * Clear a claimed record once its notification has been handed to a consumer.
+ *
+ * The token is re-checked under the lock: a record that changed hands since we
+ * claimed it (a stale-claim break, or another process's delivery) must not be
+ * deleted by us. A delivery without a token means the durable write itself
+ * failed, so there is nothing on disk to clear. Failures are swallowed — the
+ * record stays, and the next replay pass retries within its bounds.
+ */
+export function completeReplayDelivery(delivery: CompletionDelivery): void {
+	if (delivery.token === undefined) return;
+	const path = recordFile(backgroundDir(), delivery.record.taskId);
+	try {
+		withLock(lockPath(), () => {
+			const current = readRecordFile(path);
+			if (current === undefined || current.claimToken !== delivery.token) return;
+			deleteRecordFile(path);
+		});
+	} catch (err) {
+		console.warn(`[subagent-bg] failed to clear settle record for ${delivery.record.taskId}:`, errorText(err));
+	}
+}
+
+/**
+ * Claim the settle notifications a previous process wrote but never delivered.
+ *
+ * One pass under one lock hold: a record that cannot be parsed, has outlived
+ * `REPLAY_MAX_AGE_MS`, or has already been claimed `REPLAY_MAX_ATTEMPTS` times
+ * is collected (deleted) rather than replayed, a record whose claim is still
+ * fresh is left to its owner, and the oldest `REPLAY_MAX_RECORDS` survivors are
+ * claimed and returned for delivery, in `createdAt` order. Anything beyond
+ * that cap is counted as deferred and stays on disk.
+ *
+ * `now` is injectable so a test can age claims and records without sleeping.
+ */
+export function claimReplayDeliveries(now: number = Date.now()): CompletionReplayReceipt {
+	const bgDir = backgroundDir();
+	const receipt: CompletionReplayReceipt = { delivered: [], deferred: 0, collected: 0, claimsHeld: 0 };
+	try {
+		withLock(lockPath(), () => {
+			const candidates: Array<{ path: string; record: CompletionRecord }> = [];
+			for (const path of listRecordFiles(replayDir(bgDir))) {
+				const record = readRecordFile(path);
+				if (
+					record === undefined ||
+					isRecordStale(record, now, REPLAY_MAX_AGE_MS) ||
+					record.attempts >= REPLAY_MAX_ATTEMPTS
+				) {
+					deleteRecordFile(path);
+					receipt.collected += 1;
+					continue;
+				}
+				candidates.push({ path, record });
+			}
+			candidates.sort(
+				(a, b) =>
+					Date.parse(a.record.createdAt) - Date.parse(b.record.createdAt) ||
+					(a.record.taskId < b.record.taskId ? -1 : 1),
+			);
+			for (const { path, record } of candidates) {
+				if (isClaimFresh(record, now, isProcessAlive)) {
+					receipt.claimsHeld += 1;
+					continue;
+				}
+				if (receipt.delivered.length >= REPLAY_MAX_RECORDS) {
+					receipt.deferred += 1;
+					continue;
+				}
+				const token = crypto.randomUUID();
+				claimRecord(record, token, now, process.pid);
+				writeRecordFile(path, record);
+				receipt.delivered.push({ record, token });
+			}
+		});
+	} catch (err) {
+		// Losing the lock only postpones the replay; the records stay on disk.
+		console.warn("[subagent-bg] replay pass could not take the registry lock:", errorText(err));
+	}
+	return receipt;
 }
 
 /**
@@ -857,7 +1332,25 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 	};
 	registry.add(row);
 	// add() regenerates on an id collision — track the final id everywhere.
-	const taskId = row.id;
+	// The row is stamped once here and handed to the runner under that id, so
+	// the registry and the detached run can never disagree about which row
+	// this dispatch owns.
+	dispatchBackgroundRow({ ...options, taskId: row.id }, row.id);
+	return { taskId: row.id };
+}
+
+/**
+ * Everything a background task does AFTER its row exists: the SPAWN log entry,
+ * the telemetry span, and the detached run.
+ *
+ * Split out of `startBackgroundSubagent` so the dispatch queue can promote an
+ * already-recorded `pending` row (see `requestBackgroundDispatch`) without
+ * re-adding it — re-adding would collide with the parked row and silently
+ * relocate the task to a fresh id, orphaning the id the model was given.
+ * `options` must already carry this `taskId`: the row and the run share one id.
+ */
+function dispatchBackgroundRow(options: BackgroundRunOptions, taskId: string): void {
+	const registry = options.registry;
 	registry.appendLog(taskId, { type: "SPAWN", role: options.spec.role });
 
 	const spanId = newTaskSpanId();
@@ -867,25 +1360,45 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 	// exit path is guarded so it can never reject.
 	void runDetached(options, taskId)
 		.then(({ failed, errorMessage }) => {
-			endSubagentTask(spanId, !failed, failed ? errorMessage : undefined);
+			// Telemetry must never throw here: a rejection from this callback would
+			// land in the catch below and report a task that already settled — and
+			// already notified — a second time as `crashed`.
+			try {
+				endSubagentTask(spanId, !failed, failed ? errorMessage : undefined);
+			} catch (spanErr) {
+				console.warn(`[subagent-bg] failed to close span for ${taskId}:`, errorText(spanErr));
+			}
 		})
 		.catch((err: unknown) => {
 			const message = err instanceof Error ? err.message : String(err);
-			endSubagentTask(spanId, false, message);
-			const errorMessage = `runner crashed: ${message}`;
 			try {
-				registry.update(taskId, {
-					status: "crashed",
-					errorMessage,
-					finishedAt: new Date().toISOString(),
-				});
-			} catch (updateErr) {
-				// Never let this catch reject — that would surface as an
-				// unhandled rejection and take the parent session down.
-				console.warn(
-					`[subagent-bg] failed to record crash for ${taskId}:`,
-					updateErr instanceof Error ? updateErr.message : String(updateErr),
-				);
+				endSubagentTask(spanId, false, message);
+			} catch (spanErr) {
+				console.warn(`[subagent-bg] failed to close span for ${taskId}:`, errorText(spanErr));
+			}
+			const errorMessage = `runner crashed: ${message}`;
+			// A row that is already terminal wins here exactly as it does in
+			// `runDetached`: `stop` writes `cancelled` while the child is still
+			// running, the killed child then rejects, and stamping `crashed` over
+			// that would contradict the cancellation the model was already told
+			// about (REQ-X01.4).
+			const existing = currentRowStatus(registry, taskId);
+			const status = terminalStatusOf(existing) ?? "crashed";
+			if (existing !== status) {
+				try {
+					registry.update(taskId, {
+						status: "crashed",
+						errorMessage,
+						finishedAt: new Date().toISOString(),
+					});
+				} catch (updateErr) {
+					// Never let this catch reject — that would surface as an
+					// unhandled rejection and take the parent session down.
+					console.warn(
+						`[subagent-bg] failed to record crash for ${taskId}:`,
+						updateErr instanceof Error ? updateErr.message : String(updateErr),
+					);
+				}
 			}
 			// The task is terminal, so the settle notification must fire here
 			// too — without it the model gets no subagent-background-result
@@ -893,20 +1406,24 @@ export function startBackgroundSubagent(options: BackgroundRunOptions): Backgrou
 			// reports the same failure as a tool error. Synthesize the failed
 			// result the runner never produced (exit code 1, stopReason "error")
 			// so consumers treat it exactly like a failed run.
-			notifySettled(options.onSettled, taskId, {
-				role: options.spec.role,
-				task: options.task,
-				exitCode: 1,
-				aborted: false,
-				finalOutput: "",
-				stderr: "",
-				usage: createEmptyUsage(),
-				messages: [],
-				stopReason: "error",
-				errorMessage,
-			});
+			notifySettled(
+				options.onSettled,
+				taskId,
+				{
+					role: options.spec.role,
+					task: options.task,
+					exitCode: 1,
+					aborted: false,
+					finalOutput: "",
+					stderr: "",
+					usage: createEmptyUsage(),
+					messages: [],
+					stopReason: "error",
+					errorMessage,
+				},
+				{ status },
+			);
 		});
-	return { taskId };
 }
 
 async function runDetached(
@@ -924,6 +1441,7 @@ async function runDetached(
 			cwd: options.cwd,
 			parentModel: options.parentModel,
 			parentThinkingLevel: options.parentThinkingLevel,
+			depth: options.depth,
 			logPath: join(getAgentDir(), BG_DIR_NAME, taskId, BG_LOG_FILE),
 			...(options.parentSessionFile === undefined ? {} : { parentSessionFile: options.parentSessionFile }),
 			...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
@@ -931,7 +1449,30 @@ async function runDetached(
 		// No caller signal: a background task must not inherit the turn's abort.
 		undefined,
 		(event) => {
-			if (event.type === "message_end" && event.message.role === "assistant") {
+			if (event.type === "spawned") {
+				// The pid is the only handle that outlives this call: `stop` from
+				// another session and startup orphan reconciliation both address
+				// the child by pid alone, because neither has the BunSubprocess
+				// handle `createKillController` needs. Recorded before any other
+				// event can settle the row so there is no window in which a
+				// running row is unaddressable.
+				if (event.pid !== undefined) registry.update(taskId, { pid: event.pid });
+				// The row can already read `cancelled` here: `stop` is issued the
+				// moment a task is dispatched, and the row exists before the runner
+				// has resolved its invocation, so the cancel lands in the spawn
+				// window with no pid to signal. Honour it now that a pid exists,
+				// otherwise the child would run to completion behind a row that
+				// says it was stopped.
+				if (event.pid !== undefined && isRowCancelled(registry, taskId)) {
+					const outcome = killPidTree(event.pid);
+					appendToTaskLog(taskId, {
+						type: "KILL",
+						pid: event.pid,
+						outcome,
+						reason: "cancelled during spawn window",
+					});
+				}
+			} else if (event.type === "message_end" && event.message.role === "assistant") {
 				const message = event.message;
 				if (message.usage) {
 					usage.input += message.usage.input ?? 0;
@@ -955,8 +1496,21 @@ async function runDetached(
 
 	const failed = isFailedSubagentResult(result);
 	const output = result.finalOutput || lastText || "(no output)";
+	// A `stop` that landed while the child was running already wrote the terminal
+	// `cancelled` row. The child then settles (killed -> exit != 0) and this write
+	// would overwrite `cancelled` with `failed`, undoing the cancellation the
+	// model was just told about — the exact contradiction REQ-X01.4 forbids.
+	// A row that is already terminal wins; only the observable output is added.
+	let status: TaskStatus | undefined;
+	try {
+		const row = registry.snapshot().tasks.find((t) => t.id === taskId);
+		if (row !== undefined && row.status !== "running" && row.status !== "pending") status = row.status;
+	} catch {
+		// An unreadable registry is not evidence that the row was cancelled;
+		// fall through and record this run's own terminal status.
+	}
 	registry.update(taskId, {
-		status: failed ? (result.aborted ? "cancelled" : "failed") : "completed",
+		...(status === undefined ? { status: failed ? (result.aborted ? "cancelled" : "failed") : "completed" } : {}),
 		exitCode: result.exitCode,
 		finishedAt: new Date().toISOString(),
 		lastOutput: output.slice(-200),
@@ -969,12 +1523,372 @@ async function runDetached(
 		...(result.sessionFile ? { sessionFile: result.sessionFile } : {}),
 		...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
 	});
-	registry.appendLog(taskId, { type: "EXIT", exitCode: result.exitCode, status: failed ? "failed" : "completed" });
+	registry.appendLog(taskId, {
+		type: "EXIT",
+		exitCode: result.exitCode,
+		status: status ?? (failed ? "failed" : "completed"),
+		...(status === undefined ? {} : { supersededBy: status }),
+	});
 	// Guarded: a throwing onSettled must not reach the outer catch, which would
 	// rewrite this terminal status to "crashed".
-	notifySettled(options.onSettled, taskId, result);
+	notifySettled(options.onSettled, taskId, result, {
+		status: terminalStatusOf(status) ?? deriveCompletionStatus(result),
+		output,
+	});
 	return {
 		failed,
 		...(failed ? { errorMessage: result.errorMessage ?? `exit code ${result.exitCode}` } : {}),
 	};
+}
+
+// ============================================================================
+// Dispatch cap + FIFO queue
+// ============================================================================
+
+/** How a capped dispatch request was admitted: started immediately, or parked. */
+export type DispatchAdmission = "running" | "queued";
+
+export interface BackgroundDispatchRequest {
+	/**
+	 * Registry row id. The row exists from the moment the request returns:
+	 * `running` when admitted, `pending` while it waits for a slot.
+	 */
+	taskId: string;
+	admission: DispatchAdmission;
+	/** 1-based position in the queue. 0 when admitted immediately. */
+	queuePosition: number;
+}
+
+interface DispatchQueue {
+	/**
+	 * Task ids holding a live slot. `size` is the live count the cap compares
+	 * against: added at admission, removed when the task settles.
+	 */
+	readonly slots: Set<string>;
+	/** Parked task ids, FIFO. */
+	readonly order: string[];
+	/** Parked payloads by task id. Removed on promotion, cancellation, or failure. */
+	readonly parked: Map<string, BackgroundRunOptions>;
+	/** Re-entrancy guard: a failed promotion releases its slot from inside the drain loop. */
+	draining: boolean;
+}
+
+/**
+ * Queue state lives per registry instance, in memory.
+ *
+ * The on-disk row is the visible half — `pending`, so `action="status"` and the
+ * UI can list queued work. The dispatch payload is the invisible half: a parked
+ * task carries the runner, spec, parent context and settle callback that
+ * registry.json does not record, so no other process could promote it. A session
+ * that dies therefore leaves its parked rows `pending` and startup hygiene
+ * crashes them exactly like orphaned `running` rows — the queue survives as a
+ * report, not as work in flight.
+ */
+let dispatchQueues = new WeakMap<BackgroundRegistry, DispatchQueue>();
+
+function dispatchQueueFor(registry: BackgroundRegistry): DispatchQueue {
+	let queue = dispatchQueues.get(registry);
+	if (queue === undefined) {
+		queue = { slots: new Set(), order: [], parked: new Map(), draining: false };
+		dispatchQueues.set(registry, queue);
+	}
+	return queue;
+}
+
+/** A cap below 1 would park every task forever; clamp to one slot instead of stalling. */
+export function normalizeDispatchCap(maxConcurrent: number): number {
+	if (!Number.isFinite(maxConcurrent)) return 1;
+	return Math.max(1, Math.trunc(maxConcurrent));
+}
+
+/** Whether a parked row may still be promoted to a running task. */
+type ParkedRowState = "pending" | "settled" | "unknown";
+
+function parkedRowState(registry: BackgroundRegistry, taskId: string): ParkedRowState {
+	try {
+		const row = registry.snapshot().tasks.find((t) => t.id === taskId);
+		// A missing row was pruned or never landed: there is nothing to promote.
+		if (row === undefined) return "settled";
+		return row.status === "pending" ? "pending" : "settled";
+	} catch {
+		// An unreadable registry is not a reason to spend a slot on a task whose
+		// row cannot be confirmed; leave it parked and retry on the next release.
+		return "unknown";
+	}
+}
+
+/**
+ * Forget reservations whose row is already terminal.
+ *
+ * Every normal path releases its slot from the settle callback, but a row can
+ * also be ended from the outside — startup hygiene crashes orphans, and a
+ * registry-level cancel marks a row whose detached child is still running and
+ * will settle later. Without this sweep such a leak would shrink the effective
+ * cap forever and stall the queue, so slots are re-checked against the file
+ * before the cap is applied.
+ */
+function sweepReleasedSlots(registry: BackgroundRegistry, queue: DispatchQueue): void {
+	if (queue.slots.size === 0) return;
+	let rows: BackgroundTask[];
+	try {
+		rows = registry.snapshot().tasks;
+	} catch {
+		// Cannot prove anything is stale; keep the reservations and let the next
+		// release sweep again.
+		return;
+	}
+	const byId = new Map(rows.map((t) => [t.id, t]));
+	for (const taskId of [...queue.slots]) {
+		const row = byId.get(taskId);
+		const terminal =
+			row === undefined ||
+			row.status === "completed" ||
+			row.status === "failed" ||
+			row.status === "cancelled" ||
+			row.status === "crashed";
+		if (terminal) queue.slots.delete(taskId);
+	}
+}
+
+/**
+ * Drop parked tasks whose row stopped being `pending` while it waited.
+ *
+ * Cancelling a queued task marks its row `cancelled`, but the drain only looks
+ * at a row when it pops it, so a dead task at the head of the line would sit in
+ * `order` indefinitely and keep showing up in `queuedTaskIds` — counted as
+ * queued work in status listings and the UI, with a position nobody can claim.
+ * Pruning on every drain keeps the reported queue to work that can still start.
+ * One registry read covers the whole line, and an unreadable registry is left
+ * alone: the per-promotion row check stays the authoritative gate.
+ */
+function pruneSettledParkedTasks(registry: BackgroundRegistry, queue: DispatchQueue): void {
+	if (queue.order.length === 0) return;
+	let rows: BackgroundTask[];
+	try {
+		rows = registry.snapshot().tasks;
+	} catch {
+		return;
+	}
+	const byId = new Map(rows.map((t) => [t.id, t]));
+	for (const taskId of [...queue.order]) {
+		const row = byId.get(taskId);
+		if (row !== undefined && row.status === "pending") continue;
+		const index = queue.order.indexOf(taskId);
+		if (index !== -1) queue.order.splice(index, 1);
+		queue.parked.delete(taskId);
+	}
+}
+
+/**
+ * Hand free slots to the oldest parked tasks.
+ *
+ * Called after every release and after every enqueue (an enqueue can free a
+ * slot itself when the sweep finds the cap was overstated). Self-limiting: it
+ * never promotes more than `maxConcurrent` slots are worth, so calling it when
+ * nothing is eligible is cheap and safe.
+ */
+function drainDispatchQueue(registry: BackgroundRegistry, queue: DispatchQueue, maxConcurrent: number): void {
+	if (queue.draining || queue.order.length === 0) return;
+	queue.draining = true;
+	try {
+		sweepReleasedSlots(registry, queue);
+		pruneSettledParkedTasks(registry, queue);
+		const cap = normalizeDispatchCap(maxConcurrent);
+		while (queue.order.length > 0 && queue.slots.size < cap) {
+			const taskId = queue.order.shift();
+			if (taskId === undefined) break;
+			const run = queue.parked.get(taskId);
+			if (run === undefined) continue;
+			const state = parkedRowState(registry, taskId);
+			if (state === "unknown") {
+				// Put it back at the head and stop: promoting anything out of order
+				// while the registry is unreadable would break FIFO for no gain.
+				queue.order.unshift(taskId);
+				return;
+			}
+			queue.parked.delete(taskId);
+			if (state === "settled") continue; // cancelled or finished while it waited: no slot spent
+			queue.slots.add(taskId);
+			try {
+				promoteParkedTask(registry, taskId, run);
+			} catch (err) {
+				// The slot is given back here; the enclosing loop picks it up on its
+				// next iteration (drainDispatchQueue itself is re-entrancy-guarded).
+				queue.slots.delete(taskId);
+				failParkedPromotion(registry, taskId, run, err);
+			}
+		}
+	} finally {
+		queue.draining = false;
+	}
+}
+
+/** Flip a parked row to `running` and start it under the id the model already has. */
+function promoteParkedTask(registry: BackgroundRegistry, taskId: string, run: BackgroundRunOptions): void {
+	const now = new Date().toISOString();
+	// The label follows the row's state: it said `(queued)` while it waited, and
+	// says `(background)` from here on exactly like a task admitted outright.
+	registry.update(taskId, {
+		status: "running",
+		label: `${run.spec.role} (background)`,
+		startedAt: now,
+		lastEventAt: now,
+	});
+	registry.appendLog(taskId, { type: "QUEUE_PROMOTE", role: run.spec.role });
+	// No registry.add(): the row was written at enqueue time, and add() would
+	// collide with it and move the task to an id nobody is waiting for.
+	dispatchBackgroundRow({ ...run, taskId }, taskId);
+}
+
+/**
+ * Record a parked task that could not be promoted, and settle it so consumers
+ * (chain steps, the background-result injector) see a terminal result instead of
+ * a task that silently vanished. Mirrors the synthesized failure result the
+ * detached crash path reports.
+ */
+function failParkedPromotion(
+	registry: BackgroundRegistry,
+	taskId: string,
+	run: BackgroundRunOptions,
+	err: unknown,
+): void {
+	const message = err instanceof Error ? err.message : String(err);
+	const errorMessage = `queued dispatch failed: ${message}`;
+	try {
+		registry.update(taskId, {
+			status: "failed",
+			exitCode: 1,
+			finishedAt: new Date().toISOString(),
+			errorMessage,
+		});
+	} catch (updateErr) {
+		console.warn(
+			`[subagent-bg] failed to record queued dispatch failure for ${taskId}:`,
+			updateErr instanceof Error ? updateErr.message : String(updateErr),
+		);
+	}
+	notifySettled(run.onSettled, taskId, {
+		role: run.spec.role,
+		task: run.task,
+		exitCode: 1,
+		aborted: false,
+		finalOutput: "",
+		stderr: "",
+		usage: createEmptyUsage(),
+		messages: [],
+		stopReason: "error",
+		errorMessage,
+	});
+}
+
+/**
+ * Cap-aware entry point for every detached subagent dispatch.
+ *
+ * `startBackgroundSubagent` starts a child immediately and has no notion of how
+ * many children the session is already running, so a model that fires twenty
+ * background tasks in one call spawned twenty concurrent children — the
+ * `subagent.maxConcurrent` cap only ever guarded inline parallel batches. This
+ * admits a dispatch into one slot of that budget, and parks the overflow in a
+ * FIFO queue behind it (see the module comment on `dispatchQueues`).
+ *
+ * The caller owns two obligations:
+ *
+ * 1. Pass the returned `taskId` to the model. It is the row id from here on,
+ *    whether the task started or is waiting.
+ * 2. Call `releaseBackgroundDispatch(registry, taskId, maxConcurrent)` from the
+ *    task's settle callback. That is what frees the slot and promotes the next
+ *    queued task; a release that never happens is only recovered by
+ *    `sweepReleasedSlots` on the following dispatch.
+ *
+ * A queued task never reaches the runner until it is promoted, so cancelling one
+ * is a plain `registry.cancel()` — it holds no slot and starts no child.
+ */
+export function requestBackgroundDispatch(
+	registry: BackgroundRegistry,
+	run: BackgroundRunOptions,
+	maxConcurrent: number,
+): BackgroundDispatchRequest {
+	const queue = dispatchQueueFor(registry);
+	sweepReleasedSlots(registry, queue);
+	const cap = normalizeDispatchCap(maxConcurrent);
+
+	// Fast path: nothing waiting and a slot free. The `order.length === 0`
+	// condition is what keeps FIFO — a free slot found by the sweep while tasks
+	// are parked belongs to them, not to whoever arrived last.
+	if (queue.order.length === 0 && queue.slots.size < cap) {
+		const requestedId = run.taskId ?? registry.makeTaskId();
+		queue.slots.add(requestedId);
+		let dispatch: BackgroundDispatch;
+		try {
+			dispatch = startBackgroundSubagent({ ...run, taskId: requestedId });
+		} catch (err) {
+			queue.slots.delete(requestedId);
+			throw err;
+		}
+		// add() regenerates the id on a cross-process clash. Re-key so the
+		// settle-time release matches the row that actually holds the slot.
+		if (dispatch.taskId !== requestedId) {
+			queue.slots.delete(requestedId);
+			queue.slots.add(dispatch.taskId);
+		}
+		return { taskId: dispatch.taskId, admission: "running", queuePosition: 0 };
+	}
+
+	// Overflow path: record the row as pending so status listings and the UI can
+	// see the work, then park the payload beside it.
+	const now = new Date().toISOString();
+	const row: BackgroundTask = {
+		id: run.taskId ?? registry.makeTaskId(),
+		kind: "pi-subprocess",
+		mode: "single",
+		role: run.spec.role,
+		label: `${run.spec.role} (queued)`,
+		task: run.task,
+		model: run.spec.model ?? run.parentModel,
+		status: "pending",
+		startedAt: now,
+		lastEventAt: now,
+		lastOutput: "",
+		cwd: run.cwd,
+	};
+	registry.add(row); // stamps ownerPid, and lands the final id on `row`
+	queue.parked.set(row.id, { ...run, taskId: row.id });
+	queue.order.push(row.id);
+	// A sweep may have just revealed a free slot (or this row may be the only
+	// parked one); let it start now rather than waiting for an unrelated settle.
+	drainDispatchQueue(registry, queue, cap);
+	const stillParked = queue.parked.has(row.id);
+	return {
+		taskId: row.id,
+		admission: stillParked ? "queued" : "running",
+		queuePosition: stillParked ? queue.order.indexOf(row.id) + 1 : 0,
+	};
+}
+
+/**
+ * Free the slot a settled task held, then promote whatever is next in line.
+ * Idempotent: releasing an unknown id is a no-op that still runs the drain, so
+ * a double settle cannot strand the queue.
+ */
+export function releaseBackgroundDispatch(registry: BackgroundRegistry, taskId: string, maxConcurrent: number): void {
+	const queue = dispatchQueueFor(registry);
+	queue.slots.delete(taskId);
+	drainDispatchQueue(registry, queue, maxConcurrent);
+}
+
+/** Task ids waiting for a slot, in the order they will be promoted. */
+export function queuedTaskIds(registry: BackgroundRegistry): string[] {
+	const queue = dispatchQueues.get(registry);
+	return queue === undefined ? [] : [...queue.order];
+}
+
+/** Position of one queued task (1-based), or 0 when it is not waiting. */
+export function queuePositionOf(registry: BackgroundRegistry, taskId: string): number {
+	const index = dispatchQueues.get(registry)?.order.indexOf(taskId) ?? -1;
+	return index === -1 ? 0 : index + 1;
+}
+
+/** Test helper — drop every registry's in-memory queue state. */
+export function _resetBackgroundQueueForTests(): void {
+	dispatchQueues = new WeakMap();
 }

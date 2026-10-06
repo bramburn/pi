@@ -18,8 +18,10 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir } from "../../config.ts";
-import type { SubagentSpec } from "./types.ts";
+import { THINKING_LEVEL_OPTIONS } from "../defaults.ts";
+import type { SubagentGate, SubagentSpec } from "./types.ts";
 
 export const SPECS_DIR_NAME = "subagent-specs";
 const SPEC_FILE_EXT = ".json";
@@ -40,6 +42,9 @@ interface SavedSpecFile {
 	model?: string;
 	tools?: string[];
 	cwd?: string | null;
+	thinking?: ThinkingLevel;
+	outputSchema?: Record<string, unknown>;
+	gate?: SubagentGate;
 	savedAt: string;
 }
 
@@ -66,7 +71,35 @@ function toSpec(file: SavedSpecFile): SubagentSpec {
 		spec.tools = file.tools.filter((tool): tool is string => typeof tool === "string");
 	}
 	if (typeof file.cwd === "string") spec.cwd = file.cwd;
+	// `thinking` names a CLI value, so an unrecognized one is dropped rather than
+	// passed through — same rule as the contract fields above.
+	if (typeof file.thinking === "string" && (THINKING_LEVEL_OPTIONS as readonly string[]).includes(file.thinking)) {
+		spec.thinking = file.thinking as ThinkingLevel;
+	}
+	// The contract fields come from a hand-editable file, so they are re-checked
+	// structurally here. An unusable one is dropped rather than trusted: saving a
+	// spec is not the place to fail a later dispatch, and `checkContractSpec`
+	// reports anything genuinely required.
+	if (isPlainObject(file.outputSchema)) spec.outputSchema = file.outputSchema;
+	const gate = readGate(file.gate);
+	if (gate !== undefined) spec.gate = gate;
 	return spec;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Read a persisted gate, keeping only the fields that are the right type. */
+function readGate(value: unknown): SubagentGate | undefined {
+	if (!isPlainObject(value)) return undefined;
+	if (typeof value.command !== "string" || value.command.trim() === "") return undefined;
+	const gate: SubagentGate = { command: value.command };
+	if (typeof value.cwd === "string") gate.cwd = value.cwd;
+	if (typeof value.timeoutMs === "number" && Number.isFinite(value.timeoutMs) && value.timeoutMs > 0) {
+		gate.timeoutMs = value.timeoutMs;
+	}
+	return gate;
 }
 
 /** List all saved specs, sorted by name. A missing directory reads as empty. */
@@ -115,6 +148,9 @@ export function saveSpec(name: string, spec: SubagentSpec): void {
 	if (spec.model !== undefined) file.model = spec.model;
 	if (spec.tools !== undefined) file.tools = [...spec.tools];
 	if (spec.cwd !== undefined) file.cwd = spec.cwd;
+	if (spec.thinking !== undefined) file.thinking = spec.thinking;
+	if (spec.outputSchema !== undefined) file.outputSchema = spec.outputSchema;
+	if (spec.gate !== undefined) file.gate = { ...spec.gate };
 	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
 }
 

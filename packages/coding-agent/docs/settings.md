@@ -246,8 +246,9 @@ See [Subagents](subagents.md) for the built-in delegation tool and the experimen
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `subagent.enabled` | boolean | `true` | Register the built-in `subagent` tool. Requires the Bun runtime |
-| `subagent.maxConcurrent` | number | `4` | Max subagent processes running at once per session |
+| `subagent.maxConcurrent` | number | `4` | Max subagent processes running at once per session; background dispatch queues the overflow |
 | `subagent.maxParallelTasks` | number | `8` | Max tasks accepted in one parallel `tasks: [...]` call |
+| `subagent.maxDepth` | number | `1` | Deepest delegation level. `0` is a top-level session, so the default permits one level of subagents and refuses grandchildren. `0` forbids delegation entirely; raise it to allow nesting |
 | `subagent.worktreeBase` | string | `".worktrees"` | Directory for experiment worktrees (`<repo>/<worktreeBase>/<slug>`) |
 | `subagent.enableExperiments` | boolean | `false` | Experiments surface: the eight `experiment_*` tools, the `.pi-experiments/` registry, and worktrees |
 | `subagent.researchModeTriggerCount` | number | `3` | Consecutive same-error tool failures before the Research Mode suggestion fires (see [Subagents](subagents.md#research-mode)) |

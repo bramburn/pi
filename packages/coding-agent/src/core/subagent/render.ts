@@ -9,6 +9,11 @@
  * - Parallel: ⏳ while anything runs, ◐ when done with failures, ✓ all good;
  *   per-task ⏳/✓/✗; status `N/M done, K running`.
  * - Chain: `✓ chain N/M steps` with per-step sections.
+ * - Contracts: every section header carries the declared contract's verdict —
+ *   `json ✓` / `json ✗ 2` for `outputSchema`, `gate ✓ 1.2s` / `gate ✗ exit 1` /
+ *   `gate ⏱ timeout` / `gate ⊘ schema-failed` for `gate` — and a settled batch
+ *   line ends with `json 2/3 gate 1/2` totals so a green tick never hides a
+ *   failed contract.
  *
  * Unlike `bash.ts`, this module keeps rendering pure string composition inside
  * pi-tui `Text`/`Container` components — the subagent result is a tree of small
@@ -161,6 +166,111 @@ export function aggregateUsage(results: SubagentResult[]): Omit<SubagentUsage, "
 	return total;
 }
 
+function formatDuration(ms: number): string {
+	return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+export type ContractBadge = { text: string; tone: "success" | "error" | "warning" };
+
+/**
+ * Verdict badges for a result's declared output contract. A running child has
+ * no verdict yet, so it contributes nothing; a skipped gate says why, because
+ * "no gate line" and "the gate never ran" must not look the same.
+ */
+export function getContractBadges(result: SubagentResult): ContractBadge[] {
+	if (result.exitCode === -1) return [];
+	const badges: ContractBadge[] = [];
+	const validation = result.outputValidation;
+	if (validation) {
+		badges.push(
+			validation.status === "passed"
+				? { text: "json ✓", tone: "success" }
+				: {
+						text: `json ✗ ${validation.errors.length > 0 ? validation.errors.length : "parse"}`,
+						tone: "error",
+					},
+		);
+	}
+	const gate = result.gate;
+	if (gate) {
+		if (gate.skipped) badges.push({ text: `gate ⊘ ${gate.skipped}`, tone: "warning" });
+		else if (gate.timedOut) badges.push({ text: `gate ⏱ ${formatDuration(gate.durationMs)}`, tone: "error" });
+		else if (gate.cancelled) badges.push({ text: "gate ⊘ cancelled", tone: "warning" });
+		else if (gate.passed) badges.push({ text: `gate ✓ ${formatDuration(gate.durationMs)}`, tone: "success" });
+		else badges.push({ text: `gate ✗ exit ${gate.exitCode}`, tone: "error" });
+	}
+	return badges;
+}
+
+/** Plain-text form of {@link getContractBadges}, for tests and non-TUI output. */
+export function formatContractBadges(result: SubagentResult): string {
+	return getContractBadges(result)
+		.map((b) => b.text)
+		.join(" ");
+}
+
+function renderContractBadges(theme: Theme, result: SubagentResult): string {
+	return getContractBadges(result)
+		.map((b) => theme.fg(b.tone, b.text))
+		.join(" ");
+}
+
+/** Contract verdict badges for a section header, pre-spaced, or "" when none. */
+function contractHeaderSuffix(theme: Theme, result: SubagentResult): string {
+	const badges = renderContractBadges(theme, result);
+	return badges ? ` ${badges}` : "";
+}
+
+/**
+ * Batch totals: `json 2/3 gate 1/2`. Denominators count the contracts that
+ * actually ran, so a gate skipped by a failed schema does not dilute the gate
+ * column. Returns "" when the batch declared no contract at all.
+ */
+export function formatContractSummary(results: SubagentResult[]): string {
+	let jsonOk = 0;
+	let jsonTotal = 0;
+	let gateOk = 0;
+	let gateTotal = 0;
+	for (const result of results) {
+		const validation = result.outputValidation;
+		if (validation) {
+			jsonTotal++;
+			if (validation.status === "passed") jsonOk++;
+		}
+		const gate = result.gate;
+		if (gate && !gate.skipped && !gate.cancelled) {
+			gateTotal++;
+			if (gate.passed) gateOk++;
+		}
+	}
+	const parts: string[] = [];
+	if (jsonTotal > 0) parts.push(`json ${jsonOk}/${jsonTotal}`);
+	if (gateTotal > 0) parts.push(`gate ${gateOk}/${gateTotal}`);
+	return parts.join(" ");
+}
+
+/** Expanded-view lines describing a result's contract: the gate it ran, the JSON it produced. */
+function contractDetailComponents(theme: Theme, result: SubagentResult): Component[] {
+	const components: Component[] = [];
+	const gate = result.gate;
+	if (gate && !gate.skipped) {
+		const verdict = formatContractBadges(result)
+			.split(" ")
+			.filter((part) => part.startsWith("gate"))
+			.join(" ");
+		components.push(new Text(`${theme.fg("muted", "Gate: ")}${theme.fg("dim", gate.command)}`, 0, 0));
+		components.push(new Text(`${theme.fg("muted", "      in ")}${theme.fg("dim", shortenPath(gate.cwd))}`, 0, 0));
+		if (verdict) components.push(new Text(theme.fg("dim", `      ${verdict}`), 0, 0));
+	}
+	if (result.structuredOutput !== undefined) {
+		const json = JSON.stringify(result.structuredOutput, undefined, 1) ?? "";
+		const clipped = json.length > 1200 ? `${json.slice(0, 1200)}\n…` : json;
+		components.push(new Text(theme.fg("muted", "─── Structured output ───"), 0, 0));
+		components.push(new Text(theme.fg("toolOutput", clipped), 0, 0));
+	}
+	return components;
+}
+
 export function renderSubagentCall(args: SubagentToolInput, theme: Theme): Component {
 	// Control-plane call: no dispatch, no spec. The action plus whatever names
 	// its target (a run id, a spec name) is the whole story; steer and
@@ -262,11 +372,12 @@ export function renderSubagentResult(
 
 		if (expanded) {
 			const container = new Container();
-			let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
+			let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}${contractHeaderSuffix(theme, r)}`;
 			if (failed && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 			container.addChild(new Text(header, 0, 0));
 			if (failed && r.errorMessage)
 				container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
+			for (const component of contractDetailComponents(theme, r)) container.addChild(component);
 			container.addChild(new Spacer(1));
 			container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
 			container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
@@ -295,7 +406,7 @@ export function renderSubagentResult(
 			return container;
 		}
 
-		let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}`;
+		let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.role))}${contractHeaderSuffix(theme, r)}`;
 		if (failed && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 		if (failed && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
 		else if (displayItems.length === 0)
@@ -334,7 +445,11 @@ export function renderSubagentResult(
 				const displayItems = getDisplayItems(r.messages);
 				container.addChild(new Container());
 				container.addChild(
-					new Text(`${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.role)} ${rIcon}`, 0, 0),
+					new Text(
+						`${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.role)} ${rIcon}${contractHeaderSuffix(theme, r)}`,
+						0,
+						0,
+					),
 				);
 				container.addChild(new Text(`${theme.fg("muted", "Task: ")}${theme.fg("dim", r.task)}`, 0, 0));
 				for (const item of displayItems) {
@@ -348,13 +463,17 @@ export function renderSubagentResult(
 					container.addChild(new Spacer(1));
 					container.addChild(new Markdown(r.finalOutput.trim(), 0, 0, mdTheme));
 				}
+				for (const component of contractDetailComponents(theme, r)) container.addChild(component);
 				const stepUsage = formatUsageStats(r.usage, r.model);
 				if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
 			}
 			const usageStr = stepUsageLine(details.results);
-			if (usageStr) {
+			const totals = formatContractSummary(details.results);
+			if (usageStr || totals) {
 				container.addChild(new Spacer(1));
-				container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
+				container.addChild(
+					new Text(theme.fg("dim", [`Total: ${usageStr}`, totals].filter(Boolean).join(" · ")), 0, 0),
+				);
 			}
 			return container;
 		}
@@ -368,7 +487,7 @@ export function renderSubagentResult(
 						? theme.fg("error", "✗")
 						: theme.fg("success", "✓");
 			const displayItems = getDisplayItems(r.messages);
-			text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.role)} ${rIcon}`;
+			text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.role)} ${rIcon}${contractHeaderSuffix(theme, r)}`;
 			if (displayItems.length === 0) {
 				text += `\n${theme.fg("muted", r.exitCode === -1 ? "(running...)" : "(no output)")}`;
 			} else {
@@ -377,7 +496,9 @@ export function renderSubagentResult(
 		}
 		if (done) {
 			const usageStr = stepUsageLine(details.results);
-			if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
+			const totals = formatContractSummary(details.results);
+			if (usageStr || totals)
+				text += `\n\n${theme.fg("dim", [`Total: ${usageStr}`, totals].filter(Boolean).join(" · "))}`;
 		}
 		if (!expanded) text += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
 		return new Text(text, 0, 0);
@@ -406,7 +527,13 @@ export function renderSubagentResult(
 			const rIcon = isFailedSubagentResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
 			const displayItems = getDisplayItems(r.messages);
 			container.addChild(new Spacer(1));
-			container.addChild(new Text(`${theme.fg("muted", "─── ")}${theme.fg("accent", r.role)} ${rIcon}`, 0, 0));
+			container.addChild(
+				new Text(
+					`${theme.fg("muted", "─── ")}${theme.fg("accent", r.role)} ${rIcon}${contractHeaderSuffix(theme, r)}`,
+					0,
+					0,
+				),
+			);
 			container.addChild(new Text(`${theme.fg("muted", "Task: ")}${theme.fg("dim", r.task)}`, 0, 0));
 			for (const item of displayItems) {
 				if (item.type === "toolCall") {
@@ -419,13 +546,17 @@ export function renderSubagentResult(
 				container.addChild(new Spacer(1));
 				container.addChild(new Markdown(r.finalOutput.trim(), 0, 0, mdTheme));
 			}
+			for (const component of contractDetailComponents(theme, r)) container.addChild(component);
 			const taskUsage = formatUsageStats(r.usage, r.model);
 			if (taskUsage) container.addChild(new Text(theme.fg("dim", taskUsage), 0, 0));
 		}
 		const usageStr = stepUsageLine(details.results);
-		if (usageStr) {
+		const totals = formatContractSummary(details.results);
+		if (usageStr || totals) {
 			container.addChild(new Spacer(1));
-			container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
+			container.addChild(
+				new Text(theme.fg("dim", [`Total: ${usageStr}`, totals].filter(Boolean).join(" · ")), 0, 0),
+			);
 		}
 		return container;
 	}
@@ -439,7 +570,7 @@ export function renderSubagentResult(
 					? theme.fg("error", "✗")
 					: theme.fg("success", "✓");
 		const displayItems = getDisplayItems(r.messages);
-		text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.role)} ${rIcon}`;
+		text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.role)} ${rIcon}${contractHeaderSuffix(theme, r)}`;
 		if (displayItems.length === 0) {
 			text += `\n${theme.fg("muted", r.exitCode === -1 ? "(running...)" : "(no output)")}`;
 		} else {
@@ -448,7 +579,10 @@ export function renderSubagentResult(
 	}
 	if (!isRunning) {
 		const usageStr = stepUsageLine(details.results);
-		if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
+		const totals = formatContractSummary(details.results);
+		if (usageStr || totals) {
+			text += `\n\n${theme.fg("dim", [`Total: ${usageStr}`, totals].filter(Boolean).join(" · "))}`;
+		}
 	}
 	if (!expanded) text += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
 	return new Text(text, 0, 0);

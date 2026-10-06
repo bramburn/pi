@@ -17,6 +17,8 @@
  * package-level API yet.
  */
 
+export type { AgentDefinition, AgentScope, AgentsDir } from "./agents.ts";
+export { AGENTS_DIR_NAME, agentsDirs, listAgents, parseAgentFile, resolveAgent } from "./agents.ts";
 export type {
 	BackgroundLogEvent,
 	BackgroundRegistry,

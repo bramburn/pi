@@ -114,9 +114,15 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { BG_CUSTOM_MESSAGE_TYPE, getBackgroundRegistry } from "./subagent/background.ts";
+import {
+	BG_CUSTOM_MESSAGE_TYPE,
+	claimReplayDeliveries,
+	completeReplayDelivery,
+	getBackgroundRegistry,
+} from "./subagent/background.ts";
 import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
 import { ResearchModeTracker } from "./subagent/research-mode.ts";
+import type { CompletionEscalation, CompletionRecord } from "./subagent/result-record.ts";
 import { isFailedSubagentResult } from "./subagent/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -252,6 +258,11 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * Delegation depth of this session: 0 for a top-level session, 1+ for a
+	 * subagent child. Feeds `subagent.maxDepth` enforcement on the parent side.
+	 */
+	subagentDepth?: number;
 }
 
 export interface ExtensionBindings {
@@ -326,6 +337,48 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
 // ============================================================================
+// Background settle formatting
+// ============================================================================
+
+/**
+ * Advisory warning appended to a settle notification when a role has just
+ * failed the same way `threshold` times in a row (#1051).
+ *
+ * An identical error signature repeated across tasks is evidence against the
+ * last step the model took and for the task definition itself, so the note asks
+ * the model to reconsider the task rather than retry it unchanged. It is not a
+ * hard stop: the caller decides what to do next.
+ */
+function escalationNote(escalation: CompletionEscalation | undefined, role: string): string {
+	if (escalation === undefined) return "";
+	return `\n\nWarning: this is failure ${escalation.consecutiveFailures} in a row for the "${role}" subagent role with the same error signature (${escalation.signature}). Retrying the same task unchanged is unlikely to help — reconsider the task definition (or the role's prompt) before retrying.`;
+}
+
+/**
+ * Batched body for a startup replay pass. Several tasks can have settled while
+ * pi was not listening, and each separate custom message costs a model turn, so
+ * they are reported as sections of one message.
+ */
+function replaySettleText(records: CompletionRecord[]): string {
+	const header =
+		records.length === 1
+			? "A background subagent task settled before this session was listening. Replaying its result:"
+			: `${records.length} background subagent tasks settled before this session was listening. Replaying their results:`;
+	const sections = records.map((record) => {
+		const head =
+			record.status === "crashed"
+				? `Background task ${record.taskId} (${record.role}) crashed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
+				: record.status === "failed"
+					? `Background task ${record.taskId} (${record.role}) failed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
+					: record.status === "cancelled"
+						? `Background task ${record.taskId} (${record.role}) was cancelled.`
+						: `Background task ${record.taskId} (${record.role}) completed.`;
+		return `${head}\n\n${record.output || "(no output)"}${escalationNote(record.escalation, record.role)}`;
+	});
+	return `${header}\n\n${sections.join("\n\n")}`;
+}
+
+// ============================================================================
 // AgentSession Class
 // ============================================================================
 
@@ -394,6 +447,7 @@ export class AgentSession {
 	private _baseToolsOverride?: Record<string, AgentTool>;
 	private _subagentToolCollisionWarned = false;
 	private _researchMode?: ResearchModeTracker;
+	private _subagentDepth: number;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -431,6 +485,9 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		// Delegation depth of this process, handed over on a child's argv as
+		// `--subagent-depth`. Read once here: it cannot change mid-session.
+		this._subagentDepth = Math.max(0, Math.floor(config.subagentDepth ?? 0));
 
 		// Seed the in-memory mirror of the DeepSeek Harness toggle from
 		// the user's settings.json. The setter is the public surface;
@@ -455,6 +512,47 @@ export class AgentSession {
 		const backgroundRegistry = getBackgroundRegistry();
 		void backgroundRegistry.markAllRunningAsCrashed().catch(console.warn);
 		void backgroundRegistry.prune().catch(console.warn);
+
+		// Same hygiene pass, one step further: report the tasks that settled
+		// while a previous session was not listening. Fire-and-forget and guarded
+		// so a stuck registry lock can never block or break startup.
+		void this._replayUndeliveredSettles().catch(console.warn);
+	}
+
+	/**
+	 * Replay settle notifications a previous process wrote but never delivered
+	 * (#1050): the write-before-notify record survived, so the model still finds
+	 * out that its detached task finished instead of waiting forever.
+	 *
+	 * Called once from the constructor and never awaited. The claimed records are
+	 * batched into one custom message, and each is cleared only after that batch
+	 * reached the message queue — a throw before that leaves them claimed on
+	 * disk, where a later pass reclaims them (once the claim is stale) within the
+	 * replay attempt bound.
+	 */
+	private async _replayUndeliveredSettles(): Promise<void> {
+		const receipt = claimReplayDeliveries();
+		if (receipt.delivered.length === 0) return;
+		const records = receipt.delivered.map((delivery) => delivery.record);
+		const text = replaySettleText(records);
+		const single = records.length === 1 ? records[0] : undefined;
+		await this.sendCustomMessage(
+			{
+				customType: BG_CUSTOM_MESSAGE_TYPE,
+				content: [{ type: "text", text }],
+				display: true,
+				details: {
+					taskId: single?.taskId,
+					status: "replayed",
+					role: single?.role,
+					exitCode: single?.exitCode,
+					finalOutput: text,
+					replayedTasks: records.length,
+				},
+			},
+			{ triggerTurn: true, deliverAs: "nextTurn" },
+		);
+		for (const delivery of receipt.delivered) completeReplayDelivery(delivery);
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -3018,7 +3116,11 @@ export class AgentSession {
 							researchModeTriggerCount: this.settingsManager.getSubagentResearchModeTriggerCount(),
 							maxTotalSpawns: this.settingsManager.getSubagentMaxTotalSpawns(),
 							toolTimeoutMs: this.settingsManager.getSubagentToolTimeoutMs(),
+							maxDepth: this.settingsManager.getSubagentMaxDepth(),
 						}),
+						// Parent-side depth guard. The child-side half — dropping
+						// `subagent` from the active tool set — happens in createAgentSession.
+						depth: this._subagentDepth,
 						getParentContext: () => ({
 							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
 							thinkingLevel: this.thinkingLevel,
@@ -3047,10 +3149,14 @@ export class AgentSession {
 										result.errorMessage ? `: ${result.errorMessage}` : ` with exit code ${result.exitCode}`
 									}.\n\n${output}`
 								: `Background task ${taskId} (${result.role}) completed.\n\n${output}`;
+							// #1051: a role that keeps failing the same way is reported as an
+							// escalation once, on the settle that crosses the threshold.
+							const warning = escalationNote(result.escalation, result.role);
+							const body = `${text}${warning}`;
 							void this.sendCustomMessage(
 								{
 									customType: BG_CUSTOM_MESSAGE_TYPE,
-									content: [{ type: "text", text }],
+									content: [{ type: "text", text: body }],
 									display: true,
 									details: {
 										taskId,
@@ -3058,6 +3164,7 @@ export class AgentSession {
 										role: result.role,
 										exitCode: result.exitCode,
 										finalOutput: output,
+										...(result.escalation === undefined ? {} : { escalation: result.escalation }),
 									},
 								},
 								{ triggerTurn: true, deliverAs: "nextTurn" },

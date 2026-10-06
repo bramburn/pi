@@ -574,7 +574,7 @@ describe("background chain continuation guard", () => {
 			snapshot: () => ({ tasks: [] }),
 			markAllRunningAsCrashed: async () => 0,
 			prune: async () => 0,
-			cancel: async () => {},
+			cancel: async () => ({ kind: "cancelled-queued" }),
 		};
 		const runner: SubagentRunner = {
 			async run(request): Promise<SubagentResult> {

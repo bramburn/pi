@@ -1,6 +1,6 @@
 # Subagents
 
-Pi ships a built-in `subagent` tool: the model delegates work to a child pi process with a fresh context and gets back a summary. There are no agent files, discovery, scopes, or trust prompts — every subagent is defined inline in the tool call.
+Pi ships a built-in `subagent` tool: the model delegates work to a child pi process with a fresh context and gets back a summary. A call defines the subagent inline — or names a reusable [agent definition file](#agent-definition-files) with `agent`. There is no discovery daemon and no trust prompt: definitions are ordinary files in the repo or in your agent dir, read at dispatch time.
 
 The tool is active out of the box (`subagent.enabled` defaults to `true`): a fresh pi session's default tool set is `read`, `bash`, `edit`, `write`, `subagent`. Remove it with `subagent.enabled: false`, `--exclude-tools subagent`, or an explicit `defaultTools` / `tools` list that omits it. The `experiment_*` tools join the default set when `subagent.enableExperiments` is on.
 
@@ -47,25 +47,104 @@ Independent tasks dispatched together. At most `subagent.maxParallelTasks` tasks
 
 Sequential steps. Every occurrence of `{previous}` in a step's `instructions` is replaced with the previous step's output. A failing step throws instead of resolving: the chain stops and the call surfaces as a tool error `Chain stopped at step <n> (<role>): <output>`. Otherwise the call returns the last step's output.
 
+## Agent definition files
+
+A definition file makes a delegation reusable: it records the *configuration* of a subagent — model, tool allowlist, thinking level, standing system prompt — once, and a tool call then names it. The task itself still comes from the call, because the orchestrator knows what needs doing and the file does not.
+
+```markdown
+---
+name: scout
+description: Map code paths and report file:line, nothing else
+model: anthropic/claude-haiku-4-5
+tools: read, grep, ls
+thinking: low
+---
+
+You are a read-only scout. Report file paths and line numbers only, never a
+proposed fix, and say plainly where something does not exist.
+```
+
+The frontmatter is parsed by the same primitive that reads skills and prompt templates, so the subset is YAML, not JSON: `name` (required), `description`, `tools` (a comma list or a YAML sequence), `model`, `thinking`, `systemPrompt`. Unknown keys are ignored rather than rejected — a definition written for a newer pi keeps working on an older one. Without `systemPrompt`, the markdown body below the frontmatter is the standing prompt. `description` is never sent to the child; it is the human- and orchestrator-facing label.
+
+Two scopes are read, in this order, first match wins:
+
+| Scope | Path |
+|-------|------|
+| project | `<cwd>/.pi/agents/*.md` |
+| user | `<agentDir>/agents/*.md` (`~/.pi/agent/agents/` by default, `PI_CODING_AGENT_DIR` honoured) |
+
+The project scope resolves against the session's working directory, so a subdirectory's definitions are not merged into a parent's; a repo that wants one set of agents keeps them at the root. Project wins on a name collision, which is what lets a repo pin the agent its team actually runs over whatever a developer has in their own dir.
+
+Dispatch by name in the single-task slot:
+
+```json
+{
+ "agent": "scout",
+ "instructions": "Find every place retry backoff is computed. Report file:line for each."
+}
+```
+
+`agent` replaces `role` — the definition's `name` becomes the role — and is therefore mutually exclusive with `role`, `tasks`, and `chain`; the call is refused up front rather than reinterpreted. `model` / `tools` / `thinking` / `cwd` passed on the call override the file for this dispatch only, and the standing prompt is prepended to `instructions` with a blank line between, so the per-call task always wins the last word. An unknown name does not fall back to anything: the error lists the definitions that were found (with their scope), the saved specs, and the directories that were searched, so the model can retry with a real name instead of guessing.
+
+A file whose *known* keys are unusable — no `name`, a `thinking` value outside the CLI's enum, unreadable, invalid frontmatter — is skipped with a line on stderr prefixed `subagent-agents:`. Silently dropping it would read as "that agent does not exist", and silently dropping the bad key would run the child in a configuration nobody wrote.
+
+Definitions are one of two name stores. A spec saved by `action: "save-spec"` (`<agentDir>/subagent-specs/`) is a whole inline spec, task included, so dispatching one by name rejects `instructions`; definition files win over a saved spec of the same name, because a hand-authored file is the deliberate artifact.
+
 ## Spec fields
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `agent` | string | Name of an [agent definition file](#agent-definition-files) or a saved spec to dispatch instead of defining one inline. Mutually exclusive with `role` / `tasks` / `chain` |
 | `role` | string | Short specialist label (e.g. `scout`), used in the UI and analytics |
 | `instructions` | string | The complete task. The child never sees this conversation, so include all context it needs. `{previous}` is substituted in chain mode |
 | `model` | string | Optional model id (`provider/model`). Omitted inherits the session's model and thinking level. An unknown id fails the call with an error naming the model and role |
+| `thinking` | string | Optional thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`), applied whether or not the model is inherited. Omitted takes an `agent` definition's level, else this session's level (which then rides only when the model is inherited too) |
 | `tools` | string[] | Optional allowlist of built-in tool names (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`). Omitted gives the full coding set |
 | `cwd` | string | Optional working directory. Omitted inherits the session's working directory |
+| `outputSchema` | object | Optional JSON Schema. The child is told to answer with JSON matching it, and the reply is parsed and validated by the parent (see [Output contracts](#output-contracts)) |
+| `gate` | object | Optional verify command (`{ command, cwd?, timeoutMs? }`) the host runs after the child finishes; a failing gate fails the result |
+
+## Output contracts
+
+A delegation can carry two independent guarantees on top of the child's prose. Both are enforced by the parent after the child settles, which is what makes them worth declaring: neither depends on the child being cooperative.
+
+**`outputSchema`** — a JSON Schema (`type`, `properties`, `required`, `items`, `enum`, `additionalProperties` as `true`/`false`, `oneOf`, `anyOf`, `minimum`/`maximum`, `minLength`/`maxLength`, `pattern`; `type` may be a list). Any other keyword — `$ref`, `$defs`, `format`, `dependentRequired` — is rejected up front, before the child is spawned, rather than silently ignored after it has spent a run. A compact version of the schema is appended to the child's system prompt, so the instruction is present but a bloated schema cannot eat the context (it is clipped at 8 KB in the prompt, never in validation). After the child answers, the parent reads a JSON value out of the reply — the whole message first, then a fenced code block, then the widest brace/bracket span — and validates it. On success the parsed value is attached to the result as `structuredOutput`, so a downstream chain step or the parent session gets data rather than a paragraph to re-parse. On failure the run is reported as failed, the error names the JSON path (`$.files[1]: expected string, got number`), and the gate never runs — a build that cannot state its verdict is not worth verifying. An output that is not parseable JSON at all fails with the parse error and a fragment of the reply.
+
+**`gate`** — `{ command, cwd?, timeoutMs? }`. `command` is one shell command line, run by the host through the platform shell (`/bin/sh -c` on POSIX, `cmd /c` on Windows) in `cwd`, which defaults to the directory the child ran in — its `cwd`, so a gate on a `cwd: "packages/ai"` delegation runs there rather than in the session root. A relative `gate.cwd` resolves against that same directory. It defaults to a 5 minute timeout and captures up to 64 KB of combined stdout/stderr as the tail, with the omitted byte count noted, because a failing build dumps more than it explains. `passed` is a clean exit 0: a non-zero exit fails the result and reports the code plus the excerpts; a timeout or a cancel does the same, named as such. A gate that never ran says why instead of pretending to have passed.
+
+The gate is spawned by the parent process, in its own shell, after the child has exited — so the verdict is independent of anything the child said. That is the point: a `done, tests pass` claim costs the model nothing to write, while a gate that exits 1 makes the failure a fact in the parent session.
+
+Both contracts apply to inline runs only: a `background: true` call that declares either is refused, because a detached run returns before the child has produced anything to check. The TUI shows the outcome beside each role (`json ✓`, `gate ✓ 1.2s`, `gate ✗ exit 1`) so a green tick cannot hide a failed contract.
 
 ## Background results
 
 Pass `"background": true` with any mode to detach: the call returns task ids immediately instead of waiting. Background chain steps still run sequentially so `{previous}` keeps working. When a task settles, pi posts a `subagent-background-result` custom message with the outcome and output, queued for the next turn (`deliverAs: "nextTurn"`, `triggerTurn: true`). Background task state lives in an on-disk registry; check it after a restart before assuming a task is still running.
 
-Background dispatch is intentionally not parallel-capped or concurrency-limited: `subagent.maxParallelTasks` and `subagent.maxConcurrent` bound the inline work of one call, while a detached task outlives the turn. The registry is the record of what is running.
+Background dispatch is capped by the same `subagent.maxConcurrent` limit (default 4): a detached call starts up to that many children at once and the rest queue. Overflow is recorded as a `pending` row in the registry — labelled `<role> (queued)`, no process spawned — and promoted in FIFO order whenever a running task settles or is cancelled. So a `background: true` call can no longer start an unbounded number of processes beside the ones already running.
+
+A queued task reports its id and queue position in the dispatch result and in `action="status"`, and its result is delivered exactly like a started one: when it settles. Cancelling a queued task drops it from the line without spending a slot. The queue belongs to the session that filled it, so after a restart its `pending` rows are marked crashed alongside running ones — nothing is resumed from a dead session's backlog.
+
+### Stopping a background task
+
+`action="stop"` on a background task id signals the child process: a graceful signal first, escalating to a process-tree kill if it survives. The call reports what it actually did, so a task that could not be reached never reads as cancelled — it says so instead, and the row stays `running`.
+
+Two cases have no process to signal: a task still in the queue never spawned anything, and a task stopped in the moment before its child spawns is killed as soon as the pid is known. Both are reported distinctly in the tool text.
+
+A `stop` only touches tasks this session owns. A task row belonging to another session is left alone, because a pid outlives its row and the number may have been recycled by an unrelated process.
+
+If a session dies outright while a background child is running, the next session's startup reconciliation terminates that child rather than leaving it running with a row that claims it crashed; the reap outcome is recorded in the row's `errorMessage`.
 
 ## Output and limits
 
 Each subagent's output is capped at 50 KB in the model-facing text (`Output truncated: ...` when hit), including the output embedded in thrown single/chain failure errors; the `details` object keeps the full output for renderers. Child transcripts stream as JSONL to a per-run artifact, and aborting the call kills the child's whole process tree.
+
+### Delegation depth
+
+A child is its own `pi` process with its own spawn counter, so per-process limits cannot bound a delegation tree. `subagent.maxDepth` (default `1`) is the bound that crosses the process boundary: the top-level session is depth `0`, so the default permits one level of subagents and refuses grandchildren.
+
+At the limit, delegation fails two ways on purpose. The parent refuses the call with an error naming the limit and telling the model to finish the work in its own session — so the parent can re-plan. And the child drops `subagent` from its own tool set, so a grandchild is never offered the tool and there is nothing to refuse. The second is the one that actually stops the tree.
+
+Set `subagent.maxDepth: 0` to remove delegation entirely, or raise it to allow nesting.
 
 ## Analytics
 
@@ -77,10 +156,11 @@ With `enableAnalytics` on, each dispatched run records one `pi_subagent_tasks` r
 - **Parallelize independent lookups.** Use `tasks: [...]` when tasks do not read each other's output (e.g. scouting several modules at once). Keep each task narrow enough that its 50 KB output cap is not hit.
 - **Chain when each step builds on the last.** Use `chain: [...]` for generate-then-review or map-then-summarize flows; `{previous}` carries the earlier output forward.
 - **Match the role to the job.** The `role` is a short specialist label — it labels the run in the UI, logs, and analytics and does not alter the child's prompt. Put any stance or persona differences (e.g. `code-reviewer` vs `scout`) in `instructions`.
+- **Verify instead of trusting.** Give a write/fix step a `gate` pointing at the project's own check command, and give a research or triage step an `outputSchema` so its findings arrive as structured data the next chain step can read. Both are enforced by the host after the child settles, so a confident "tests pass" is either confirmed or reported as a failure.
 
 ## Comparison with the npm `pi-subagents` package
 
-The native tool covers inline, ad-hoc subagents: every call defines its own `role` and `instructions`, runs, and returns. The npm [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) package builds on the same extension API for named, persisted agents with watchdog loops and mission-style task orchestration. Use the native tool for one-shot and short-chain delegation; use the package when you need long-lived named agents or scheduled mission loops.
+The native tool covers ad-hoc delegation plus reusable configuration: every call defines its own task, and an [agent definition file](#agent-definition-files) can carry the model, tools, thinking, and standing prompt behind a name. The npm [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) package builds on the same extension API for named, persisted agents with watchdog loops and mission-style task orchestration. Use the native tool for one-shot and short-chain delegation, including named definitions checked into the repo; use the package when you need long-lived named agents or scheduled mission loops.
 
 ## Experiments surface
 

@@ -3,8 +3,10 @@
  *
  * A subagent is defined per tool call by the orchestrator: a short `role`
  * label, the full `instructions` for the work, and optionally a `model` and a
- * `tools` allowlist. There are no agent definition files and no discovery —
- * `SubagentSpec` is the whole definition.
+ * `tools` allowlist. A call may instead name an agent definition file
+ * (`{ agent: "reviewer" }`, see `agents.ts`); that resolves to defaults which
+ * are merged into the inline fields before validation, so `SubagentSpec` is
+ * still the whole definition by the time a runner sees it.
  *
  * Everything here is runtime-agnostic on purpose. `SubagentRunner` is the seam:
  * the shipped implementation spawns a `pi` subprocess, but an in-process
@@ -13,6 +15,7 @@
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
+import type { CompletionEscalation } from "./result-record.ts";
 
 /** How the orchestrator dispatched a set of subagent tasks. */
 export type SubagentMode = "single" | "parallel" | "chain" | "resume";
@@ -74,13 +77,81 @@ export interface SubagentSpec {
 	instructions: string;
 	/** Model id (`provider/model` or a bare id resolved by the child). Omit to inherit the parent model. */
 	model?: string;
+	/**
+	 * Thinking level for the child (#1046), usually from an agent definition
+	 * file's `thinking` key. Applies whether or not the model is inherited; omit
+	 * to fall back to the parent's level, which only carries over on an inherited
+	 * model (a pinned model may not support it).
+	 */
+	thinking?: ThinkingLevel;
 	/** Allowlist of built-in tool names. Omit for the full coding tool set. */
 	tools?: string[];
 	/** Working directory for the child process. Omit to inherit the parent's cwd. */
 	cwd?: string;
 	/** Persisted child session file to resume. Wins over `parentSessionFile`. */
 	sessionFile?: string;
+	/**
+	 * JSON Schema the child's final output must satisfy (#1045). When set, the
+	 * parent appends a structured-output instruction to the child prompt, then
+	 * parses the final output and validates it after the child settles; a
+	 * mismatch turns the run into a failed `SubagentResult`. Validated by the
+	 * parent, never inside the child, so a parallel batch reports per-task.
+	 *
+	 * Only enforced on the paths that settle in the parent process (inline
+	 * single / parallel / chain and inline redirects). A `background` dispatch
+	 * settles in the detached-run pipeline, which does not run the contract.
+	 */
+	outputSchema?: Record<string, unknown>;
+	/**
+	 * Host-run verify command for the child's work (#1045): `pnpm check`, a
+	 * `test --filter` invocation, and so on. Runs on the **host** after the
+	 * child settles — never through the child's own bash tool — so the verdict
+	 * is not something the graded agent can decline to produce. Skipped when the
+	 * child failed or its output did not validate.
+	 */
+	gate?: SubagentGate;
+}
 
+/** A `gate` declaration on a spec. */
+export interface SubagentGate {
+	/** Command line, run through the platform shell by the host. */
+	command: string;
+	/** Directory to run it in. Omit to use the same directory the child ran in. */
+	cwd?: string;
+	/** Hard wall-clock limit. Default: `DEFAULT_GATE_TIMEOUT_MS` (5 minutes). */
+	timeoutMs?: number;
+}
+
+/** Default wall-clock limit for a host-run `gate` command. */
+export const DEFAULT_GATE_TIMEOUT_MS = 300_000;
+
+/** Combined stdout+stderr cap kept from a `gate` command's output. */
+export const GATE_OUTPUT_CAP_BYTES = 64 * 1024;
+
+/**
+ * Outcome of one host-run `gate` command, recorded on the settled result.
+ *
+ * On a passing run this is details-only — the verdict is never injected into the
+ * model-facing text, because the model already got a successful tool result and
+ * the transcript is the child's, not the gate's. On a failing run the verdict
+ * plus bounded excerpts become the failure message.
+ */
+export interface SubagentGateOutcome {
+	command: string;
+	/** Resolved directory the command ran in. */
+	cwd: string;
+	passed: boolean;
+	exitCode: number;
+	durationMs: number;
+	timedOut: boolean;
+	cancelled: boolean;
+	/** Bounded stdout excerpt (cap: `GATE_OUTPUT_CAP_BYTES` across both streams). */
+	stdout: string;
+	stderr: string;
+	/** True when the excerpts were cut to the cap. */
+	truncated: boolean;
+	/** Set when the command never ran: `"child-failed"` or `"schema-failed"`. */
+	skipped?: "child-failed" | "schema-failed";
 }
 
 /** Everything needed to launch one subagent run. */
@@ -96,6 +167,13 @@ export interface SubagentRunRequest {
 	parentThinkingLevel?: ThinkingLevel;
 	/** Parent session file path; threaded into the runner so the child can nest under it. */
 	parentSessionFile?: string;
+	/**
+	 * Delegation depth of the child to launch. The root session is 0, so its
+	 * direct children are 1. Passed to the child on argv so the child resolves
+	 * its own tool set without `subagent` once the depth budget is spent —
+	 * see `subagent.maxDepth`.
+	 */
+	depth?: number;
 
 	/** 1-based position within a `chain` dispatch, for display. */
 	step?: number;
@@ -187,6 +265,36 @@ export interface SubagentResult {
 	runId?: string;
 	/** Persisted child session file path (set when the child opens a session). */
 	sessionFile?: string;
+	/**
+	 * Set by the background settle path (#1051) when this failure is the
+	 * threshold-th consecutive failure of the same role with an identical error
+	 * signature. It rides the settle notification only: an inline run never
+	 * carries it, because a streak is a property of the background queue's
+	 * history, not of one child process.
+	 */
+	escalation?: CompletionEscalation;
+	/**
+	 * Parsed JSON value the child's final output validated against `spec.outputSchema`
+	 * (#1045). Present only when the spec declared a schema AND the output
+	 * satisfied it; absent otherwise, so a consumer can trust the field's type.
+	 */
+	structuredOutput?: unknown;
+	/**
+	 * Validation state for a spec that declared `outputSchema`. Absent when the
+	 * spec had no schema. `failed` makes this a failed result and puts the
+	 * per-property errors in `errorMessage`.
+	 */
+	outputValidation?: SubagentOutputValidation;
+	/** Host-run verify command outcome, when the spec declared `gate`. */
+	gate?: SubagentGateOutcome;
+}
+
+export interface SubagentOutputValidation {
+	status: "passed" | "failed";
+	/** Per-property error strings; empty when `status === "passed"`. */
+	errors: string[];
+	/** Set when the final output was not parseable JSON at all. */
+	parseError?: string;
 }
 
 export type SubagentEvent =
@@ -234,7 +342,15 @@ export interface SubagentRunner {
 }
 
 export function isFailedSubagentResult(result: SubagentResult): boolean {
-	return result.aborted || result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+	if (result.aborted || result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted") {
+		return true;
+	}
+	// Contract failures (#1045) are reported through these two fields rather
+	// than by faking a process exit code: the child did exit cleanly, and the
+	// run still did not deliver what was asked of it.
+	if (result.outputValidation && result.outputValidation.status === "failed") return true;
+	if (result.gate && result.gate.skipped === undefined && !result.gate.passed) return true;
+	return false;
 }
 
 /** Model-facing text for one result: final output, or the best available diagnostic. */

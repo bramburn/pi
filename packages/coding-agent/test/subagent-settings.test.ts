@@ -27,6 +27,7 @@ describe("subagent.* settings", () => {
 		expect(manager.getSubagentWorktreeBase()).toBe(".worktrees");
 		expect(manager.getSubagentEnableExperiments()).toBe(false);
 		expect(manager.getSubagentResearchModeTriggerCount()).toBe(3);
+		expect(manager.getSubagentMaxDepth()).toBe(1);
 		expect(DEFAULT_SUBAGENT_SETTINGS).toEqual({
 			enabled: true,
 			maxConcurrent: 4,
@@ -36,7 +37,18 @@ describe("subagent.* settings", () => {
 			researchModeTriggerCount: 3,
 			maxTotalSpawns: 64,
 			toolTimeoutMs: 300_000,
+			maxDepth: 1,
 		});
+	});
+
+	it("clamps maxDepth to a non-negative integer", () => {
+		expect(SettingsManager.inMemory({ subagent: { maxDepth: 3 } }).getSubagentMaxDepth()).toBe(3);
+		expect(SettingsManager.inMemory({ subagent: { maxDepth: 0 } }).getSubagentMaxDepth()).toBe(0);
+		// maxDepth 0 means "no delegation at all" and must survive as 0.
+		expect(SettingsManager.inMemory({ subagent: { maxDepth: -5 } }).getSubagentMaxDepth()).toBe(0);
+		expect(SettingsManager.inMemory({ subagent: { maxDepth: 2.9 } }).getSubagentMaxDepth()).toBe(2);
+		// Non-numeric falls back to the default rather than NaN-poisoning the guard.
+		expect(SettingsManager.inMemory({ subagent: { maxDepth: "x" } as never }).getSubagentMaxDepth()).toBe(1);
 	});
 
 	it("round-trips all six keys through settings.json", () => {

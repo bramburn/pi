@@ -82,6 +82,10 @@ export async function getPiInvocation(args: string[], bun?: BunApi): Promise<{ c
 
 function buildChildArgs(request: SubagentRunRequest): string[] {
 	const args = ["--mode", "json", "-p"];
+	// Delegation depth. The child is a fresh process with its own spawn counter,
+	// so the only bound that can stop a grandchild is the depth it is told about
+	// here. Always emitted (even at 0) so the flag and the child agree.
+	args.push("--subagent-depth", String(Math.max(0, Math.floor(request.depth ?? 0))));
 	// Session precedence: an explicit child session file (resume) wins over
 	// inheriting the parent session file; neither means a fresh ephemeral child.
 	if (request.spec.sessionFile) {
@@ -92,11 +96,14 @@ function buildChildArgs(request: SubagentRunRequest): string[] {
 		args.push("--no-session");
 	}
 	// A spec that pins a model does not inherit the parent's thinking level: the
-	// two belong together and mixing them is surprising.
+	// two belong together and mixing them is surprising. An agent definition's own
+	// `thinking` (#1046) is different — it describes the agent, not the parent —
+	// so it applies whether or not the model is pinned.
 	const model = request.spec.model ?? request.parentModel;
 	if (model) args.push("--model", model);
-	if (!request.spec.model && request.parentThinkingLevel) {
-		args.push("--thinking", request.parentThinkingLevel);
+	const thinkingLevel = request.spec.thinking ?? (request.spec.model ? undefined : request.parentThinkingLevel);
+	if (thinkingLevel) {
+		args.push("--thinking", thinkingLevel);
 	}
 	if (request.spec.tools && request.spec.tools.length > 0) {
 		args.push("--tools", request.spec.tools.join(","));
