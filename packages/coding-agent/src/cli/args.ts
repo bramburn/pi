@@ -54,6 +54,12 @@ export interface Args {
 	useTheme?: string;
 	noThemes?: boolean;
 	noContextFiles?: boolean;
+	/**
+	 * Delegation depth of this process: 0 for a top-level session, incremented
+	 * for each `pi` subagent child. Internal — set on the child's argv by the
+	 * subagent runner, not by users. Governs `subagent.maxDepth`.
+	 */
+	subagentDepth?: number;
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
@@ -216,6 +222,18 @@ export function parseArgs(args: string[]): Args {
 			result.noThemes = true;
 		} else if (arg === "--no-context-files" || arg === "-nc") {
 			result.noContextFiles = true;
+		} else if (arg === "--subagent-depth") {
+			const raw = args[i + 1];
+			const v = raw === undefined ? Number.NaN : parseInt(raw, 10);
+			if (Number.isFinite(v) && v >= 0) {
+				result.subagentDepth = v;
+				i += 1;
+			} else {
+				result.diagnostics.push({
+					type: "error",
+					message: "--subagent-depth requires a non-negative integer",
+				});
+			}
 		} else if (arg === "--list-models") {
 			// Check if next arg is a search pattern (not a flag or file arg)
 			if (i + 1 < args.length && !args[i + 1].startsWith("-") && !args[i + 1].startsWith("@")) {
@@ -324,6 +342,7 @@ ${chalk.bold("Options:")}
   --use-theme <name[/name]>      Set the initial interactive theme for this run
   --no-themes                    Disable theme discovery and loading
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
+  --subagent-depth <n>           Internal: delegation depth of this process (0 = top level)
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)

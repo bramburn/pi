@@ -180,6 +180,11 @@ export interface SubagentSettings {
 	maxTotalSpawns?: number;
 	/** Per-tool-call wall-clock budget inside a child subagent. Default 300_000 (5 min). */
 	toolTimeoutMs?: number;
+	/**
+	 * Deepest delegation level allowed, where 0 is the top-level session.
+	 * Default 1 — one level of subagents, no grandchildren. 0 forbids delegation.
+	 */
+	maxDepth?: number;
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -1605,5 +1610,17 @@ export class SettingsManager {
 		return typeof value === "number" && Number.isFinite(value)
 			? Math.max(0, Math.floor(value))
 			: DEFAULT_SUBAGENT_SETTINGS.toolTimeoutMs;
+	}
+
+	/**
+	 * Deepest delegation level allowed, where 0 is the top-level session.
+	 * Default 1. Unlike maxTotalSpawns this crosses the process boundary,
+	 * because the depth is handed to each child on argv.
+	 */
+	getSubagentMaxDepth(): number {
+		const value = this.settings.subagent?.maxDepth;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxDepth;
 	}
 }

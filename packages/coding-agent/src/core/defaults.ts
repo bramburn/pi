@@ -30,6 +30,19 @@ export const DEFAULT_SUBAGENT_SETTINGS: ResolvedSubagentSettings = {
 	researchModeTriggerCount: 3,
 	/** Max subagent spawns allowed per session, across inline and background. */
 	maxTotalSpawns: 64,
-	/** Per-tool-call wall-clock budget inside a child subagent. */
+	/** Per-tool-call budget inside a child subagent. */
 	toolTimeoutMs: 300_000,
+	/**
+	 * Deepest delegation level this process may spawn.
+	 *
+	 * Depth 0 is the top-level session, so the default of 1 permits one level
+	 * of subagents and refuses grandchildren. `maxTotalSpawns` cannot bound a
+	 * tree: it is a per-process counter, and every child is its own process
+	 * that starts a fresh one. This is the only bound that crosses the process
+	 * boundary, because the depth is handed to the child on argv and the child
+	 * resolves its own tool set from it.
+	 *
+	 * Set to 0 to disable delegation entirely in this process.
+	 */
+	maxDepth: 1,
 };

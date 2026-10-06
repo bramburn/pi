@@ -88,6 +88,16 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * Delegation depth of this session: 0 for a top-level session, 1+ for a
+	 * subagent child. Set on the child's argv as `--subagent-depth`.
+	 *
+	 * At `subagent.maxDepth` the `subagent` tool is removed from the active
+	 * tool set, so a child that has spent its depth budget cannot spawn a
+	 * grandchild. This is the load-bearing half of the depth guard — the
+	 * parent's own refusal is only advisory.
+	 */
+	subagentDepth?: number;
 }
 
 /** Result from createAgentSession */
@@ -276,9 +286,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+	// Depth guard, child-side half (the load-bearing one). Applied AFTER the
+	// active set is resolved, so it also strips `subagent` from a configured
+	// `defaultTools` or an explicit `--tools subagent` — at max depth there is
+	// no delegation to make, so the tool must not exist rather than be refused.
+	// Filtering `defaultActiveToolNames` above would miss both of those.
+	const subagentDepth = Math.max(0, Math.floor(options.subagentDepth ?? 0));
+	const subagentDepthExhausted = subagentDepth >= settingsManager.getSubagentMaxDepth();
 	const initialActiveToolNames = (
 		options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? defaultActiveToolNames))
-	).filter((name) => !excludedToolNameSet?.has(name));
+	)
+		.filter((name) => !excludedToolNameSet?.has(name))
+		.filter((name) => !(subagentDepthExhausted && name === "subagent"));
 
 	let agent: Agent;
 
@@ -417,6 +436,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		subagentDepth,
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 

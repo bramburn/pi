@@ -128,6 +128,68 @@ function mergeEnv(overrides: Record<string, string | undefined>): Record<string,
 }
 
 /**
+ * Escalate a kill against a child addressed only by its pid.
+ *
+ * `createKillController` below is the in-process equivalent, but it needs the
+ * `BunSubprocess` handle — which only the spawning call site holds. The
+ * background registry persists a pid and nothing else, and `stop` may be issued
+ * from a DIFFERENT session process than the one that spawned the child, so a
+ * pid-addressed kill is the only form available on that path. This mirrors the
+ * same contract: graceful first, hard tree kill after the grace.
+ *
+ * Windows residual limitation (same one `createKillController` documents):
+ * there are no signal groups, and `process.kill` on win32 terminates
+ * unconditionally, so a "graceful" SIGTERM is in fact an immediate TerminateProcess
+ * and only `taskkill /F /T` reaches the tree. There is no spawn-side fix.
+ *
+ * Recycles: pid liveness alone cannot distinguish a live child from an unrelated
+ * process that inherited the number, so every caller must gate on its own
+ * evidence that the row is abandoned (see background.ts). This function never
+ * invents that evidence itself.
+ */
+export type PidKillOutcome = "signalled" | "already-gone" | "failed";
+
+export function killPidTree(pid: number, graceMs: number = KILL_GRACE_MS): PidKillOutcome {
+	// pid 0 and negative pids address whole process groups in kill(); a row
+	// carrying one is corrupt, never a child. Our own pid is refused outright —
+	// killing the caller is never the intent of cancelling one of its children.
+	if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return "failed";
+
+	if (process.platform === "win32") {
+		// No graceful tier exists on win32: process.kill maps every signal to
+		// TerminateProcess on the direct child only, orphaning its
+		// grandchildren. taskkill /F /T is the tree-wide form, so it is the
+		// first thing sent rather than the escalation.
+		killProcessTree(pid);
+		return "signalled";
+	}
+
+	try {
+		process.kill(pid, "SIGTERM");
+	} catch (err) {
+		// ESRCH: already gone. EPERM: alive but not ours — not cancellable.
+		return (err as NodeJS.ErrnoException).code === "ESRCH" ? "already-gone" : "failed";
+	}
+	// Detached children lead their own process group on POSIX, so a group
+	// signal extends the same grace to the grandchildren they run tools as.
+	try {
+		process.kill(-pid, "SIGTERM");
+	} catch {
+		// No group to signal, or it is already gone.
+	}
+	const escalation = setTimeout(() => {
+		killProcessTree(pid);
+		try {
+			process.kill(pid, "SIGKILL");
+		} catch {
+			// Already gone.
+		}
+	}, graceMs);
+	escalation.unref?.();
+	return "signalled";
+}
+
+/**
  * Kill escalation and bounded exit waiting for one spawned child.
  *
  * `killOnce` is the idempotent GRACEFUL first kill: SIGTERM to the child and,
