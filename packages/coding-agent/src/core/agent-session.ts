@@ -3016,11 +3016,14 @@ export class AgentSession {
 							worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
 							enableExperiments: this.settingsManager.getSubagentEnableExperiments(),
 							researchModeTriggerCount: this.settingsManager.getSubagentResearchModeTriggerCount(),
+							maxTotalSpawns: this.settingsManager.getSubagentMaxTotalSpawns(),
+							toolTimeoutMs: this.settingsManager.getSubagentToolTimeoutMs(),
 						}),
 						getParentContext: () => ({
 							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
 							thinkingLevel: this.thinkingLevel,
 						}),
+						getParentSessionFile: () => this.sessionManager.getSessionFile(),
 						resolveModel: (modelId) => {
 							const match = findExactModelReferenceMatch(modelId, [...this._modelRuntime.getModels()]);
 							return match ? `${match.provider}/${match.id}` : undefined;

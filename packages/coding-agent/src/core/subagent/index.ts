@@ -62,11 +62,23 @@ export {
 	shouldRegisterExperimentTools,
 } from "./experiment-tools.ts";
 export {
+	type BackgroundLogRecord,
+	type BackgroundLogTail,
+	BG_LOG_MAX_BYTES,
+	BG_LOG_MAX_RECORDS,
+	backgroundLogPath,
+	clearBackgroundDashboard,
+	clearBackgroundLogOverlay,
 	clearDashboard,
 	type ExperimentsUi,
+	readBackgroundLogTail,
+	renderBackgroundLines,
+	renderBackgroundLogLines,
 	renderBackgroundPill,
 	renderDashboardLines,
 	renderExperimentsStatusPill,
+	showBackgroundDashboard,
+	showBackgroundLogOverlay,
 	showDashboard,
 	UI_KEYS,
 } from "./experiments-dashboard.ts";
@@ -75,6 +87,8 @@ export { formatTokens, formatUsageStats, getDisplayItems, renderSubagentCall, re
 export { type ResearchModeOptions, ResearchModeTracker } from "./research-mode.ts";
 export type { BunApi, BunReadableStream, BunShell, BunShellResult, BunSpawnOptions, BunSubprocess } from "./runtime.ts";
 export { getBun, isBunRuntime } from "./runtime.ts";
+export type { SavedSpec } from "./saved-specs.ts";
+export { deleteSpec, listSpecs, loadSpec, saveSpec } from "./saved-specs.ts";
 export type { ShellOptions, ShellResult } from "./shell.ts";
 export { runGit, runShell, runShellLine } from "./shell.ts";
 export { buildStatusInjection } from "./status-injector.ts";

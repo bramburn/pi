@@ -34,6 +34,8 @@ describe("subagent.* settings", () => {
 			worktreeBase: ".worktrees",
 			enableExperiments: false,
 			researchModeTriggerCount: 3,
+			maxTotalSpawns: 64,
+			toolTimeoutMs: 300_000,
 		});
 	});
 

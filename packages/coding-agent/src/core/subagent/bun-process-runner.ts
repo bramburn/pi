@@ -29,6 +29,7 @@ import { createKillController, HARD_KILL_EXIT_CODE } from "./shell.ts";
 import { createStreamPump } from "./stream.ts";
 import {
 	createEmptyUsage,
+	type InFlightRun,
 	type SubagentEventListener,
 	type SubagentResult,
 	type SubagentRunner,
@@ -49,6 +50,8 @@ export interface BunProcessRunnerOptions {
 	bun?: BunApi;
 	/** Kill escalation grace: graceful SIGTERM → SIGKILL → give up, each after this long. Default 5000ms. */
 	killGraceMs?: number;
+	/** Per-tool-call wall-clock budget in ms. The child is killed if a single tool call exceeds this. */
+	toolTimeoutMs?: number;
 }
 
 // ============================================================================
@@ -78,7 +81,16 @@ export async function getPiInvocation(args: string[], bun?: BunApi): Promise<{ c
 }
 
 function buildChildArgs(request: SubagentRunRequest): string[] {
-	const args = ["--mode", "json", "-p", "--no-session"];
+	const args = ["--mode", "json", "-p"];
+	// Session precedence: an explicit child session file (resume) wins over
+	// inheriting the parent session file; neither means a fresh ephemeral child.
+	if (request.spec.sessionFile) {
+		args.push("--session", request.spec.sessionFile);
+	} else if (request.parentSessionFile) {
+		args.push("--session-parent", request.parentSessionFile);
+	} else {
+		args.push("--no-session");
+	}
 	// A spec that pins a model does not inherit the parent's thinking level: the
 	// two belong together and mixing them is surprising.
 	const model = request.spec.model ?? request.parentModel;
@@ -223,10 +235,61 @@ class JsonLineParser {
 // Runner
 // ============================================================================
 
+/**
+ * One registered in-flight run: the snapshot `listRunning()` reports, plus the
+ * kill hook `runChild` binds the moment a child exists and a `killOnce` can be
+ * aimed at it.
+ *
+ * `kill` is undefined until the child is spawned, so an interrupt that lands in
+ * the registration window (temp-file write, invocation resolve) reports "not
+ * mine" rather than pretending to stop something that is not yet running.
+ */
+interface ActiveRun {
+	info: InFlightRun;
+	kill?: () => void;
+}
+
+/**
+ * Create the shipped runner: one `pi` subprocess per run, Bun only.
+ *
+ * The returned object also carries the control plane (`listRunning` /
+ * `interrupt`), which is necessarily per-instance: in-flight state is the set of
+ * children THIS process dispatched, keyed by the runId each settled result
+ * echoes back. A different session cannot see or stop them — cross-process
+ * visibility is the background registry's job, not the runner's.
+ */
 export function createBunProcessRunner(options?: BunProcessRunnerOptions): SubagentRunner {
+	const inFlight = new Map<string, ActiveRun>();
 	return {
 		async run(request, signal, onEvent): Promise<SubagentResult> {
-			const emit: SubagentEventListener = onEvent ?? (() => {});
+			const runId = crypto.randomUUID();
+			const active: ActiveRun = {
+				info: {
+					runId,
+					role: request.spec.role,
+					task: request.task,
+					cwd: request.cwd,
+					startedAt: new Date().toISOString(),
+					// Mirror the pinned model/tools onto the in-flight snapshot so the
+					// control plane can report what the run was dispatched with and
+					// re-derive a spec for a resuming re-dispatch. Omitted when unset:
+					// "inherits the parent's model" is not a value the snapshot can
+					// claim, and spreading `undefined` would create the key anyway.
+					...(request.spec.model === undefined ? {} : { model: request.spec.model }),
+					...(request.spec.tools === undefined ? {} : { tools: [...request.spec.tools] }),
+				},
+			};
+			inFlight.set(runId, active);
+			const downstream: SubagentEventListener = onEvent ?? (() => {});
+			// Stamp the child session file onto the snapshot the moment the child
+			// announces it. `finishResult` only puts `sessionFile` on the settled
+			// result, and an in-flight run has not settled — so this is the only
+			// source of that path for a `steer`/`swap-model` target that is still
+			// running. Events are forwarded to the caller's listener unchanged.
+			const emit: SubagentEventListener = (event) => {
+				if (event.type === "session_start") active.info.sessionFile = event.sessionFile;
+				downstream(event);
+			};
 			const result: SubagentResult = {
 				role: request.spec.role,
 				task: request.task,
@@ -237,6 +300,7 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 				usage: createEmptyUsage(),
 				step: request.step,
 				messages: [],
+				runId,
 			};
 
 			const instructions = request.spec.instructions.trim();
@@ -263,14 +327,32 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 					timeoutMs: request.timeoutMs,
 					killGraceMs: options?.killGraceMs,
 					logPath: request.logPath,
+					toolTimeoutMs: options?.toolTimeoutMs,
+					checkpointBeforeDeadlineMs: request.checkpointBeforeDeadlineMs,
 				};
 
-				await runChild(childRequest, signal, result, emit, bun);
+				await runChild(childRequest, signal, result, emit, bun, active);
 
 				return result;
 			} finally {
+				inFlight.delete(runId);
 				await removePromptFile(promptFile, bun);
 			}
+		},
+
+		listRunning(): InFlightRun[] {
+			// Copies, so a consumer can never mutate the runner's own snapshot.
+			return Array.from(inFlight.values(), (entry) => ({ ...entry.info }));
+		},
+
+		async interrupt(runId: string): Promise<boolean> {
+			const entry = inFlight.get(runId);
+			if (!entry?.kill) return false;
+			// The same `killOnce` the abort signal and the timeout timers use, so an
+			// interrupted run settles through the identical path — graceful first,
+			// escalation on survival, `aborted: true` in the result.
+			entry.kill();
+			return true;
 		},
 	};
 }
@@ -284,6 +366,8 @@ interface ChildRequest {
 	timeoutMs?: number;
 	killGraceMs?: number;
 	logPath?: string;
+	toolTimeoutMs?: number;
+	checkpointBeforeDeadlineMs?: number;
 }
 
 interface ChildStreams {
@@ -293,14 +377,27 @@ interface ChildStreams {
 	model?: string;
 	stopReason?: string;
 	errorMessage?: string;
+	sessionFile?: string;
 }
 
 function createChildStreams(): ChildStreams {
 	return { messages: [], finalOutput: "", usage: createEmptyUsage() };
 }
 
-function applyJsonEvent(event: Record<string, unknown>, streams: ChildStreams, emit: SubagentEventListener): void {
+function applyJsonEvent(
+	event: Record<string, unknown>,
+	streams: ChildStreams,
+	emit: SubagentEventListener,
+	resetToolTimer: () => void,
+): void {
 	const type = event.type;
+	// Capture session_start before the message-type gate: it is a control event,
+	// not a transcript event, and falls through the same parser path.
+	if (type === "session_start" && typeof event.sessionFile === "string") {
+		streams.sessionFile = event.sessionFile;
+		emit({ type: "session_start", sessionFile: event.sessionFile });
+		return;
+	}
 	if (type !== "message_end" && type !== "tool_result_end") return;
 	const message = event.message as Message | undefined;
 	if (!message) return;
@@ -312,6 +409,9 @@ function applyJsonEvent(event: Record<string, unknown>, streams: ChildStreams, e
 	} else {
 		emit({ type: "tool_result_end", message });
 	}
+	// Per-tool-call budget: any progress event resets the wall clock. A child
+	// that goes silent between two events longer than toolTimeoutMs is killed.
+	resetToolTimer();
 }
 
 function applyAssistantMessage(message: Message, streams: ChildStreams): void {
@@ -340,18 +440,25 @@ function finishResult(
 	killed: boolean,
 	timedOut: boolean,
 	timeoutMs: number | undefined,
+	toolTimedOut: boolean,
+	toolTimeoutMs: number | undefined,
 ): void {
 	result.messages = streams.messages;
 	result.finalOutput = streams.finalOutput;
 	result.usage = streams.usage;
 	result.model = streams.model;
 	result.stopReason = streams.stopReason;
+	if (streams.sessionFile) result.sessionFile = streams.sessionFile;
 	if (streams.errorMessage) result.errorMessage = streams.errorMessage;
 	if (timedOut) {
 		result.aborted = true;
 		result.errorMessage = `Subagent timed out after ${timeoutMs}ms`;
 	}
-	if (killed && !timedOut) result.aborted = true;
+	if (toolTimedOut) {
+		result.aborted = true;
+		result.errorMessage = `Subagent tool call timed out after ${toolTimeoutMs}ms`;
+	}
+	if (killed && !timedOut && !toolTimedOut) result.aborted = true;
 }
 
 /** Attach the caller's AbortSignal to a kill callback. Returns a detach function. */
@@ -421,6 +528,7 @@ async function runChild(
 	result: SubagentResult,
 	emit: SubagentEventListener,
 	bun: BunApi,
+	active?: ActiveRun,
 ): Promise<void> {
 	const streams = createChildStreams();
 	const parser = new JsonLineParser();
@@ -443,23 +551,67 @@ async function runChild(
 
 	let killed = false;
 	let timedOut = false;
+	let toolTimedOut = false;
 	const kills = createKillController(proc, child.killGraceMs);
 	const killOnce = () => {
 		killed = true;
 		kills.killOnce();
 	};
+	// Bind the control plane now that a child exists to stop: `interrupt(runId)`
+	// reaches this exact `killOnce`, the same one the abort signal and both
+	// timeout paths use. Registered after spawn, so an in-flight listing never
+	// shows a run without a kill target behind it.
+	if (active) {
+		active.kill = killOnce;
+		if (proc.pid !== undefined) active.info.pid = proc.pid;
+	}
 	const detachAbort = attachAbort(signal, killOnce);
 	const timer = startTimeout(child.timeoutMs, () => {
 		timedOut = true;
 		killOnce();
 	});
 
+	// Per-tool-call wall-clock budget: the timer arms at spawn and resets on
+	// every progress event. A child that goes silent between two events longer
+	// than toolTimeoutMs is killed, distinguishing a stuck tool call from a
+	// long-running run that is simply between turns.
+	let toolTimer: NodeJS.Timeout | undefined;
+	const armToolTimer = () => {
+		if (child.toolTimeoutMs === undefined || child.toolTimeoutMs <= 0) return;
+		if (toolTimer) clearTimeout(toolTimer);
+		toolTimer = setTimeout(() => {
+			toolTimedOut = true;
+			killOnce();
+		}, child.toolTimeoutMs);
+		toolTimer.unref?.();
+	};
+	const resetToolTimer = () => armToolTimer();
+	armToolTimer();
+
+	// Checkpoint-before-deadline: emit a `checkpoint_pending` event so the
+	// parent can capture partial state, but do NOT change the actual kill
+	// timing. The deadline timer is the one that fires `killOnce`.
+	let checkpointTimer: NodeJS.Timeout | undefined;
+	if (
+		child.timeoutMs !== undefined &&
+		child.checkpointBeforeDeadlineMs !== undefined &&
+		child.checkpointBeforeDeadlineMs > 0 &&
+		child.checkpointBeforeDeadlineMs < child.timeoutMs
+	) {
+		const delay = child.timeoutMs - child.checkpointBeforeDeadlineMs;
+		checkpointTimer = setTimeout(() => {
+			emit({ type: "checkpoint_pending", msUntilDeadline: child.checkpointBeforeDeadlineMs as number });
+			log.append({ type: "CHECKPOINT_PENDING", msUntilDeadline: child.checkpointBeforeDeadlineMs });
+		}, delay);
+		checkpointTimer.unref?.();
+	}
+
 	// Parse JSONL as it arrives: a long-running subagent must keep emitting
 	// progress, not stay silent until it exits. The pumps run with the child and
 	// release only after it is gone, so the drain grace bounds the post-exit
 	// wait and never the child's lifetime.
 	const stdoutPump = createStreamPump(proc.stdout, (chunk) => {
-		parser.push(chunk, (event) => applyJsonEvent(event, streams, emit));
+		parser.push(chunk, (event) => applyJsonEvent(event, streams, emit, resetToolTimer));
 	});
 	const stderrBuffer = new BoundedText(MAX_STDERR_CHARS);
 	const stderrPump = createStreamPump(proc.stderr, (chunk) => {
@@ -473,6 +625,8 @@ async function runChild(
 	// aborted/timedOut flags carry the outcome.
 	const exitCode = await kills.waitForExit();
 	clearTimeout(timer);
+	if (toolTimer) clearTimeout(toolTimer);
+	if (checkpointTimer) clearTimeout(checkpointTimer);
 	detachAbort();
 	// Only now do we stop waiting for EOF: a surviving grandchild may still hold
 	// the pipe open, and it must not stall the parent after the child is gone.
@@ -480,13 +634,13 @@ async function runChild(
 	// Flush AFTER the drain, not before: a final JSONL line without a trailing
 	// newline that completes during the drain window sits in the parser buffer
 	// past a pre-release flush, and the run's last event would be dropped.
-	parser.flush((event) => applyJsonEvent(event, streams, emit));
+	parser.flush((event) => applyJsonEvent(event, streams, emit, resetToolTimer));
 	kills.dispose();
 	if (proc.pid) untrackDetachedChildPid(proc.pid);
 
 	result.stderr = stderrBuffer.text;
 	result.exitCode = exitCode ?? HARD_KILL_EXIT_CODE;
-	finishResult(result, streams, killed, timedOut, child.timeoutMs);
+	finishResult(result, streams, killed, timedOut, child.timeoutMs, toolTimedOut, child.toolTimeoutMs);
 	const signalName = killed ? "SIGTERM" : null;
 	emit({ type: "exit", exitCode, signal: signalName });
 	log.append({ type: "EXIT", exitCode, killed });

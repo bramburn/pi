@@ -28,6 +28,13 @@ export interface Args {
 	noSession?: boolean;
 	session?: string;
 	sessionId?: string;
+	/**
+	 * Parent session file or id for lineage tracking when spawning a nested
+	 * session. Phase 1 accepts a PATH and errors on a bare session id.
+	 */
+	sessionParent?: string;
+	/** Explicitly drop the parent session link and run with no session lineage. */
+	noSessionParent?: boolean;
 	fork?: string;
 	sessionDir?: string;
 	models?: string[];
@@ -132,6 +139,12 @@ export function parseArgs(args: string[]): Args {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
 			result.session = args[++i];
+		} else if (arg === "--session-parent" && i + 1 < args.length) {
+			// Phase 1: accept a PATH to a parent session file. A bare session id
+			// is rejected because id resolution is deferred to Phase 2.
+			result.sessionParent = args[++i];
+		} else if (arg === "--no-session-parent") {
+			result.noSessionParent = true;
 		} else if (arg === "--session-id" && i + 1 < args.length) {
 			result.sessionId = args[++i];
 		} else if (arg === "--fork" && i + 1 < args.length) {
@@ -288,6 +301,8 @@ ${chalk.bold("Options:")}
   --session-id <id>              Use exact project session ID, creating it if missing
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
+  --session-parent <path>        Parent session file for lineage tracking
+  --no-session-parent            Drop the parent session link for this run
   --no-session                   Don't save session (ephemeral)
   --name, -n <name>              Set session display name
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling

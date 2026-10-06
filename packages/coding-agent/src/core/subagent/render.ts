@@ -162,6 +162,38 @@ export function aggregateUsage(results: SubagentResult[]): Omit<SubagentUsage, "
 }
 
 export function renderSubagentCall(args: SubagentToolInput, theme: Theme): Component {
+	// Control-plane call: no dispatch, no spec. The action plus whatever names
+	// its target (a run id, a spec name) is the whole story; steer and
+	// swap-model additionally carry a payload worth showing.
+	if (args.action) {
+		const parts: string[] = [args.action];
+		if (args.id) parts.push(args.id);
+		if (args.name) parts.push(args.name);
+		if (args.action === "swap-model" && args.model) parts.push(`-> ${args.model}`);
+		let text = theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("warning", parts.join(" "));
+		if (args.message) {
+			const note = args.message.length > 60 ? `${args.message.slice(0, 60)}...` : args.message;
+			text += `\n ${theme.fg("dim", note)}`;
+		}
+		if (args.action === "save-spec" && args.role) {
+			text += `\n ${theme.fg("dim", `${args.role}${args.model ? ` · ${args.model}` : ""}`)}`;
+		}
+		return new Text(text, 0, 0);
+	}
+	// Saved-spec dispatch: the spec's own role is not knowable at render time —
+	// the call only carries its name — so the name is the label.
+	if (args.agent) {
+		let text =
+			theme.fg("toolTitle", theme.bold("subagent ")) +
+			theme.fg("accent", `@${args.agent}`) +
+			(args.background ? theme.fg("muted", " [background]") : "");
+		if (args.model) text += theme.fg("muted", ` -> ${args.model}`);
+		if (args.instructions) {
+			const preview = args.instructions.length > 60 ? `${args.instructions.slice(0, 60)}...` : args.instructions;
+			text += `\n ${theme.fg("dim", preview)}`;
+		}
+		return new Text(text, 0, 0);
+	}
 	if (args.chain && args.chain.length > 0) {
 		let text =
 			theme.fg("toolTitle", theme.bold("subagent ")) +

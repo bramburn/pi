@@ -103,6 +103,16 @@ export interface BackgroundTask {
 	finishedAt?: string;
 	usage?: BackgroundUsage;
 	errorMessage?: string;
+	/**
+	 * Persistent child session file path. Captured from the run's
+	 * `sessionFile` when the child emitted a `session_start` event — i.e. a
+	 * `--session-parent` (or `--session`) child that wrote a session file.
+	 * Undefined for `--no-session` children and for runs that crashed before
+	 * opening their session. Persists in the registry so a parent restart
+	 * can hand the same file to a later `subagent(..., sessionFile: ...)`
+	 * call to resume the child.
+	 */
+	sessionFile?: string;
 }
 
 interface RegistryFile {
@@ -793,6 +803,8 @@ export interface BackgroundRunOptions {
 	/** The model the parent session is using, used when `spec.model` is absent. */
 	parentModel?: string;
 	parentThinkingLevel?: SubagentRunRequest["parentThinkingLevel"];
+	/** Parent session file path; threaded into the runner so the child can nest under it. */
+	parentSessionFile?: string;
 	/** Called once the task reaches a terminal state. Must not throw. */
 	onSettled?: (taskId: string, result: SubagentResult) => void;
 	/** No hard limit by default: a background task is expected to outlive a turn. */
@@ -913,6 +925,7 @@ async function runDetached(
 			parentModel: options.parentModel,
 			parentThinkingLevel: options.parentThinkingLevel,
 			logPath: join(getAgentDir(), BG_DIR_NAME, taskId, BG_LOG_FILE),
+			...(options.parentSessionFile === undefined ? {} : { parentSessionFile: options.parentSessionFile }),
 			...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
 		},
 		// No caller signal: a background task must not inherit the turn's abort.
@@ -948,6 +961,12 @@ async function runDetached(
 		finishedAt: new Date().toISOString(),
 		lastOutput: output.slice(-200),
 		usage,
+		// sessionFile is captured for the resume path: a parent restart can
+		// hand it back via spec.sessionFile to continue the same child
+		// session. Only stamp it on a successful capture (the runner leaves
+		// result.sessionFile undefined for --no-session children and for
+		// runs that crashed before opening their session).
+		...(result.sessionFile ? { sessionFile: result.sessionFile } : {}),
 		...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
 	});
 	registry.appendLog(taskId, { type: "EXIT", exitCode: result.exitCode, status: failed ? "failed" : "completed" });

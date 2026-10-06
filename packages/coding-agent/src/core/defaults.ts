@@ -28,4 +28,8 @@ export const DEFAULT_SUBAGENT_SETTINGS: ResolvedSubagentSettings = {
 	worktreeBase: ".worktrees",
 	enableExperiments: false,
 	researchModeTriggerCount: 3,
+	/** Max subagent spawns allowed per session, across inline and background. */
+	maxTotalSpawns: 64,
+	/** Per-tool-call wall-clock budget inside a child subagent. */
+	toolTimeoutMs: 300_000,
 };

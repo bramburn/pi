@@ -13,10 +13,27 @@
  *   instructions is replaced with the previous step's output; stops at the
  *   first failure.
  *
- * Background (`background: true`) dispatch is intentionally NOT parallel-capped
- * or concurrency-limited: `maxParallelTasks`/`maxConcurrent` bound the inline
- * work of one call, while a detached task outlives the turn. The on-disk
+ * Background (`background: true`) dispatch fires detached tasks; the on-disk
  * registry is the record of what is running.
+ *
+ * Saved specs (`agent: "<name>"`) dispatch a spec an earlier
+ * `action: "save-spec"` call stored, with top-level `model` / `tools` / `cwd`
+ * overriding the saved values. `agent` and `role` are mutually
+ * exclusive, and resolution happens before mode validation so a saved spec
+ * occupies the single-dispatch slot.
+ *
+ * Control (`action`) manages runs instead of starting one. Beyond listing and
+ * killing, `steer` and `swap-model` interrupt a target and re-dispatch it
+ * against its own child session, carrying the new instruction in the
+ * replacement run's prompt. See `handleManagementAction` for the exact
+ * admission rules — a background task whose child has not provably settled is
+ * never steered, because two processes appending to one session file corrupts it.
+ *
+ * Spawn budget: a session-wide counter (`subagent.maxTotalSpawns`, default 64)
+ * caps the total number of subagent spawns across all dispatch paths —
+ * inline and background share the same budget. The check is atomic per call:
+ * if a batch would push the counter past the cap, the whole call is rejected
+ * (no partial admission).
  *
  * Services arrive through the options bag, not `ExtensionContext`: the runner,
  * the settings reader (registration guard), concurrency limits, and a getter for
@@ -40,6 +57,7 @@ import { type BackgroundRegistry, getBackgroundRegistry, startBackgroundSubagent
 import { createBunProcessRunner } from "./bun-process-runner.ts";
 import { renderSubagentCall, renderSubagentResult } from "./render.ts";
 import { isBunRuntime } from "./runtime.ts";
+import { deleteSpec, listSpecs, loadSpec, saveSpec } from "./saved-specs.ts";
 import {
 	createEmptyUsage,
 	getSubagentResultOutput,
@@ -134,6 +152,48 @@ export const subagentSchema = Type.Object({
 			default: false,
 		}),
 	),
+	action: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("status"),
+				Type.Literal("stop"),
+				Type.Literal("interrupt"),
+				Type.Literal("steer"),
+				Type.Literal("swap-model"),
+				Type.Literal("save-spec"),
+				Type.Literal("list-specs"),
+				Type.Literal("delete-spec"),
+			],
+			{
+				description:
+					"Control-plane call in place of a dispatch. 'status' lists every subagent run that has not settled; 'stop' and 'interrupt' are synonyms that ask one run to stop; 'steer' interrupts one run and re-dispatches it against its own child session with `message` appended; 'swap-model' does the same with a new `model` (plus optional `message`); 'save-spec' stores the dispatch fields of this call under `name`; 'list-specs' lists saved specs; 'delete-spec' removes the one under `name`. Mutually exclusive with role/instructions, tasks, and chain. Listing and spec calls spawn nothing, so the spawn budget is untouched; steer and swap-model re-dispatch through the normal path, which does account for the spawn budget.",
+			},
+		),
+	),
+	id: Type.Optional(
+		Type.String({
+			description:
+				"Target of action 'stop'/'interrupt'/'steer'/'swap-model': an inline run id or a background task id, exactly as reported by action 'status'. Required for those actions.",
+		}),
+	),
+	message: Type.Optional(
+		Type.String({
+			description:
+				"New instruction for action 'steer' (required), or an optional continuation note for action 'swap-model'. Ignored by the other actions.",
+		}),
+	),
+	agent: Type.Optional(
+		Type.String({
+			description:
+				"Dispatch a saved spec by `name` instead of defining one inline. The spec is loaded before mode validation, so it occupies the single-dispatch slot. Top-level `model` / `tools` / `cwd` override the saved values. Mutually exclusive with `role`.",
+		}),
+	),
+	name: Type.Optional(
+		Type.String({
+			description:
+				"Spec name for action 'save-spec' and action 'delete-spec'. A bare filesystem-safe label: no path separators and no '..'. Saving over an existing name overwrites it in place.",
+		}),
+	),
 });
 
 export type SubagentToolInput = Static<typeof subagentSchema>;
@@ -144,6 +204,14 @@ export interface SubagentToolDetails {
 	/** Present when the call dispatched background tasks instead of running inline. */
 	background?: boolean;
 	taskIds?: string[];
+	/**
+	 * Present when the call was a control-plane action instead of a dispatch.
+	 * `results` is empty for those calls, with one exception: `steer` and
+	 * `swap-model` re-dispatch a replacement run through the normal path, so
+	 * they carry that run's result. The other actions only report on other runs
+	 * and never produce one.
+	 */
+	action?: "status" | "stop" | "interrupt" | "steer" | "swap-model" | "save-spec" | "list-specs" | "delete-spec";
 }
 
 /** Minimal settings surface consulted by the registration guard. */
@@ -165,6 +233,14 @@ export interface SubagentToolOptions {
 	/** Parent session model + thinking level, read at dispatch time for inheritance. */
 	getParentContext?: () => { model?: string; thinkingLevel?: ThinkingLevel };
 	/**
+	 * Path of the parent session file. Read at dispatch time so the child
+	 * `pi` process can nest its own session under the parent's session
+	 * directory via `--session-parent`. Undefined when the parent is in-memory
+	 * (ephemeral callers) or the spec is resuming an existing child session
+	 * (which uses `--session` instead).
+	 */
+	getParentSessionFile?: () => string | undefined;
+	/**
 	 * Resolve a requested model id to its canonical `provider/model` form.
 	 * Return undefined for unknown ids — the call then fails with a tool error
 	 * naming the model instead of dispatching a doomed child. Wired from
@@ -181,6 +257,87 @@ export interface SubagentToolOptions {
 	registry?: BackgroundRegistry;
 	/** Called after experiment registry mutations so the UI can refresh its status pill. */
 	onRegistryChanged?: () => void;
+}
+
+/** Clip free text onto one listing line; task strings are unbounded, ids are not. */
+function clipForListing(text: string, max: number): string {
+	const flat = text.replace(/\s+/g, " ").trim();
+	return flat.length <= max ? flat : `${flat.slice(0, max - 1)}...`;
+}
+
+/** Column budget for the `action="status"` listing's task preview. */
+const LISTING_TASK_CLIP = 120;
+
+/** How long `steer`/`swap-model` wait for an interrupted inline run to settle. */
+const STEER_SETTLE_TIMEOUT_MS = 10_000;
+/** Poll interval while waiting for an interrupted inline run to leave the runner. */
+const STEER_SETTLE_POLL_MS = 50;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wait for an interrupted inline run to leave the runner's in-flight map.
+ *
+ * This is the barrier that makes a steer safe: the replacement dispatch resumes
+ * the same child session file, so it must not start while the old child could
+ * still be appending to it. Returns false on timeout, which the caller treats
+ * as "do not dispatch" rather than "dispatch anyway".
+ *
+ * An aborted `signal` stops the wait early and reports unsettled: the parent
+ * tearing down is no guarantee that the child already did.
+ */
+async function waitForInlineSettle(
+	runner: SubagentRunner,
+	runId: string,
+	signal: AbortSignal | undefined,
+	timeoutMs = STEER_SETTLE_TIMEOUT_MS,
+): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		if (signal?.aborted === true) return false;
+		if (!(runner.listRunning?.() ?? []).some((run) => run.runId === runId)) return true;
+		if (Date.now() >= deadline) return false;
+		await delay(STEER_SETTLE_POLL_MS);
+	}
+}
+
+/** What a `steer` / `swap-model` call resolved its target id into. */
+interface SteerTarget {
+	kind: "inline" | "background";
+	id: string;
+	role: string;
+	cwd: string;
+	sessionFile: string;
+	model?: string;
+	tools?: string[];
+	/** Caveats the caller must surface to the orchestrator next to the result. */
+	warnings: string[];
+}
+
+/** The continuation prompt a steered replacement is dispatched with. */
+function buildSteerInstructions(message: string): string {
+	return `[STEER] ${message}\n\n---\n\nContinue your work.`;
+}
+
+/** The continuation prompt a model-swapped replacement is dispatched with. */
+function buildSwapModelInstructions(message: string | undefined): string {
+	const trimmed = (message ?? "").trim();
+	return trimmed === "" ? "[MODEL SWAP] Continue from where you left off." : `[MODEL SWAP] ${trimmed}`;
+}
+
+/**
+ * Validate a saved-spec label. Names become file components in the spec store,
+ * so they are bare labels: no separators, no `..`, not empty. `site` names the
+ * field being checked, for the error message.
+ */
+function validateSpecName(rawName: string | undefined, site: string): string {
+	const name = (rawName ?? "").trim();
+	if (name === "" || name.includes("/") || name.includes("\\") || name.includes("..")) {
+		throw new Error(
+			`Invalid parameters. ${site} must be a bare spec label — no path separators, no "..", not empty.`,
+		);
+	}
+	return name;
 }
 
 /**
@@ -208,6 +365,7 @@ async function runOne(
 	spec: SubagentSpec,
 	baseCwd: string,
 	parent: ParentContext,
+	parentSessionFile: string | undefined,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onPartial?: (snapshot: SubagentResult) => void,
@@ -219,6 +377,10 @@ async function runOne(
 		cwd,
 		...(parent.model === undefined ? {} : { parentModel: parent.model }),
 		...(parent.thinkingLevel === undefined ? {} : { parentThinkingLevel: parent.thinkingLevel }),
+		// parentSessionFile is set for every inline single/chain/parallel step
+		// unless the harness has none. A spec.sessionFile (resume) wins in the
+		// runner, so passing the parent path here too is safe.
+		...(parentSessionFile === undefined ? {} : { parentSessionFile }),
 		...(step === undefined ? {} : { step }),
 	};
 
@@ -385,8 +547,464 @@ export function createSubagentToolDefinition(
 ): ToolDefinition<typeof subagentSchema, SubagentToolDetails | undefined> {
 	let defaultRunner: SubagentRunner | undefined;
 	const getRunner = (): SubagentRunner => {
-		defaultRunner ??= createBunProcessRunner();
+		// Lazy: build the default runner from the live subagent settings so a
+		// mid-session change to subagent.toolTimeoutMs takes effect without a
+		// harness rebuild. An injected runner is always honored as-is.
+		if (!defaultRunner) {
+			const liveSettings = options?.subagentSettings?.();
+			defaultRunner = createBunProcessRunner({
+				...(liveSettings?.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: liveSettings.toolTimeoutMs }),
+			});
+		}
 		return options?.runner ?? defaultRunner;
+	};
+	// Session-wide spawn counter: one definition owns one counter, so a single
+	// tool registration tracks all spawns in this process. The cap is checked
+	// atomically per call (the proposed count vs. the current counter), so a
+	// batch is either admitted in full or rejected in full — no partial
+	// admission, no two parallel calls slipping through the same hole.
+	let totalSpawnCount = 0;
+
+	// ------------------------------------------------------------------------
+	// Control plane: action = status | stop | interrupt | steer | swap-model |
+	//                     save-spec | list-specs | delete-spec
+	//
+	// Two namespaces are reported side by side rather than merged. Inline runs
+	// live only in this process's runner and carry bare-UUID runIds; background
+	// rows live in the on-disk registry and carry `bg_`-prefixed ids. Keeping
+	// them distinct means an id copied out of a listing is always aimed at the
+	// right place.
+	// ------------------------------------------------------------------------
+
+	/**
+	 * Resolve the run a `steer` / `swap-model` call is aimed at into the fields a
+	 * replacement dispatch needs.
+	 *
+	 * Admission is deliberately asymmetric between the two namespaces. An inline
+	 * run can be steered once it has opened its child session: the caller
+	 * interrupts it and waits for it to leave the runner before re-dispatching, a
+	 * race the runner can actually observe. A background row can only be steered
+	 * once its child has *provably* settled, and the registry signals that by
+	 * stamping `sessionFile` — the detached settle path writes it, `cancel()`
+	 * never does. Absent means the process may still be alive, and resuming a
+	 * session file another process holds puts two writers on one JSONL.
+	 */
+	const resolveSteerTarget = (
+		action: "steer" | "swap-model",
+		rawId: string | undefined,
+		runner: SubagentRunner,
+		registry: BackgroundRegistry,
+	): SteerTarget => {
+		const id = (rawId ?? "").trim();
+		if (id === "") {
+			throw new Error(
+				`Invalid parameters. action="${action}" requires \`id\` — pass a run id from action="status".`,
+			);
+		}
+		const runningInline = runner.listRunning?.() ?? [];
+		const inlineRun = runningInline.find((run) => run.runId === id);
+		if (inlineRun !== undefined) {
+			// No session file means the child never emitted `session_start`: it is
+			// still spawning. Killing it would destroy a run with no resumable
+			// state, so refuse instead.
+			if (inlineRun.sessionFile === undefined) {
+				throw new Error(
+					`Inline run ${id} has not opened a child session yet, so there is nothing to ${action}. It is still spawning — wait for it to appear in action="status" with a session, or interrupt it and dispatch a fresh run.`,
+				);
+			}
+			return {
+				kind: "inline",
+				id,
+				role: inlineRun.role,
+				cwd: inlineRun.cwd,
+				sessionFile: inlineRun.sessionFile,
+				...(inlineRun.model === undefined ? {} : { model: inlineRun.model }),
+				...(inlineRun.tools === undefined ? {} : { tools: inlineRun.tools }),
+				warnings: [],
+			};
+		}
+		const tasks = registry.snapshot().tasks;
+		const row = tasks.find((task) => task.id === id);
+		if (row !== undefined) {
+			if (row.sessionFile === undefined) {
+				const stillDetached = row.status === "running" || row.status === "pending";
+				throw new Error(
+					`Background task ${id} (status=${row.status}) has no recorded child session, so it cannot be redirected safely. ${
+						stillDetached
+							? "Its detached process may still be running, and resuming its session while it writes would corrupt the JSONL."
+							: "The row settled before the child reported a session file (cancelled, crashed, or killed by the watchdog)."
+					} Use action="stop" to mark it cancelled, or dispatch a fresh run.`,
+				);
+			}
+			// The tools allowlist is not persisted on registry rows, so the
+			// replacement would silently widen the child's permissions. Say so.
+			return {
+				kind: "background",
+				id,
+				role: row.role,
+				cwd: row.cwd,
+				sessionFile: row.sessionFile,
+				...(row.model === undefined ? {} : { model: row.model }),
+				warnings: [
+					`Note: background rows do not record a tools allowlist, so the replacement runs with the full tool set.`,
+				],
+			};
+		}
+		const known = [
+			runningInline.length > 0 ? `inline: ${runningInline.map((run) => run.runId).join(", ")}` : "inline: none",
+			tasks.length > 0 ? `background: ${tasks.map((task) => task.id).join(", ")}` : "background: none",
+		].join("; ");
+		throw new Error(`Unknown subagent run "${id}" (${known}). Run action="status" for a full listing.`);
+	};
+
+	/**
+	 * Interrupt a resolved target (inline only) and dispatch its replacement.
+	 *
+	 * Model validation happens in the caller, before any kill lands: a steer
+	 * with a typo'd model must leave the original run alone rather than kill it
+	 * and then fail.
+	 */
+	const redispatchSteered = async (payload: {
+		action: "steer" | "swap-model";
+		target: SteerTarget;
+		instructions: string;
+		model?: string;
+		runner: SubagentRunner;
+		baseCwd: string;
+		parent: ParentContext;
+		parentSessionFile: string | undefined;
+		signal: AbortSignal | undefined;
+		onUpdate: SubagentToolUpdateCallback | undefined;
+		background: boolean;
+	}): Promise<SubagentToolResult> => {
+		const { action, target } = payload;
+		if (target.kind === "inline") {
+			const stopped = (await payload.runner.interrupt?.(target.id)) ?? false;
+			if (!stopped) {
+				throw new Error(
+					`Inline run ${target.id} settled before the ${action} kill landed, so it was not redirected. Its result is already final.`,
+				);
+			}
+			if (!(await waitForInlineSettle(payload.runner, target.id, payload.signal))) {
+				throw new Error(
+					`Inline run ${target.id} was signalled but did not settle within ${STEER_SETTLE_TIMEOUT_MS}ms. Refusing to dispatch a replacement: two processes on one child session file would corrupt it. Check action="status" before retrying.`,
+				);
+			}
+		}
+		const spec: SubagentSpec = {
+			role: target.role,
+			instructions: payload.instructions,
+			sessionFile: target.sessionFile,
+			// Pin the replacement to the directory the target was already working
+			// in: a steer must not relocate a run mid-branch.
+			cwd: target.cwd,
+			...(payload.model === undefined ? {} : { model: payload.model }),
+			...(target.tools === undefined ? {} : { tools: target.tools }),
+		};
+		// One replacement child pays one budget slot, exactly like a fresh single
+		// dispatch. Checked here rather than in execute() because the control-plane
+		// short-circuit runs before the dispatch budget does.
+		const maxTotalSpawns = (options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS).maxTotalSpawns;
+		if (totalSpawnCount + 1 > maxTotalSpawns) {
+			throw new Error(
+				`Subagent spawn budget exceeded: ${action} on ${target.id} would add 1 spawn(s) to the current ${totalSpawnCount}, exceeding the per-session cap of ${maxTotalSpawns} (subagent.maxTotalSpawns).`,
+			);
+		}
+		totalSpawnCount += 1;
+		const verb = action === "steer" ? "Steered" : "Re-dispatched with a new model";
+		const head = `${verb} ${target.kind} run ${target.id} (role=${target.role}), resuming child session ${target.sessionFile}`;
+
+		if (payload.background) {
+			const registry = options?.registry ?? getBackgroundRegistry();
+			const dispatch = startBackgroundSubagent({
+				registry,
+				runner: payload.runner,
+				spec,
+				task: spec.instructions,
+				cwd: target.cwd,
+				parentModel: payload.parent.model,
+				parentThinkingLevel: payload.parent.thinkingLevel,
+				...(payload.parentSessionFile === undefined ? {} : { parentSessionFile: payload.parentSessionFile }),
+				onSettled: options?.onBackgroundSettled,
+			});
+			return {
+				content: [
+					{ type: "text", text: [`${head} as detached task ${dispatch.taskId}.`, ...target.warnings].join(" ") },
+				],
+				details: {
+					mode: "single",
+					results: [],
+					background: true,
+					taskIds: [dispatch.taskId],
+					action,
+				},
+			};
+		}
+
+		const result = await runOne(
+			payload.runner,
+			spec,
+			payload.baseCwd,
+			payload.parent,
+			payload.parentSessionFile,
+			undefined,
+			payload.signal,
+			(snapshot) => {
+				payload.onUpdate?.({
+					content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
+					details: { mode: "single", results: [snapshot], action },
+				});
+			},
+		);
+		if (isFailedSubagentResult(result)) {
+			throw new Error(
+				`Subagent ${result.role} ${result.stopReason || "failed"} after ${action} of ${target.id}: ${truncateModelFacingOutput(getSubagentResultOutput(result), "")}`,
+			);
+		}
+		const output = truncateModelFacingOutput(result.finalOutput) || "(no output)";
+		return {
+			content: [
+				{ type: "text", text: target.warnings.length > 0 ? `${output}\n\n${target.warnings.join("\n")}` : output },
+			],
+			details: { mode: "single", results: [result], action },
+		};
+	};
+
+	const handleManagementAction = async (
+		action: NonNullable<SubagentToolInput["action"]>,
+		rawParams: SubagentToolInput,
+		runner: SubagentRunner,
+		baseCwd: string,
+		parent: ParentContext,
+		parentSessionFile: string | undefined,
+		signal: AbortSignal | undefined,
+		onUpdate: SubagentToolUpdateCallback | undefined,
+	): Promise<SubagentToolResult> => {
+		const registry = options?.registry ?? getBackgroundRegistry();
+		// A runner without the control plane reports no inline candidates rather
+		// than failing the call: "this runner cannot see in-flight work" is not
+		// "no work exists". The background half is always available.
+		const inline = runner.listRunning?.() ?? [];
+		const background = registry.listRunning();
+
+		if (action === "status") {
+			const rows: string[] = [];
+			rows.push(`Inline runs (this process, not yet settled): ${inline.length}`);
+			for (const run of inline) {
+				rows.push(
+					[
+						`  id=${run.runId}`,
+						`role=${run.role}`,
+						run.pid === undefined ? "" : `pid=${run.pid}`,
+						`started=${run.startedAt}`,
+						`cwd=${run.cwd}`,
+						`task=${clipForListing(run.task, LISTING_TASK_CLIP)}`,
+					]
+						.filter(Boolean)
+						.join(" "),
+				);
+			}
+			rows.push(`Background tasks (registry, running or pending): ${background.length}`);
+			for (const task of background) {
+				rows.push(
+					[
+						`  id=${task.id}`,
+						`role=${task.role}`,
+						`status=${task.status}`,
+						task.pid === undefined ? "" : `pid=${task.pid}`,
+						`started=${task.startedAt}`,
+						`cwd=${task.cwd}`,
+						`task=${clipForListing(task.task, LISTING_TASK_CLIP)}`,
+					]
+						.filter(Boolean)
+						.join(" "),
+				);
+			}
+			if (inline.length === 0 && background.length === 0) rows.push("No subagent run is in flight.");
+			return {
+				content: [{ type: "text", text: rows.join("\n") }],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		// ----------------------------------------------------------------------
+		// Saved specs: operations on the name store, not on any run. They spawn
+		// nothing, so they are handled before the target-id plumbing.
+		// ----------------------------------------------------------------------
+		if (action === "list-specs") {
+			const specs = listSpecs();
+			const rows: string[] = [`Saved subagent specs: ${specs.length}`];
+			for (const entry of specs) {
+				rows.push(
+					[
+						` name=${entry.name}`,
+						`role=${entry.spec.role}`,
+						entry.spec.model === undefined ? "model=<inherit>" : `model=${entry.spec.model}`,
+						entry.spec.tools === undefined ? "tools=<full set>" : `tools=${entry.spec.tools.join(",")}`,
+						entry.spec.cwd === undefined ? "" : `cwd=${entry.spec.cwd}`,
+						`savedAt=${entry.savedAt}`,
+						`instructions=${clipForListing(entry.spec.instructions, LISTING_TASK_CLIP)}`,
+					]
+						.filter(Boolean)
+						.join(" "),
+				);
+			}
+			if (specs.length === 0) {
+				rows.push(
+					'Nothing stored yet. Save a dispatch with action="save-spec" plus `name`, `role`, `instructions`.',
+				);
+			}
+			return {
+				content: [{ type: "text", text: rows.join("\n") }],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		if (action === "save-spec") {
+			const name = validateSpecName(rawParams.name, action);
+			const role = (rawParams.role ?? "").trim();
+			const instructions = (rawParams.instructions ?? "").trim();
+			if (role === "" || instructions === "") {
+				throw new Error(
+					'Invalid parameters. action="save-spec" stores a dispatch, so it needs `name`, `role`, and `instructions` (plus optional model / tools / cwd).',
+				);
+			}
+			// Canonicalize through the same resolver a dispatch uses, so a typo
+			// fails at save time instead of on every later `agent` call.
+			const requested = (rawParams.model ?? "").trim();
+			let model: string | undefined;
+			if (requested !== "") {
+				model = options?.resolveModel ? options.resolveModel(requested) : requested;
+				if (model === undefined) {
+					throw new Error(`Unknown model "${requested}" for action="save-spec".`);
+				}
+			}
+			saveSpec(
+				name,
+				specFromInput({
+					role,
+					instructions,
+					...(model === undefined ? {} : { model }),
+					...(rawParams.tools === undefined ? {} : { tools: rawParams.tools }),
+					...(rawParams.cwd === undefined ? {} : { cwd: rawParams.cwd }),
+				}),
+			);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Saved spec "${name}" (role=${role}${model === undefined ? ", model inherits the session" : `, model=${model}`}). Dispatch it with \`agent: "${name}"\`.`,
+					},
+				],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		if (action === "delete-spec") {
+			const name = validateSpecName(rawParams.name, action);
+			deleteSpec(name);
+			return {
+				content: [{ type: "text", text: `Deleted saved spec "${name}".` }],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		// ----------------------------------------------------------------------
+		// steer / swap-model: interrupt a target and re-dispatch its replacement
+		// against the same child session file.
+		//
+		// Both arguments are validated before anything is killed, so a malformed
+		// steer leaves the original run running.
+		// ----------------------------------------------------------------------
+		if (action === "steer" || action === "swap-model") {
+			const target = resolveSteerTarget(action, rawParams.id, runner, registry);
+			const message = (rawParams.message ?? "").trim();
+			let model: string | undefined;
+			if (action === "steer") {
+				if (message === "") {
+					throw new Error(
+						'Invalid parameters. action="steer" requires `message` — the new instruction for the replacement run. Use action="swap-model" to change only the model.',
+					);
+				}
+			} else {
+				const requested = (rawParams.model ?? "").trim();
+				if (requested === "") {
+					throw new Error(
+						'Invalid parameters. action="swap-model" requires `model` — the model the replacement run should use. Use action="steer" to redirect a run without changing its model.',
+					);
+				}
+				model = options?.resolveModel ? options.resolveModel(requested) : requested;
+				if (model === undefined) {
+					throw new Error(`Unknown model "${requested}" for action="swap-model".`);
+				}
+			}
+			return await redispatchSteered({
+				action,
+				target,
+				instructions:
+					action === "steer" ? buildSteerInstructions(message) : buildSwapModelInstructions(rawParams.message),
+				...(model === undefined ? {} : { model }),
+				runner,
+				baseCwd,
+				parent,
+				parentSessionFile,
+				signal,
+				onUpdate,
+				background: rawParams.background === true,
+			});
+		}
+
+		const id = (rawParams.id ?? "").trim();
+		if (id === "") {
+			// Thrown, per the file's failure contract: a bad dispatch is a tool
+			// error, not a resolved result with an apology in it.
+			throw new Error(
+				`Invalid parameters. action="${action}" requires \`id\` — pass a run id from action="status" (inline) or a background task id.`,
+			);
+		}
+		const reason = `Cancelled by the parent session via subagent action="${action}".`;
+
+		if (inline.some((run) => run.runId === id)) {
+			// The gap between the listing and the kill is real: a run can settle in
+			// it, and `interrupt` then correctly reports "not mine". Say so rather
+			// than falling through to the background namespace, where the id
+			// definitely does not belong.
+			const stopped = (await runner.interrupt?.(id)) ?? false;
+			if (!stopped) {
+				throw new Error(`Inline run ${id} could not be interrupted — it settled before the kill landed.`);
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Interrupted inline run ${id}. The child is killed gracefully, escalating if it survives the first signal, and the pending dispatch settles as aborted.`,
+					},
+				],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		const row = background.find((task) => task.id === id);
+		if (row !== undefined) {
+			await registry.cancel(id, reason);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Background task ${id} (role=${row.role}) marked cancelled in the registry: ${reason} This does not signal the detached child — it keeps running, and when it settles it overwrites the row's status.`,
+					},
+				],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		const inlineIds = inline.map((run) => run.runId);
+		const backgroundIds = background.map((task) => task.id);
+		const known = [
+			inlineIds.length > 0 ? `inline: ${inlineIds.join(", ")}` : "inline: none",
+			backgroundIds.length > 0 ? `background: ${backgroundIds.join(", ")}` : "background: none",
+		].join("; ");
+		throw new Error(`Unknown subagent run "${id}" (${known}). Run action="status" for a full listing.`);
 	};
 
 	return {
@@ -396,6 +1014,7 @@ export function createSubagentToolDefinition(
 			"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
 			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
 			"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
+			"Control: `action` ('status' / 'stop' / 'interrupt') manages runs instead of starting one; `id` names the target run, taken from a 'status' listing.",
 		].join(" "),
 		promptSnippet: "Delegate work to a subagent with a fresh context (role + instructions per call)",
 		parameters: subagentSchema,
@@ -414,13 +1033,69 @@ export function createSubagentToolDefinition(
 			// turns a thrown error into error content + isError:true. A parallel
 			// batch with per-task failures still resolves: the call itself worked.
 			const parent = options?.getParentContext?.() ?? {};
+			// Resolved once per dispatch; threading the same value into every
+			// runOne call (single / chain steps / parallel tasks) keeps the
+			// child's `--session-parent` arg identical across steps and lets a
+			// later resume land back in the parent's session dir.
+			const parentSessionFile = options?.getParentSessionFile?.();
 			const runner = getRunner();
+
+			// ----------------------------------------------------------------
+			// Control plane: `action` short-circuits before dispatch, model
+			// resolution, mode validation, and the spawn budget. A control call
+			// spawns nothing, so it neither proposes nor commits a spawn slot.
+			// ----------------------------------------------------------------
+			if (rawParams.action !== undefined) {
+				return await handleManagementAction(
+					rawParams.action,
+					rawParams,
+					runner,
+					cwd,
+					parent,
+					parentSessionFile,
+					signal,
+					onUpdate,
+				);
+			}
+
 			// Read live per dispatch — see SubagentToolOptions.subagentSettings.
 			const subagentSettings = options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS;
 
+			// --------------------------------------------------------------
+			// Saved-spec dispatch: `agent` names a spec an earlier call stored.
+			// It is expanded into inline dispatch fields BEFORE model
+			// resolution, so the saved model is canonicalized — and a typo
+			// fails — on the same path an inline spec takes. Call-site fields
+			// win over saved ones; `agent` never coexists with an inline
+			// definition, so mode validation below still sees exactly one mode.
+			// --------------------------------------------------------------
+			let dispatchParams: SubagentToolInput = rawParams;
+			if (rawParams.agent !== undefined) {
+				const agentName = validateSpecName(rawParams.agent, "`agent`");
+				if (
+					(rawParams.role ?? "").trim() !== "" ||
+					rawParams.instructions !== undefined ||
+					(rawParams.tasks?.length ?? 0) > 0 ||
+					(rawParams.chain?.length ?? 0) > 0
+				) {
+					throw new Error(
+						"Invalid parameters. `agent` dispatches a saved spec and is mutually exclusive with `role`/`instructions`, `tasks`, and `chain`. Overrides go in top-level `model` / `tools` / `cwd`.",
+					);
+				}
+				const saved = loadSpec(agentName);
+				dispatchParams = {
+					...rawParams,
+					role: saved.role,
+					instructions: saved.instructions,
+					model: rawParams.model ?? saved.model,
+					tools: rawParams.tools ?? saved.tools,
+					cwd: rawParams.cwd ?? saved.cwd,
+				};
+			}
+
 			const resolution = options?.resolveModel
-				? resolveModelOverrides(rawParams, options.resolveModel)
-				: { input: rawParams };
+				? resolveModelOverrides(dispatchParams, options.resolveModel)
+				: { input: dispatchParams };
 			if (resolution.error !== undefined) {
 				throw new Error(resolution.error);
 			}
@@ -441,6 +1116,27 @@ export function createSubagentToolDefinition(
 				);
 			}
 
+			// ----------------------------------------------------------------
+			// Session-wide spawn budget (subagent.maxTotalSpawns)
+			//
+			// Counted once per dispatched child: chain counts every step, parallel
+			// counts every task, single counts 1, background counts every
+			// detached task. The check is atomic — a parallel batch that would
+			// push the counter past the cap is rejected as a whole, never
+			// admitted partially.
+			// ----------------------------------------------------------------
+			const proposedSpawns = chain.length > 0 ? chain.length : tasks.length > 0 ? tasks.length : singleSpec ? 1 : 0;
+			const maxTotalSpawns = subagentSettings.maxTotalSpawns;
+			if (proposedSpawns > 0 && totalSpawnCount + proposedSpawns > maxTotalSpawns) {
+				throw new Error(
+					`Subagent spawn budget exceeded: this call would add ${proposedSpawns} spawn(s) to the current ${totalSpawnCount}, exceeding the per-session cap of ${maxTotalSpawns} (subagent.maxTotalSpawns).`,
+				);
+			}
+			// Commit the count up front: from the budget's perspective the spawn
+			// slot is consumed the moment the call enters its dispatch path. Any
+			// throw from here on is a dispatch failure, and the orchestrator pays
+			// for the slot the same way it pays for a hung child.
+			totalSpawnCount += proposedSpawns;
 			// ----------------------------------------------------------------
 			// Background: fire detached tasks, return their ids immediately.
 			//
@@ -467,6 +1163,10 @@ export function createSubagentToolDefinition(
 						cwd: resolveTaskCwd(spec),
 						parentModel: parent.model,
 						parentThinkingLevel: parent.thinkingLevel,
+						// Background children nest under the parent's session dir
+						// the same way inline children do. spec.sessionFile (resume)
+						// still wins inside the runner, so passing both is safe.
+						...(parentSessionFile === undefined ? {} : { parentSessionFile }),
 						onSettled: onSettled ?? options?.onBackgroundSettled,
 						...(taskId === undefined ? {} : { taskId }),
 					});
@@ -582,7 +1282,7 @@ export function createSubagentToolDefinition(
 							truncateModelFacingOutput(previousOutput),
 						),
 					});
-					const result = await runOne(runner, spec, cwd, parent, i + 1, signal, (snapshot) => {
+					const result = await runOne(runner, spec, cwd, parent, parentSessionFile, i + 1, signal, (snapshot) => {
 						onUpdate?.({
 							content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
 							details: { mode: "chain", results: [...results, snapshot] },
@@ -653,6 +1353,7 @@ export function createSubagentToolDefinition(
 							specFromInput(task),
 							cwd,
 							parent,
+							parentSessionFile,
 							undefined,
 							signal,
 							(snapshot) => {
@@ -693,7 +1394,7 @@ export function createSubagentToolDefinition(
 			// Single
 			// ----------------------------------------------------------------
 			const spec = singleSpec as SubagentSpec;
-			const result = await runOne(runner, spec, cwd, parent, undefined, signal, (snapshot) => {
+			const result = await runOne(runner, spec, cwd, parent, parentSessionFile, undefined, signal, (snapshot) => {
 				onUpdate?.({
 					content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
 					details: { mode: "single", results: [snapshot] },

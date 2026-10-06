@@ -110,13 +110,18 @@ import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../cor
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
-import { getBackgroundRegistry } from "../../core/subagent/background.ts";
+import { type BackgroundTask, getBackgroundRegistry } from "../../core/subagent/background.ts";
 import { listExperiments } from "../../core/subagent/experiment-registry.ts";
 import {
+	clearBackgroundDashboard,
+	clearBackgroundLogOverlay,
 	clearDashboard,
 	type ExperimentsUi,
+	readBackgroundLogTail,
 	renderBackgroundPill,
 	renderExperimentsStatusPill,
+	showBackgroundDashboard,
+	showBackgroundLogOverlay,
 	showDashboard,
 	UI_KEYS,
 } from "../../core/subagent/experiments-dashboard.ts";
@@ -633,6 +638,14 @@ export class InteractiveMode {
 	// Experiments dashboard (subagent.enableExperiments, plan 4.6)
 	private experimentsDashboardOpen = false;
 	private experimentsDashboardEscapeHandler?: () => void;
+
+	// Background-task dashboard (the Fleet TUI surface for /subagents)
+	private bgDashboardOpen = false;
+	private bgDashboardEscapeHandler?: () => void;
+	private bgDashboardSelectedRow = 0;
+	private bgDashboardTasks: BackgroundTask[] = [];
+	private bgLogOverlayOpen = false;
+	private bgLogOverlayEscapeHandler?: () => void;
 
 	// Auto-retry state
 	private retryEscapeHandler?: () => void;
@@ -3050,7 +3063,19 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
-			if (isEmptySubmit(payload)) return;
+			// Enter with an empty editor while the background dashboard is open
+			// is the documented "open log" gesture for the selected row — not
+			// a regular submit. Slash-command handling stays below.
+			if (isEmptySubmit(payload)) {
+				if (this.bgDashboardOpen && this.bgDashboardTasks.length > 0) {
+					const task = this.bgDashboardTasks[this.bgDashboardSelectedRow];
+					if (task) {
+						this.openBackgroundLogOverlay(task);
+						return;
+					}
+				}
+				return;
+			}
 			const media = buildMediaContent(payload.attachments, this.session.model);
 			for (const kind of media.dropped) {
 				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
@@ -3183,6 +3208,11 @@ export class InteractiveMode {
 			}
 			if (text === "/resume") {
 				this.showSessionSelector();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/subagents") {
+				this.toggleBackgroundDashboard();
 				this.editor.setText("");
 				return;
 			}
@@ -4431,6 +4461,64 @@ export class InteractiveMode {
 		if (this.experimentsDashboardEscapeHandler) {
 			this.defaultEditor.onEscape = this.experimentsDashboardEscapeHandler;
 			this.experimentsDashboardEscapeHandler = undefined;
+		}
+	}
+
+	/**
+	 * Background-task dashboard toggle (the Fleet TUI surface for `/subagents`).
+	 * Mirrors `toggleExperimentsDashboard`: each invocation either opens or
+	 * closes the overlay, and Esc is the only documented close path. Enter
+	 * with an empty editor opens the log overlay for the currently selected
+	 * row (the most recent task by default — see renderBackgroundLines sort
+	 * order).
+	 */
+	private toggleBackgroundDashboard(): void {
+		if (this.bgDashboardOpen) {
+			// The log overlay sits on top of the dashboard and binds its own
+			// escape handler; close it first so the stack unwinds in the
+			// right order before the dashboard itself is torn down.
+			if (this.bgLogOverlayOpen) this.closeBackgroundLogOverlay();
+			this.closeBackgroundDashboard();
+			return;
+		}
+		const tasks = getBackgroundRegistry()
+			.snapshot()
+			.tasks.slice()
+			.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+		this.bgDashboardTasks = tasks;
+		this.bgDashboardSelectedRow = 0;
+		showBackgroundDashboard(this.createExperimentsUi(), theme, tasks, 0);
+		this.bgDashboardOpen = true;
+		this.bgDashboardEscapeHandler = this.defaultEditor.onEscape;
+		this.defaultEditor.onEscape = () => this.closeBackgroundDashboard();
+	}
+
+	private closeBackgroundDashboard(): void {
+		if (!this.bgDashboardOpen) return;
+		this.bgDashboardOpen = false;
+		clearBackgroundDashboard(this.createExperimentsUi());
+		if (this.bgDashboardEscapeHandler) {
+			this.defaultEditor.onEscape = this.bgDashboardEscapeHandler;
+			this.bgDashboardEscapeHandler = undefined;
+		}
+	}
+
+	/** Open the log-tail overlay for one task. The dashboard is the dispatcher. */
+	private openBackgroundLogOverlay(task: BackgroundTask): void {
+		const tail = readBackgroundLogTail(task.id);
+		showBackgroundLogOverlay(this.createExperimentsUi(), theme, task, tail);
+		this.bgLogOverlayOpen = true;
+		this.bgLogOverlayEscapeHandler = this.defaultEditor.onEscape;
+		this.defaultEditor.onEscape = () => this.closeBackgroundLogOverlay();
+	}
+
+	private closeBackgroundLogOverlay(): void {
+		if (!this.bgLogOverlayOpen) return;
+		this.bgLogOverlayOpen = false;
+		clearBackgroundLogOverlay(this.createExperimentsUi());
+		if (this.bgLogOverlayEscapeHandler) {
+			this.defaultEditor.onEscape = this.bgLogOverlayEscapeHandler;
+			this.bgLogOverlayEscapeHandler = undefined;
 		}
 	}
 

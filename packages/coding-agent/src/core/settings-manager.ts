@@ -176,6 +176,10 @@ export interface SubagentSettings {
 	enableExperiments?: boolean;
 	/** Same-error streak that triggers Research Mode. Default 3. */
 	researchModeTriggerCount?: number;
+	/** Max subagent spawns allowed per session (inline + background combined). Default 64. */
+	maxTotalSpawns?: number;
+	/** Per-tool-call wall-clock budget inside a child subagent. Default 300_000 (5 min). */
+	toolTimeoutMs?: number;
 }
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
@@ -1587,5 +1591,19 @@ export class SettingsManager {
 		return typeof value === "number" && Number.isFinite(value)
 			? Math.max(1, Math.floor(value))
 			: DEFAULT_SUBAGENT_SETTINGS.researchModeTriggerCount;
+	}
+
+	getSubagentMaxTotalSpawns(): number {
+		const value = this.settings.subagent?.maxTotalSpawns;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxTotalSpawns;
+	}
+
+	getSubagentToolTimeoutMs(): number {
+		const value = this.settings.subagent?.toolTimeoutMs;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.toolTimeoutMs;
 	}
 }
