@@ -168,6 +168,17 @@ export interface SubagentRunRequest {
 	/** Parent session file path; threaded into the runner so the child can nest under it. */
 	parentSessionFile?: string;
 	/**
+	 * Directory the child's file control plane lives in: `<taskDir>/control/` is the
+	 * inbox the parent files steer/stop/interrupt requests into (issue #1047) and
+	 * `<taskDir>/supervisor/` carries the child's `contact_supervisor` questions and
+	 * the parent's replies (issue #1048). A background run already has one — the
+	 * directory holding its `log.jsonl` — and a foreground run gets one keyed by its
+	 * run id. The runner maps it to `PI_SUBAGENT_CONTROL_DIR` /
+	 * `PI_SUBAGENT_SUPERVISOR_DIR` for the child process; when it is absent the
+	 * runner derives a default from the run id it minted.
+	 */
+	taskDir?: string;
+	/**
 	 * Delegation depth of the child to launch. The root session is 0, so its
 	 * direct children are 1. Passed to the child on argv so the child resolves
 	 * its own tool set without `subagent` once the depth budget is spent —

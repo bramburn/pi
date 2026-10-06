@@ -116,13 +116,23 @@ import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import {
 	BG_CUSTOM_MESSAGE_TYPE,
+	backgroundTaskDir,
 	claimReplayDeliveries,
 	completeReplayDelivery,
 	getBackgroundRegistry,
 } from "./subagent/background.ts";
+import {
+	CONTACT_SUPERVISOR_TOOL_NAME,
+	createContactSupervisorToolDefinition,
+} from "./subagent/contact-supervisor-tool.ts";
 import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
 import { ResearchModeTracker } from "./subagent/research-mode.ts";
 import type { CompletionEscalation, CompletionRecord } from "./subagent/result-record.ts";
+import {
+	formatOpenSupervisorRequests,
+	listOpenSupervisorRequests,
+	supervisorDirFor,
+} from "./subagent/supervisor-channel.ts";
 import { isFailedSubagentResult } from "./subagent/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
@@ -3152,7 +3162,17 @@ export class AgentSession {
 							// #1051: a role that keeps failing the same way is reported as an
 							// escalation once, on the settle that crosses the threshold.
 							const warning = escalationNote(result.escalation, result.role);
-							const body = `${text}${warning}`;
+							// Issue #1048: a child that asked its supervisor and never got an answer
+							// blocked on that question and finished anyway. Raising the open questions
+							// with the completion notification is the only path that reaches the parent —
+							// otherwise the question dies in a directory nobody reads.
+							const supervisorDir = supervisorDirFor(backgroundTaskDir(taskId));
+							const openQuestions = listOpenSupervisorRequests(supervisorDir);
+							const questions =
+								openQuestions.length === 0
+									? ""
+									: `\n\nThe child asked and was never answered:\n${formatOpenSupervisorRequests(supervisorDir)}`;
+							const body = `${text}${warning}${questions}`;
 							void this.sendCustomMessage(
 								{
 									customType: BG_CUSTOM_MESSAGE_TYPE,
@@ -3182,6 +3202,15 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+
+		// Supervisor channel (issue #1048): `contact_supervisor` exists only in a
+		// process the runner gave a supervisor dir to write into, so an ordinary
+		// session never sees a tool that could only ever time out. Registered here
+		// rather than in tools/index.ts to keep the built-in ToolName union closed.
+		const contactSupervisorDefinition = createContactSupervisorToolDefinition();
+		if (contactSupervisorDefinition) {
+			this._baseToolDefinitions.set(CONTACT_SUPERVISOR_TOOL_NAME, contactSupervisorDefinition as ToolDefinition);
+		}
 
 		// Research Mode watcher (plan 4.3): built before the tool registry so
 		// `_refreshToolRegistry` can decorate tool results with it. Gated on the
@@ -3216,7 +3245,13 @@ export class AgentSession {
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
 			: ["read", "bash", "edit", "write"];
-		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		let baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		// A child that was given a supervisor dir gets the tool active straight away:
+		// it has no one else to ask, and requiring an explicit enable per session
+		// would defeat the point of the channel.
+		if (contactSupervisorDefinition && !baseActiveToolNames.includes(CONTACT_SUPERVISOR_TOOL_NAME)) {
+			baseActiveToolNames = [...baseActiveToolNames, CONTACT_SUPERVISOR_TOOL_NAME];
+		}
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,

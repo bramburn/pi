@@ -134,6 +134,33 @@ A `stop` only touches tasks this session owns. A task row belonging to another s
 
 If a session dies outright while a background child is running, the next session's startup reconciliation terminates that child rather than leaving it running with a row that claims it crashed; the reap outcome is recorded in the row's `errorMessage`.
 
+## Control plane
+
+Every background run owns a control inbox at `<taskDir>/control/`, where `<taskDir>` is the run's directory in the background registry (`subagent-control-plane` output and `action="status"` both name it). The inbox is a directory, not a socket: a request is one JSON file written atomically, so the parent session can steer a child that has already detached — or whose parent session has exited — without either side holding a live handle.
+
+```
+<taskDir>/control/
+  requests/   pending requests, one file per request
+  applied/    requests a child has consumed, until they age out
+  receipts.jsonl  append-only state ledger
+```
+
+Three actions are filed there: `steer` (carries the message, capped at 50 KB — the remainder is dropped and the request is marked `truncated`), `interrupt`, and `stop`. A child consumes its inbox with a watcher that polls `requests/`, moves what it took into `applied/`, and applies the request as a session operation; the watcher only runs while the child's environment names its inbox via `PI_SUBAGENT_CONTROL_DIR`, which the spawner sets from the run's `taskDir`.
+
+The ledger records every state transition for a request id: `requested` when the parent files it, `scheduled` when a settle path has picked it up, `queued` once the child watcher has taken it, then `delivered` or `failed`. `action="status"` prints the inbox beside each run — one line per request with its action, latest state, and any note — so an unanswered steer is visible instead of silently lost. Filing a request against a run whose child is still attached takes the live path and settles the same receipt; both paths leave the same ledger, so the state does not depend on which one ran.
+
+## Supervisor channel
+
+The mirror of the control inbox lets a child ask its supervisor a question. When pi spawns a child it may set `PI_SUBAGENT_SUPERVISOR_DIR` to `<taskDir>/supervisor/`; the child then gets the `contact_supervisor` tool, which posts a question to `requests/` and blocks until an answer appears in `replies/` or the timeout expires (default 60 s, capped at 5 min). Without the env var the tool is not offered, so a plain child never sees it.
+
+Questions are `open` until answered, and an unanswered question does not die with the run: when a background run settles, pi raises its open questions into the parent session as part of the `subagent-background-result` message, and json mode lists them in the exit-time handoff entry (see below). Answer one with `action="supervisor"` plus the run `id`, the question's `replyTo` id, and the `message` — the reply is written to the run's `replies/`, where a still-running child picks it up on its next poll. For a run that already settled the reply still closes the question, so `status` and any later session see it answered rather than open.
+
+Both directories are pruned defensively: consumed requests and aged unanswered ones are dropped after 24 h, the ledger is capped at its last 500 lines, and the tool's own listings show at most three open questions per run so status output stays bounded.
+
+### Handoff to a json-mode consumer
+
+Background children outlive the session that started them, so a `--mode json` run that exits with runs still in flight emits one final `subagent-control-plane` custom message before the result event. It names each live run, its control inbox and supervisor outbox, the requests still sitting in each inbox with their receipt state, and the question ids still waiting for an answer. Consumers should treat it as advisory — the entry is emitted best-effort, and a session that exits with nothing running emits nothing.
+
 ## Output and limits
 
 Each subagent's output is capped at 50 KB in the model-facing text (`Output truncated: ...` when hit), including the output embedded in thrown single/chain failure errors; the `details` object keeps the full output for renderers. Child transcripts stream as JSONL to a per-run artifact, and aborting the call kills the child's whole process tree.

@@ -24,9 +24,11 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
 import { trackDetachedChildPid, untrackDetachedChildPid } from "../../utils/shell.ts";
+import { CONTROL_DIR_ENV, controlDirFor } from "./control.ts";
 import { type BunApi, type BunSpawnOptions, getBun } from "./runtime.ts";
 import { createKillController, HARD_KILL_EXIT_CODE } from "./shell.ts";
 import { createStreamPump } from "./stream.ts";
+import { SUPERVISOR_DIR_ENV, supervisorDirFor } from "./supervisor-channel.ts";
 import {
 	createEmptyUsage,
 	type InFlightRun,
@@ -329,7 +331,7 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 					command: invocation.command,
 					args: invocation.args,
 					cwd: request.cwd,
-					env: { ...process.env },
+					env: childEnv(request.taskDir),
 					role: request.spec.role,
 					timeoutMs: request.timeoutMs,
 					killGraceMs: options?.killGraceMs,
@@ -362,6 +364,20 @@ export function createBunProcessRunner(options?: BunProcessRunnerOptions): Subag
 			return true;
 		},
 	};
+}
+
+/**
+ * Environment for one child process. `taskDir` names the run's file control plane (#1047/#1048):
+ * `<taskDir>/control` is the inbox the child's own watcher polls, and `<taskDir>/supervisor` is
+ * the outbox its `contact_supervisor` tool writes questions into. A run without a `taskDir` (a
+ * foreground child) gets neither variable, so no watcher starts and no outbox is polled.
+ */
+function childEnv(taskDir: string | undefined): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = { ...process.env };
+	if (!taskDir) return env;
+	env[CONTROL_DIR_ENV] = controlDirFor(taskDir);
+	env[SUPERVISOR_DIR_ENV] = supervisorDirFor(taskDir);
+	return env;
 }
 
 interface ChildRequest {

@@ -10,8 +10,112 @@ import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.ts";
 import { flushRawStdout, waitForRawStdoutBackpressure, writeRawStdout } from "../core/output-guard.ts";
 import { reportProviderError } from "../core/sentry.ts";
+import { type BackgroundTask, backgroundTaskDir, getBackgroundRegistry } from "../core/subagent/background.ts";
+import { controlDirFor, summarizeControlRequests } from "../core/subagent/control.ts";
+import { type ControlWatcher, createControlWatcherFromEnv } from "../core/subagent/control-watcher.ts";
+import { listOpenSupervisorRequests, supervisorDirFor } from "../core/subagent/supervisor-channel.ts";
 import { killTrackedDetachedChildren } from "../utils/shell.ts";
 import { toJsonEvent } from "./json-event.ts";
+
+// ============================================================================
+// Control-plane handoff for `pi --mode json` (#1047, #1048)
+// ============================================================================
+
+/**
+ * Print mode returns as soon as the prompted turn settles, while detached
+ * background subagent runs keep going in their own processes. Once this
+ * process exits, the only bridge to a live run is its on-disk control inbox
+ * and supervisor outbox, so the JSON stream ends with one entry naming both
+ * directories and whatever is already filed or asked. A headless consumer
+ * can steer, stop, or answer from the stream alone instead of guessing the
+ * agent directory layout, and a later session replays the entry from history
+ * like any other custom message.
+ */
+const CONTROL_PLANE_CUSTOM_TYPE = "subagent-control-plane";
+
+/** One control request, as reported to a JSON consumer. */
+export interface ControlPlaneRequestSummary {
+	id: string;
+	action: string;
+	/** Newest receipt state, or "requested" when no receipt line exists yet. */
+	state: string;
+	/** True while the request file still sits in requests/, unclaimed. */
+	pending: boolean;
+	note?: string;
+}
+
+/** One live background run plus the two directories that address it. */
+export interface ControlPlaneRunSummary {
+	taskId: string;
+	status: string;
+	taskDir: string;
+	controlDir: string;
+	supervisorDir: string;
+	requests: ControlPlaneRequestSummary[];
+	/** Ids of contact_supervisor questions that have no answer yet. */
+	openQuestions: string[];
+}
+
+/** Read each live run's inbox and outbox. Pure filesystem work — no spawning. */
+export function summarizeControlPlaneRuns(tasks: BackgroundTask[]): ControlPlaneRunSummary[] {
+	return tasks.map((task) => {
+		const taskDir = backgroundTaskDir(task.id);
+		const controlDir = controlDirFor(taskDir);
+		const supervisorDir = supervisorDirFor(taskDir);
+		const requests = summarizeControlRequests(controlDir).map(
+			(row): ControlPlaneRequestSummary => ({
+				id: row.request.id,
+				action: row.request.action,
+				state: row.state ?? "requested",
+				pending: row.pending,
+				...(row.note === undefined ? {} : { note: row.note }),
+			}),
+		);
+		const openQuestions = listOpenSupervisorRequests(supervisorDir).map((request) => request.id);
+		return {
+			taskId: task.id,
+			status: task.status,
+			taskDir,
+			controlDir,
+			supervisorDir,
+			requests,
+			openQuestions,
+		};
+	});
+}
+
+/** Human-readable half of the handoff entry: one block per run. */
+export function formatControlPlaneHandoff(runs: ControlPlaneRunSummary[]): string {
+	const blocks = runs.map((run) => {
+		const lines = [
+			`run ${run.taskId} is still ${run.status}`,
+			`control inbox: ${run.controlDir}`,
+			`supervisor outbox: ${run.supervisorDir}`,
+		];
+		if (run.requests.length === 0) {
+			lines.push("control requests: none filed");
+		} else {
+			for (const request of run.requests) {
+				lines.push(
+					[
+						`control id=${request.id}`,
+						`action=${request.action}`,
+						`state=${request.state}`,
+						request.pending ? "awaiting child" : "claimed by child",
+						request.note === undefined ? "" : `note=${request.note}`,
+					]
+						.filter(Boolean)
+						.join(" "),
+				);
+			}
+		}
+		if (run.openQuestions.length > 0) {
+			lines.push(`unanswered questions: ${run.openQuestions.join(", ")}`);
+		}
+		return lines.join("\n");
+	});
+	return ["Background subagent runs are still in flight:", ...blocks].join("\n\n");
+}
 
 /**
  * Options for print mode.
@@ -38,6 +142,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
 	let disposed = false;
+	let controlWatcher: ControlWatcher | undefined;
 	const signalCleanupHandlers: Array<() => void> = [];
 
 	const disposeRuntime = async (): Promise<void> => {
@@ -45,6 +150,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		disposed = true;
 		unsubscribe?.();
 		unsubscribeBackpressure?.();
+		controlWatcher?.stop();
 		await runtimeHost.dispose();
 	};
 
@@ -119,6 +225,20 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 				: undefined;
 	};
 
+	const reportControlPlaneHandoff = async (): Promise<void> => {
+		const runs = summarizeControlPlaneRuns(getBackgroundRegistry().listRunning());
+		if (runs.length === 0) return;
+		await session.sendCustomMessage(
+			{
+				customType: CONTROL_PLANE_CUSTOM_TYPE,
+				content: [{ type: "text", text: formatControlPlaneHandoff(runs) }],
+				display: false,
+				details: { runs },
+			},
+			{ triggerTurn: false },
+		);
+	};
+
 	try {
 		if (mode === "json") {
 			const header = session.sessionManager.getHeader();
@@ -129,12 +249,30 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 
 		await rebindSession();
 
+		// Child side of the control plane (#1047): a backgrounded run is a `pi --mode json`
+		// process, so this is where its own session exists. When the spawner names a control
+		// inbox with PI_SUBAGENT_CONTROL_DIR, poll it and apply the filed action to this
+		// process's session: steer text joins the live turn, interrupt and stop abort it.
+		// No env var means no watcher and no polling, which is the ordinary case.
+		controlWatcher = createControlWatcherFromEnv({
+			steer: (text) => session.steer(text),
+			interrupt: () => session.abort(),
+			stop: () => session.abort(),
+		});
+		controlWatcher?.start();
+
 		if (initialMessage) {
 			await session.prompt(initialMessage, { images: initialImages });
 		}
 
 		for (const message of messages) {
 			await session.prompt(message);
+		}
+
+		if (mode === "json") {
+			// Best-effort handoff for detached runs that outlive this process: it only
+			// informs the consumer, so a read failure must never change the exit code.
+			await reportControlPlaneHandoff().catch(() => undefined);
 		}
 
 		if (mode === "text") {

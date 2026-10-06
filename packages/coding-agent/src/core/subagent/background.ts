@@ -474,6 +474,17 @@ function taskLogPath(taskId: string): string {
 	return join(backgroundDir(), taskId, BG_LOG_FILE);
 }
 
+/**
+ * The directory a background run owns. `log.jsonl` lives here, and so do the
+ * control inbox (`control/`, issue #1047) and the supervisor channel
+ * (`supervisor/`, issue #1048). Exported so the parent's management actions and
+ * the settlement path resolve exactly the directories the runner hands to the
+ * child through the environment.
+ */
+export function backgroundTaskDir(taskId: string): string {
+	return join(backgroundDir(), taskId);
+}
+
 function ensureBgDir(): void {
 	const dir = backgroundDir();
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

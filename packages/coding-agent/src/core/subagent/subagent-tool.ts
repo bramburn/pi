@@ -62,6 +62,7 @@ import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
+import { getAgentDir } from "../../config.ts";
 import { endSubagentTask, newTaskSpanId, startSubagentTask } from "../analytics-store.ts";
 import { DEFAULT_SUBAGENT_SETTINGS, type ResolvedSubagentSettings } from "../defaults.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
@@ -69,6 +70,7 @@ import { wrapToolDefinition } from "../tools/tool-definition-wrapper.ts";
 import { agentsDirs, listAgents, resolveAgent } from "./agents.ts";
 import {
 	type BackgroundRegistry,
+	backgroundTaskDir,
 	getBackgroundRegistry,
 	queuedTaskIds,
 	queuePositionOf,
@@ -76,6 +78,15 @@ import {
 	requestBackgroundDispatch,
 } from "./background.ts";
 import { createBunProcessRunner } from "./bun-process-runner.ts";
+import {
+	type ControlAction,
+	type ControlReceiptState,
+	claimControlRequest,
+	controlDirFor,
+	formatControlRequestsForStatus,
+	recordControlState,
+	writeControlRequest,
+} from "./control.ts";
 import { renderSubagentCall, renderSubagentResult } from "./render.ts";
 import { isBunRuntime } from "./runtime.ts";
 import { deleteSpec, listSpecs, loadSpec, saveSpec } from "./saved-specs.ts";
@@ -87,6 +98,12 @@ import {
 } from "./schema-validate.ts";
 import { acquireSessionLease, SessionLeaseConflictError, type SessionLeaseHandle } from "./session-lease.ts";
 import { runShellLine } from "./shell.ts";
+import {
+	formatOpenSupervisorRequests,
+	listOpenSupervisorRequests,
+	supervisorDirFor,
+	writeSupervisorReply,
+} from "./supervisor-channel.ts";
 import {
 	createEmptyUsage,
 	DEFAULT_GATE_TIMEOUT_MS,
@@ -278,23 +295,30 @@ export const subagentSchema = Type.Object({
 				Type.Literal("save-spec"),
 				Type.Literal("list-specs"),
 				Type.Literal("delete-spec"),
+				Type.Literal("supervisor"),
 			],
 			{
 				description:
-					"Control-plane call in place of a dispatch. 'status' lists every subagent run that has not settled; 'stop' and 'interrupt' are synonyms that ask one run to stop; 'steer' interrupts one run and re-dispatches it against its own child session with `message` appended; 'swap-model' does the same with a new `model` (plus optional `message`); 'resume' re-dispatches a run that has already settled against the child session it left behind, with an optional `message` as the continuation instruction; 'save-spec' stores the dispatch fields of this call under `name`; 'list-specs' lists saved specs; 'delete-spec' removes the one under `name`. Mutually exclusive with role/instructions, tasks, and chain. Listing and spec calls spawn nothing, so the spawn budget is untouched; steer, swap-model and resume re-dispatch through the normal path, which does account for the spawn budget.",
+					"Control-plane call in place of a dispatch. 'status' lists every subagent run that has not settled, along with anything filed in its control inbox and the questions it has asked that nobody answered; 'stop' and 'interrupt' are synonyms that ask one run to stop; 'steer' interrupts one run and re-dispatches it against its own child session with `message` appended; 'swap-model' does the same with a new `model` (plus optional `message`); 'resume' re-dispatches a run that has already settled against the child session it left behind, with an optional `message` as the continuation instruction; 'supervisor' reads the open questions a run has asked its parent, and answers one when `replyTo` and `message` are given; 'save-spec' stores the dispatch fields of this call under `name`; 'list-specs' lists saved specs; 'delete-spec' removes the one under `name`. Mutually exclusive with role/instructions, tasks, and chain. Listing and spec calls spawn nothing, so the spawn budget is untouched; steer, swap-model and resume re-dispatch through the normal path, which does account for the spawn budget.",
 			},
 		),
 	),
 	id: Type.Optional(
 		Type.String({
 			description:
-				"Target of action 'stop'/'interrupt'/'steer'/'swap-model'/'resume': an inline run id or a background task id, exactly as reported by action 'status'. Required for those actions.",
+				"Target of action 'stop'/'interrupt'/'steer'/'swap-model'/'resume'/'supervisor': an inline run id or a background task id, exactly as reported by action 'status'. Required for those actions.",
 		}),
 	),
 	message: Type.Optional(
 		Type.String({
 			description:
-				"New instruction for action 'steer' (required), an optional continuation note for action 'swap-model' or action 'resume'. Ignored by the other actions.",
+				"New instruction for action 'steer' (required), an optional continuation note for action 'swap-model' or action 'resume', the answer for action 'supervisor' when `replyTo` names the question. Ignored by the other actions.",
+		}),
+	),
+	replyTo: Type.Optional(
+		Type.String({
+			description:
+				"Open supervisor question to answer for action 'supervisor', as reported by that action without `replyTo` or by the run's `status` rows. Requires `message`; the child asking the question picks the reply up from its run directory.",
 		}),
 	),
 	agent: Type.Optional(
@@ -335,7 +359,8 @@ export interface SubagentToolDetails {
 		| "resume"
 		| "save-spec"
 		| "list-specs"
-		| "delete-spec";
+		| "delete-spec"
+		| "supervisor";
 }
 
 /** Minimal settings surface consulted by the registration guard. */
@@ -397,6 +422,157 @@ export interface SubagentToolOptions {
 function clipForListing(text: string, max: number): string {
 	const flat = text.replace(/\s+/g, " ").trim();
 	return flat.length <= max ? flat : `${flat.slice(0, max - 1)}...`;
+}
+
+// ---------------------------------------------------------------------------
+// The file control plane (issues #1047, #1048).
+//
+// Every subagent run gets a directory of its own — a background run already has
+// one (the directory holding its `log.jsonl`), a foreground run gets one keyed
+// by its run id — and inside it two channels:
+//
+//   <taskDir>/control/    the child's inbox. The parent FILES a steer /
+//                         stop / interrupt request here and records a receipt
+//                         for it, and the child's watcher claims and applies
+//                         requests in id order. Filing is never the only path:
+//                         both the parent-side kill and the in-band injection
+//                         still fire in the same call, so a run dies even
+//                         without the file. The file is what makes the intent
+//                         inspectable, ordered, and replayable.
+//   <taskDir>/supervisor/ the child's outbox for `contact_supervisor` (see
+//                         `supervisor-channel.ts`), which the parent answers
+//                         with `action: "supervisor"`.
+//
+// The paths are derived rather than threaded through the request: the same
+// id-addressing the management plane already uses is enough to find a run's
+// directory. `SubagentRunRequest.taskDir` is what the runner hands the child,
+// and the runner derives the same default from the run id it mints when a
+// caller leaves it unset.
+// ---------------------------------------------------------------------------
+
+/**
+ * Directory name holding foreground runs' control planes under the agent dir.
+ * A background run does not use it — its `subagent-bg/<taskId>/` directory
+ * already exists and holds `log.jsonl` beside these subdirectories.
+ */
+export const INLINE_TASK_DIR_NAME = "subagent-control";
+
+export function inlineTaskDir(runId: string): string {
+	return join(getAgentDir(), INLINE_TASK_DIR_NAME, runId);
+}
+
+/** A run's control-plane directory: the registry's row wins, else the run id. */
+export function runTaskDir(id: string, registry?: BackgroundRegistry): string {
+	const known = registry?.snapshot().tasks.some((task) => task.id === id);
+	return known ? backgroundTaskDir(id) : inlineTaskDir(id);
+}
+
+export function runControlDir(id: string, registry?: BackgroundRegistry): string {
+	return controlDirFor(runTaskDir(id, registry));
+}
+
+export function runSupervisorDir(id: string, registry?: BackgroundRegistry): string {
+	return supervisorDirFor(runTaskDir(id, registry));
+}
+
+/**
+ * Status lines reporting the file control plane for one run: what is pending in
+ * its inbox, which receipts the parent recorded, and what the child asked that
+ * nobody answered. Silent when nothing has ever been filed or asked, so
+ * `status` reads exactly as it did before for runs that never used the control
+ * plane.
+ */
+export function controlPlaneStatusLines(id: string, registry?: BackgroundRegistry, indent = " "): string[] {
+	const lines: string[] = [];
+	const inbox = formatControlRequestsForStatus(runControlDir(id, registry));
+	if (inbox !== "") {
+		lines.push(...inbox.split("\n").map((line) => `${indent}${line}`));
+	}
+	const questions = formatOpenSupervisorRequests(runSupervisorDir(id, registry));
+	if (questions !== "") {
+		lines.push(
+			`${indent}Supervisor questions (unanswered):`,
+			...questions.split("\n").map((line) => `${indent}  ${line}`),
+		);
+	}
+	return lines;
+}
+
+/**
+ * A filed control request, so the caller can record the later states of the same
+ * id against the same inbox without re-deriving a path. Receipts are append-only:
+ * `status` collapses them into the newest state per id, which is what makes the
+ * requested → scheduled → queued → delivered|failed transition readable.
+ */
+interface FiledControlAction {
+	dir: string;
+	id: string;
+	action: ControlAction;
+	/** Append one receipt for this request. Never throws. */
+	record: (state: ControlReceiptState, note?: string, claimed?: boolean) => void;
+	/** Append `scheduled` and then the terminal state in one call. */
+	settle: (state: "delivered" | "failed", note?: string, claimed?: boolean) => void;
+}
+
+/**
+ * File a control request into the run's inbox. `writeControlRequest` records the
+ * `requested` receipt itself, so the request is on disk and in the ledger before
+ * the caller does anything else — a crash mid-action leaves the intent readable.
+ *
+ * Returns `undefined` when the inbox could not be written. It never throws: the
+ * control plane is additive, and a run whose directory is unavailable must still
+ * be killed or steered by the existing paths.
+ */
+function fileControlRequest(
+	registry: BackgroundRegistry | undefined,
+	id: string,
+	action: ControlAction,
+	text: string,
+): FiledControlAction | undefined {
+	const dir = runControlDir(id, registry);
+	try {
+		const filed = writeControlRequest(dir, { action, text, targetId: id });
+		const requestId = filed.request.id;
+		const record = (state: ControlReceiptState, note?: string, claimed?: boolean): void => {
+			try {
+				if (claimed) claimControlRequest(dir, requestId);
+				recordControlState(dir, {
+					id: requestId,
+					action,
+					state,
+					by: "parent",
+					...(note === undefined || note === "" ? {} : { note }),
+				});
+			} catch {
+				// The action's own outcome text is the authority; a control-plane write
+				// failure is reported by `status`, not by failing a successful kill.
+			}
+		};
+		return {
+			dir,
+			id: requestId,
+			action,
+			record,
+			settle: (state, note, claimed) => {
+				record("scheduled");
+				record(state, note, claimed);
+			},
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A background row whose child was launched detached has no session file, so
+ * the kill-and-redispatch path has nothing to redirect onto. Its control inbox
+ * is the only channel that exists — the watcher applies it in the live child.
+ */
+function isDetachedSteerTarget(registry: BackgroundRegistry, rawId: string): boolean {
+	const id = rawId.trim();
+	if (id === "") return false;
+	const row = registry.listRunning().find((task) => task.id === id);
+	return row !== undefined && row.sessionFile === undefined;
 }
 
 /** Column budget for the `action="status"` listing's task preview. */
@@ -1153,13 +1329,19 @@ export function createSubagentToolDefinition(
 
 	// ------------------------------------------------------------------------
 	// Control plane: action = status | stop | interrupt | steer | swap-model |
-	//                     save-spec | list-specs | delete-spec
+	// supervisor | resume | save-spec | list-specs | delete-spec
 	//
 	// Two namespaces are reported side by side rather than merged. Inline runs
 	// live only in this process's runner and carry bare-UUID runIds; background
 	// rows live in the on-disk registry and carry `bg_`-prefixed ids. Keeping
 	// them distinct means an id copied out of a listing is always aimed at the
 	// right place.
+	//
+	// stop / interrupt / steer additionally file a request in the target run's
+	// `control/` inbox and record receipts for it, so the intent survives the
+	// parent's own process: the child's watcher can still apply it, and
+	// `status` shows its state. `supervisor` is the parent's half of the child's
+	// `contact_supervisor` outbox.
 	// ------------------------------------------------------------------------
 
 	/**
@@ -1445,6 +1627,7 @@ export function createSubagentToolDefinition(
 						.filter(Boolean)
 						.join(" "),
 				);
+				for (const line of controlPlaneStatusLines(run.runId, registry)) rows.push(line);
 			}
 			rows.push(`Background tasks (registry, running or pending): ${background.length}`);
 			const waiting = queuedTaskIds(registry);
@@ -1466,6 +1649,7 @@ export function createSubagentToolDefinition(
 						.filter(Boolean)
 						.join(" "),
 				);
+				for (const line of controlPlaneStatusLines(task.id, registry)) rows.push(line);
 			}
 			if (inline.length === 0 && background.length === 0) rows.push("No subagent run is in flight.");
 			if (waiting.length > 0) {
@@ -1562,6 +1746,67 @@ export function createSubagentToolDefinition(
 		}
 
 		// ----------------------------------------------------------------------
+		// supervisor: the parent's half of the child's `contact_supervisor`
+		// channel. Called with just `id` it reports the run's open questions; with
+		// `replyTo` and `message` it files the answer, which the asking child is
+		// polling for (see `supervisor-channel.ts`).
+		//
+		// This action never touches the running child — a question is advisory, and
+		// answering it must not interrupt work that is already in flight.
+		// ----------------------------------------------------------------------
+		if (action === "supervisor") {
+			const supervisorId = (rawParams.id ?? "").trim();
+			if (supervisorId === "") {
+				throw new Error(
+					'Invalid parameters. action="supervisor" requires `id` — the run whose supervisor questions you want to read or answer.',
+				);
+			}
+			const supervisorDir = runSupervisorDir(supervisorId, registry);
+			const replyTo = (rawParams.replyTo ?? "").trim();
+			if (replyTo === "") {
+				if ((rawParams.message ?? "").trim() !== "") {
+					throw new Error(
+						'Invalid parameters. action="supervisor" takes `replyTo` — the open request id from action="supervisor" — to answer a question. Without it the action only lists them.',
+					);
+				}
+				const questions = formatOpenSupervisorRequests(supervisorDir);
+				return {
+					content: [
+						{
+							type: "text",
+							text: questions === "" ? `No open supervisor questions for ${supervisorId}.` : questions,
+						},
+					],
+					details: { mode: "single", results: [], action },
+				};
+			}
+			const reply = (rawParams.message ?? "").trim();
+			if (reply === "") {
+				throw new Error(
+					`Invalid parameters. action="supervisor" with \`replyTo=${replyTo}\` requires \`message\` — the answer the child is waiting for.`,
+				);
+			}
+			const open = listOpenSupervisorRequests(supervisorDir);
+			if (!open.some((request) => request.id === replyTo)) {
+				throw new Error(
+					`Supervisor request ${replyTo} is not open for run ${supervisorId}. Run action="supervisor" with this id to list the questions it is still waiting on.`,
+				);
+			}
+			if (writeSupervisorReply(supervisorDir, replyTo, reply) === undefined) {
+				throw new Error(`Could not file the supervisor reply for request ${replyTo} (run ${supervisorId}).`);
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Answered supervisor question ${replyTo} for run ${supervisorId}. A child still polling contact_supervisor picks it up within its poll interval; one that gave up has already finished, and its open question rode along with the completion notification.`,
+					},
+				],
+				details: { mode: "single", results: [], action },
+			};
+		}
+
+		// ----------------------------------------------------------------------
 		// resume: re-dispatch a settled background run against the child session
 		// file it left behind. The optional `message` becomes the continuation
 		// instruction; the replacement inherits the row's role and cwd.
@@ -1604,8 +1849,31 @@ export function createSubagentToolDefinition(
 		// steer leaves the original run running.
 		// ----------------------------------------------------------------------
 		if (action === "steer" || action === "swap-model") {
-			const target = resolveSteerTarget(action, rawParams.id, runner, registry);
 			const message = (rawParams.message ?? "").trim();
+			// A detached background task has no session file to redirect onto, and the
+			// kill-and-redispatch path would refuse it for that reason alone. Its
+			// control inbox is the only channel that reaches a live child, so the steer
+			// is filed there and applied by the child's watcher (issue #1047). The
+			// message check comes first: an empty steer is a bad call whatever the
+			// target's shape, and it must not be accepted into the inbox.
+			if (action === "steer" && message !== "" && isDetachedSteerTarget(registry, rawParams.id ?? "")) {
+				const detachedId = (rawParams.id ?? "").trim();
+				const control = fileControlRequest(registry, detachedId, action, message);
+				if (control === undefined) {
+					throw new Error(`Could not file a steer request in the control inbox of background task ${detachedId}.`);
+				}
+				control.record("queued");
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Steer request ${control.id} queued in the control inbox of background task ${detachedId}. It was not killed or restarted: the child's control watcher claims it on its next pass and injects it into the live session, and action="status" reports the request with its receipt state until it is applied.`,
+						},
+					],
+					details: { mode: "single", results: [], action },
+				};
+			}
+			const target = resolveSteerTarget(action, rawParams.id, runner, registry);
 			let model: string | undefined;
 			if (action === "steer") {
 				if (message === "") {
@@ -1625,20 +1893,34 @@ export function createSubagentToolDefinition(
 					throw new Error(`Unknown model "${requested}" for action="swap-model".`);
 				}
 			}
-			return await redispatchSteered({
-				action,
-				target,
-				instructions:
-					action === "steer" ? buildSteerInstructions(message) : buildSwapModelInstructions(rawParams.message),
-				...(model === undefined ? {} : { model }),
-				runner,
-				baseCwd,
-				parent,
-				parentSessionFile,
-				signal,
-				onUpdate,
-				background: rawParams.background === true,
-			});
+			// File the steer before anything is killed: the intent is on disk and in
+			// the receipt ledger first, so a crash between the kill and the dispatch
+			// leaves a pending request the child's watcher can still apply instead of
+			// a silently lost instruction.
+			const control = action === "steer" ? fileControlRequest(registry, target.id, action, message) : undefined;
+			try {
+				const redirected = await redispatchSteered({
+					action,
+					target,
+					instructions:
+						action === "steer" ? buildSteerInstructions(message) : buildSwapModelInstructions(rawParams.message),
+					...(model === undefined ? {} : { model }),
+					runner,
+					baseCwd,
+					parent,
+					parentSessionFile,
+					signal,
+					onUpdate,
+					background: rawParams.background === true,
+				});
+				// Applied in band by the replacement run: claim the request so the
+				// child's watcher cannot apply the same steer a second time.
+				control?.settle("delivered", "injected by the redirected run", true);
+				return redirected;
+			} catch (error) {
+				control?.settle("failed", error instanceof Error ? error.message : String(error));
+				throw error;
+			}
 		}
 
 		const id = (rawParams.id ?? "").trim();
@@ -1656,10 +1938,18 @@ export function createSubagentToolDefinition(
 			// it, and `interrupt` then correctly reports "not mine". Say so rather
 			// than falling through to the background namespace, where the id
 			// definitely does not belong.
+			//
+			// The file plane is written alongside the kill, never instead of it: the
+			// request is filed before the signal so a crash leaves the intent readable,
+			// and claimed afterwards so the child's watcher does not apply a stop the
+			// parent already served.
+			const control = fileControlRequest(registry, id, action, reason);
 			const stopped = (await runner.interrupt?.(id)) ?? false;
 			if (!stopped) {
+				control?.settle("failed", "settled before the kill landed");
 				throw new Error(`Inline run ${id} could not be interrupted — it settled before the kill landed.`);
 			}
+			control?.settle("delivered", `killed inline run ${id}`, true);
 			return {
 				content: [
 					{
@@ -1673,13 +1963,27 @@ export function createSubagentToolDefinition(
 
 		const row = background.find((task) => task.id === id);
 		if (row !== undefined) {
+			// File the stop before cancelling: if the kill cannot reach the child, the
+			// request stays pending in its inbox as the backstop path, and the receipt
+			// ledger says so instead of pretending the run died.
+			const control = fileControlRequest(registry, id, action, reason);
 			const outcome = await registry.cancel(id, reason);
 			// The tool text is derived from what cancel() actually achieved. A
 			// cancellation that could not reach its child must say so: the old
 			// text claimed "cancelled" while the child kept burning tokens, which
 			// is worse than reporting no cancellation at all.
 			if (outcome.kind === "not-cancelled") {
+				control?.settle("failed", outcome.reason);
 				throw new Error(`Could not stop background task ${id} (role=${row.role}): ${outcome.reason}`);
+			}
+			if (outcome.kind === "not-found" || outcome.kind === "already-terminal") {
+				control?.settle(
+					"failed",
+					outcome.kind === "not-found" ? "no registry row to cancel" : "already terminal",
+					true,
+				);
+			} else {
+				control?.settle("delivered", `cancelled background task ${id}`, true);
 			}
 			// Release the id whether or not it held a slot: a running task frees its
 			// slot and the queue advances, and a queued task is dropped from the queue
@@ -1725,7 +2029,7 @@ export function createSubagentToolDefinition(
 			"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
 			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
 			"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
-			"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs, 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing.",
+			"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs (with any filed control requests, their receipt state, and the questions a run has asked you), 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'supervisor' (`id` + `replyTo` + `message`) answers a question a run asked with `contact_supervisor`, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing. Controlling a run whose child has detached is not lost: steer/stop/interrupt file the request in the run's control inbox and the child picks it up itself.",
 		].join(" "),
 		promptSnippet: "Delegate work to a subagent with a fresh context (role + instructions per call)",
 		parameters: subagentSchema,
