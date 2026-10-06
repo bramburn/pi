@@ -80,6 +80,8 @@ You are a read-only scout. Report file paths and line numbers only, never a
 proposed fix, and say plainly where something does not exist.
 ```
 
+`tools` is a built-in allowlist (built-in names only: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`; the comma list and YAML sequence forms are equivalent). The same field on an inline call works the same way, so the read-only delegate pattern is one frontmatter line — `tools: read, grep, ls` plus a system prompt that states the constraint, with the body beneath those fields carrying the prompt. Omitting `tools` gives the child every built-in, which is what an open-ended worker like `reviewer` wants.
+
 The frontmatter is parsed by the same primitive that reads skills and prompt templates, so the subset is YAML, not JSON: `name` (required), `description`, `tools` (a comma list or a YAML sequence), `model`, `thinking`, `systemPrompt`. Unknown keys are ignored rather than rejected — a definition written for a newer pi keeps working on an older one. Without `systemPrompt`, the markdown body below the frontmatter is the standing prompt. `description` is never sent to the child; it is the human- and orchestrator-facing label.
 
 Two scopes are read, in this order, first match wins:
@@ -150,6 +152,20 @@ Two cases have no process to signal: a task still in the queue never spawned any
 A `stop` only touches tasks this session owns. A task row belonging to another session is left alone, because a pid outlives its row and the number may have been recycled by an unrelated process.
 
 If a session dies outright while a background child is running, the next session's startup reconciliation terminates that child rather than leaving it running with a row that claims it crashed; the reap outcome is recorded in the row's `errorMessage`.
+
+### Resuming a settled run
+
+`action="resume"` reopens the child session file a run left behind and re-dispatches against it, with an optional `message` carried as the continuation instruction. It is the opposite of `stop`: nothing to kill, no live process to interrupt, and the child keeps the context it already accumulated instead of starting from scratch.
+
+```json
+{
+ "action": "resume",
+ "id": "<taskId from action=\"status\">",
+ "message": "Now harden the validation paths you flagged."
+}
+```
+
+The prior run must have settled cleanly — a still-running run is steered, not resumed, because two processes appending to one session file corrupts it. The resume itself holds a cross-process lease on the child session file for its whole duration (`session-lease.ts`), so a second pi process cannot revive the same session in the window between the old child settling and the replacement opening it; the lease is what makes "the previous run settled, but no one else picked it up yet" a safe moment to act. `outputSchema` and `gate` are refused on `resume` (a resumed task inherits the prior task text but never the contract — a contract a handler depends on was never established for the new task), and the new task counts against the spawn budget because the replacement path still spawns a child.
 
 ## Control plane
 
