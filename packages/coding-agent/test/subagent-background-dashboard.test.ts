@@ -261,6 +261,32 @@ describe("background log-tail reader", () => {
 	it("backgroundLogPath resolves under the agent dir, scoped to the task id", () => {
 		expect(backgroundLogPath("bg_demo")).toBe(join(agentDir as string, "subagent-bg", "bg_demo", "log.jsonl"));
 	});
+
+	// Trusted-root check (issue #1044): a hostile registry row id must not steer
+	// the reader outside the agent dir, even when the escape target exists.
+	it("rejects a traversal task id even when the escape target file exists", () => {
+		const outside = mkdtempSync(join(tmpdir(), "pi-bg-escape-"));
+		try {
+			writeFileSync(
+				join(outside, "log.jsonl"),
+				`${JSON.stringify({ at: "2026-10-05T12:00:00Z", type: "stdout", text: "stolen" })}\n`,
+				"utf8",
+			);
+			const escapeId = join("..", "..", "..", outside, "log.jsonl");
+			const tail = readBackgroundLogTail(escapeId);
+			expect(tail.records).toHaveLength(0);
+			expect(tail.truncated).toBe(false);
+			expect(tail.totalLines).toBe(0);
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("still reads a legitimate task log under the agent dir", () => {
+		writeLog("bg_legit", [JSON.stringify({ at: "2026-10-05T12:00:00Z", type: "stdout", text: "ok" })]);
+		const tail = readBackgroundLogTail("bg_legit");
+		expect(tail.records).toHaveLength(1);
+	});
 });
 
 describe("background log overlay rendering", () => {

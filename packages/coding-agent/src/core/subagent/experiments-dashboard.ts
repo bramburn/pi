@@ -14,7 +14,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { getAgentDir } from "../../config.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { type BackgroundTask, BG_DIR_NAME, BG_LOG_FILE } from "./background.ts";
@@ -253,6 +253,18 @@ export function backgroundLogPath(taskId: string): string {
 }
 
 /**
+ * Trusted-root check for every file the dashboard opens. A task id is joined
+ * into a filesystem path, so a hostile registry row (`../../somewhere`) must
+ * not be able to steer the reader outside our own agent dir. Canonicalizes
+ * both sides so a `..` escape, an absolute id, or a drive-letter spelling all
+ * resolve to a containment answer rather than a string-prefix guess.
+ */
+export function pathIsUnder(path: string, root: string): boolean {
+	const rel = relative(resolve(root), resolve(path));
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
  * Read the tail of a background task's `log.jsonl`. The read is bounded so
  * pathological log growth (a runaway runner appending for hours) cannot OOM
  * the dashboard. The default bounds are 2 MB and 240 records; tests pass
@@ -275,6 +287,9 @@ export function readBackgroundLogTail(
 	maxRecords = BG_LOG_MAX_RECORDS,
 ): BackgroundLogTail {
 	const path = backgroundLogPath(taskId);
+	if (!pathIsUnder(path, join(getAgentDir(), BG_DIR_NAME))) {
+		return { records: [], truncated: false, totalLines: 0 };
+	}
 	if (!existsSync(path)) return { records: [], truncated: false, totalLines: 0 };
 	const stat = statSync(path);
 	const truncated = stat.size > maxBytes;
