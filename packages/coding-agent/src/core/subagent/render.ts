@@ -318,6 +318,20 @@ export function renderSubagentCall(args: SubagentToolInput, theme: Theme): Compo
 		if (args.chain.length > 3) text += `\n ${theme.fg("muted", `... +${args.chain.length - 3} more`)}`;
 		return new Text(text, 0, 0);
 	}
+	if (args.dag && args.dag.length > 0) {
+		let text =
+			theme.fg("toolTitle", theme.bold("subagent ")) +
+			theme.fg("accent", `dag (${args.dag.length} nodes)`) +
+			(args.background ? theme.fg("muted", " [background]") : "");
+		for (const node of args.dag.slice(0, 3)) {
+			const cleanTask = node.instructions.replace(/\{\{\s*nodes\.[^{}]+?\.result\s*\}\}/g, "").trim();
+			const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
+			const deps = node.dependsOn && node.dependsOn.length > 0 ? ` <-${node.dependsOn.join(",")}` : "";
+			text += `\n ${theme.fg("accent", node.role)}${theme.fg("muted", deps)} ${theme.fg("dim", preview)}`;
+		}
+		if (args.dag.length > 3) text += `\n ${theme.fg("muted", `... +${args.dag.length - 3} more`)}`;
+		return new Text(text, 0, 0);
+	}
 	if (args.tasks && args.tasks.length > 0) {
 		let text =
 			theme.fg("toolTitle", theme.bold("subagent ")) +
@@ -504,7 +518,11 @@ export function renderSubagentResult(
 		return new Text(text, 0, 0);
 	}
 
-	// parallel
+	// parallel, and dag: a graph settles into the same per-child list, so only the
+	// label and the counting noun differ. A cascade-skipped node is a failed child
+	// result here, which is what the ◐ icon already reports.
+	const isDag = details.mode === "dag";
+	const listItemNoun = isDag ? "nodes" : "tasks";
 	const runningCount = details.results.filter((r) => r.exitCode === -1).length;
 	const successCount = details.results.filter((r) => r.exitCode !== -1 && !isFailedSubagentResult(r)).length;
 	const failCount = details.results.filter((r) => r.exitCode !== -1 && isFailedSubagentResult(r)).length;
@@ -516,12 +534,16 @@ export function renderSubagentResult(
 			: theme.fg("success", "✓");
 	const status = isRunning
 		? `${successCount + failCount}/${details.results.length} done, ${runningCount} running`
-		: `${successCount}/${details.results.length} tasks`;
+		: `${successCount}/${details.results.length} ${listItemNoun}`;
 
 	if (expanded && !isRunning) {
 		const container = new Container();
 		container.addChild(
-			new Text(`${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`, 0, 0),
+			new Text(
+				`${icon} ${theme.fg("toolTitle", theme.bold(isDag ? "dag " : "parallel "))}${theme.fg("accent", status)}`,
+				0,
+				0,
+			),
 		);
 		for (const r of details.results) {
 			const rIcon = isFailedSubagentResult(r) ? theme.fg("error", "✗") : theme.fg("success", "✓");
@@ -561,7 +583,7 @@ export function renderSubagentResult(
 		return container;
 	}
 
-	let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`;
+	let text = `${icon} ${theme.fg("toolTitle", theme.bold(isDag ? "dag " : "parallel "))}${theme.fg("accent", status)}`;
 	for (const r of details.results) {
 		const rIcon =
 			r.exitCode === -1

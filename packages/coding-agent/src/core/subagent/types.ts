@@ -18,7 +18,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { CompletionEscalation } from "./result-record.ts";
 
 /** How the orchestrator dispatched a set of subagent tasks. */
-export type SubagentMode = "single" | "parallel" | "chain" | "resume";
+export type SubagentMode = "single" | "parallel" | "chain" | "resume" | "dag";
 
 /** Tool results carry their own details payload; the parent only needs these. */
 export interface SubagentUsage {
@@ -110,6 +110,17 @@ export interface SubagentSpec {
 	 * child failed or its output did not validate.
 	 */
 	gate?: SubagentGate;
+}
+
+/**
+ * One authored node of a `dag` call (#1052): a `SubagentSpec` plus the upstream
+ * nodes it waits for. Nodes are keyed by their `role`, so `dependsOn` lists
+ * roles — `"reviewer"` names the node whose role is `"reviewer"`, and the value
+ * may also be the authoring index as a string (`"0"`) for a nameless node.
+ */
+export interface DagNodeSpec extends SubagentSpec {
+	/** Roles of the nodes this node waits for. Omitted or empty: a root node. */
+	dependsOn?: string[];
 }
 
 /** A `gate` declaration on a spec. */

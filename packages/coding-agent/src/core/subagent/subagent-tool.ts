@@ -87,6 +87,7 @@ import {
 	recordControlState,
 	writeControlRequest,
 } from "./control.ts";
+import { createDagRun, type DagStateFile, makeDagRunId, runDagInline, startDagDetached } from "./orchestration.ts";
 import { renderSubagentCall, renderSubagentResult } from "./render.ts";
 import { isBunRuntime } from "./runtime.ts";
 import { deleteSpec, listSpecs, loadSpec, saveSpec } from "./saved-specs.ts";
@@ -127,7 +128,7 @@ import {
  */
 export const PER_TASK_OUTPUT_CAP = 50 * 1024;
 
-const subagentSpecSchema = Type.Object({
+const subagentSpecProperties = {
 	role: Type.String({
 		description:
 			"Short specialist label for the subagent, e.g. 'code-reviewer' or 'scout'. Shown in the UI and analytics.",
@@ -181,6 +182,22 @@ const subagentSpecSchema = Type.Object({
 				description: "Host-run verify command for this task's work.",
 			},
 		),
+	),
+};
+
+const subagentSpecSchema = Type.Object(subagentSpecProperties);
+
+/**
+ * A `dag` entry (#1052): every `tasks` / `chain` field plus `dependsOn`, the
+ * nodes this one waits for. Nodes are keyed by role, so `dependsOn` lists roles.
+ */
+const subagentDagNodeSchema = Type.Object({
+	...subagentSpecProperties,
+	dependsOn: Type.Optional(
+		Type.Array(Type.String(), {
+			description:
+				"Roles of the nodes this node waits for, e.g. ['scout']. Omit or pass [] to start immediately. A node runs as soon as every node listed here has settled successfully; a node whose upstream failed or was skipped is itself skipped without spawning a child. Reference an upstream node's output from `instructions` as {{nodes.<role>.result}} — referencing a node not listed here is rejected before anything spawns.",
+		}),
 	),
 });
 
@@ -276,6 +293,12 @@ export const subagentSchema = Type.Object({
 				"Sequential subagent steps. '{previous}' in a step's instructions is replaced with the previous step's output. Stops at the first failure. Mutually exclusive with role/instructions and tasks.",
 		}),
 	),
+	dag: Type.Optional(
+		Type.Array(subagentDagNodeSchema, {
+			description:
+				"Declarative dependency graph of subagent nodes. Each node declares `dependsOn` roles; a node starts as soon as its upstream nodes have settled successfully, so independent branches run in parallel and only the edges serialize (up to subagent.maxConcurrent children at once, and every node counts against subagent.maxTotalSpawns). A failed node skips its transitive dependents while unrelated branches continue; there is no partial re-run. Every node's role must be non-empty and unique. Mutually exclusive with role/instructions, tasks, and chain.",
+		}),
+	),
 	background: Type.Optional(
 		Type.Boolean({
 			description:
@@ -343,6 +366,12 @@ export interface SubagentToolDetails {
 	/** Present when the call dispatched background tasks instead of running inline. */
 	background?: boolean;
 	taskIds?: string[];
+	/**
+	 * The orchestration state file for a `dag` call (#1052): node statuses, levels,
+	 * and timestamps, mirrored from `dag-state.json`. `results` carries the same
+	 * rows in authoring order; this is the structured view the renderer reads.
+	 */
+	dag?: DagStateFile;
 	/**
 	 * Present when the call was a control-plane action instead of a dispatch.
 	 * `results` is empty for those calls, with one exception: `steer`,
@@ -1193,11 +1222,13 @@ export function resolveModelOverrides(
 		...input,
 		...(input.tasks ? { tasks: input.tasks.map((t) => ({ ...t })) } : {}),
 		...(input.chain ? { chain: input.chain.map((s) => ({ ...s })) } : {}),
+		...(input.dag ? { dag: input.dag.map((n) => ({ ...n })) } : {}),
 	};
 	const specs: Array<{ role?: string; model?: string }> = [];
 	if (next.role !== undefined) specs.push(next);
 	for (const task of next.tasks ?? []) specs.push(task);
 	for (const step of next.chain ?? []) specs.push(step);
+	for (const node of next.dag ?? []) specs.push(node);
 
 	for (const spec of specs) {
 		if (spec.model === undefined) continue;
@@ -2096,10 +2127,11 @@ export function createSubagentToolDefinition(
 				if (
 					(rawParams.role ?? "").trim() !== "" ||
 					(rawParams.tasks?.length ?? 0) > 0 ||
-					(rawParams.chain?.length ?? 0) > 0
+					(rawParams.chain?.length ?? 0) > 0 ||
+					(rawParams.dag?.length ?? 0) > 0
 				) {
 					throw new Error(
-						"Invalid parameters. `agent` names a whole agent, so it is mutually exclusive with `role`, `tasks`, and `chain`. Pass this call's task in `instructions`; overrides go in top-level `model` / `tools` / `thinking` / `cwd`.",
+						"Invalid parameters. `agent` names a whole agent, so it is mutually exclusive with `role`, `tasks`, `chain`, and `dag`. Pass this call's task in `instructions`; overrides go in top-level `model` / `tools` / `thinking` / `cwd`.",
 					);
 				}
 				const definition = resolveAgent(agentName, cwd);
@@ -2162,12 +2194,18 @@ export function createSubagentToolDefinition(
 					: undefined;
 			const tasks = params.tasks ?? [];
 			const chain = params.chain ?? [];
-			const modeCount = Number(singleSpec !== undefined) + Number(tasks.length > 0) + Number(chain.length > 0);
-			const mode: SubagentMode = chain.length > 0 ? "chain" : tasks.length > 0 ? "parallel" : "single";
+			const dag = params.dag ?? [];
+			const modeCount =
+				Number(singleSpec !== undefined) +
+				Number(tasks.length > 0) +
+				Number(chain.length > 0) +
+				Number(dag.length > 0);
+			const mode: SubagentMode =
+				dag.length > 0 ? "dag" : chain.length > 0 ? "chain" : tasks.length > 0 ? "parallel" : "single";
 
 			if (modeCount !== 1) {
 				throw new Error(
-					"Invalid parameters. Provide exactly one mode: `{ role, instructions }` (single), `{ tasks }` (parallel), or `{ chain }` (sequential).",
+					"Invalid parameters. Provide exactly one mode: `{ role, instructions }` (single), `{ tasks }` (parallel), `{ chain }` (sequential), or `{ dag }` (dependency graph).",
 				);
 			}
 
@@ -2182,7 +2220,7 @@ export function createSubagentToolDefinition(
 			// validate the output or run the verify command. Dropping the contract
 			// silently would be worse than refusing the call.
 			// ----------------------------------------------------------------
-			const dispatchedSpecs = [singleSpec, ...tasks, ...chain].filter(
+			const dispatchedSpecs = [singleSpec, ...tasks, ...chain, ...dag].filter(
 				(spec): spec is SubagentSpec => spec !== undefined,
 			);
 			for (const spec of dispatchedSpecs) {
@@ -2207,7 +2245,16 @@ export function createSubagentToolDefinition(
 			// push the counter past the cap is rejected as a whole, never
 			// admitted partially.
 			// ----------------------------------------------------------------
-			const proposedSpawns = chain.length > 0 ? chain.length : tasks.length > 0 ? tasks.length : singleSpec ? 1 : 0;
+			const proposedSpawns =
+				dag.length > 0
+					? dag.length
+					: chain.length > 0
+						? chain.length
+						: tasks.length > 0
+							? tasks.length
+							: singleSpec
+								? 1
+								: 0;
 			// ----------------------------------------------------------------
 			// Delegation depth (subagent.maxDepth)
 			//
@@ -2282,7 +2329,7 @@ export function createSubagentToolDefinition(
 				} else if (tasks.length > 0) {
 					const ids = tasks.map(() => registry.makeTaskId());
 					for (let i = 0; i < tasks.length; i++) taskIds.push(fire(specFromInput(tasks[i]), ids[i]));
-				} else {
+				} else if (chain.length > 0) {
 					const ids = chain.map(() => registry.makeTaskId());
 					taskIds.push(...ids);
 					// Best-effort bookkeeping for a chain step the up-front summary
@@ -2355,12 +2402,113 @@ export function createSubagentToolDefinition(
 						taskIds[index] = finalId;
 					};
 					fireStep(0, "");
+				} else {
+					// DAG detached: every node gets a pre-generated id so the up-front
+					// summary can name the whole graph. Nodes launch as their dependencies
+					// settle; a node that never dispatches (cascade skip, abort, a bad
+					// reference) closes its own registry row via onSyntheticSettle.
+					const runId = makeDagRunId();
+					const ids = dag.map(() => registry.makeTaskId());
+					const run = createDagRun({
+						nodes: dag,
+						runId,
+						signal,
+						taskIds: ids,
+						onSyntheticSettle: (index, result) => {
+							const failed = isFailedSubagentResult(result);
+							try {
+								registry.update(ids[index] as string, {
+									status: result.aborted ? "cancelled" : failed ? "failed" : "completed",
+									errorMessage: failed ? result.errorMessage || result.stderr : undefined,
+									finishedAt: new Date().toISOString(),
+								});
+							} catch {
+								/* best-effort */
+							}
+							registry.appendLog(ids[index] as string, { type: "DAG_NODE_SKIPPED", error: result.errorMessage });
+							try {
+								options?.onBackgroundSettled?.(ids[index] as string, result);
+							} catch {
+								/* best-effort */
+							}
+						},
+					});
+					taskIds.push(...ids);
+					startDagDetached(run, (launch) => {
+						const spec = specFromInput({ ...launch.node, instructions: launch.instructions });
+						// fire() returns the post-add id (the registry reassigns on a collision).
+						const finalId = fire(spec, ids[launch.index] as string, (taskId, result) => {
+							// background.ts swallows a throwing onSettled as a warn and would
+							// never reach the graph, so guard the notify and always close the
+							// node — exactly once — or its dependents hang forever.
+							try {
+								options?.onBackgroundSettled?.(taskId, result);
+							} catch {
+								/* best-effort */
+							}
+							launch.done(result);
+						});
+						ids[launch.index] = finalId;
+						taskIds[launch.index] = finalId;
+						run.getState().nodes[launch.index].taskId = finalId;
+					});
 				}
 
 				const summary = describeDetachedDispatch(registry, taskIds, mode);
 				return {
 					content: [{ type: "text", text: summary }],
 					details: { mode, results: [], background: true, taskIds },
+				};
+			}
+
+			// ----------------------------------------------------------------
+			// DAG: dependency graph, ready-queue scheduling, {{nodes.X.result}} refs.
+			// A run is a resolved result even when nodes fail or are skipped: the
+			// per-node statuses carry the outcome, exactly like parallel mode.
+			// ----------------------------------------------------------------
+			if (dag.length > 0) {
+				const runId = makeDagRunId();
+				const run = createDagRun({
+					nodes: dag,
+					runId,
+					maxConcurrent: subagentSettings.maxConcurrent,
+					signal,
+					onUpdate: (progress) => {
+						onUpdate?.({
+							content: [
+								{
+									type: "text",
+									text: `DAG: ${progress.settled}/${progress.total} settled (${progress.running} running, ${progress.failed} failed, ${progress.skipped} skipped)`,
+								},
+							],
+							details: { mode: "dag", results: run.getResults(), dag: run.getState() },
+						});
+					},
+				});
+				const progress = await runDagInline(run, async (launch) => {
+					const spec = specFromInput({ ...launch.node, instructions: launch.instructions });
+					return runOne(
+						runner,
+						spec,
+						cwd,
+						parent,
+						parentSessionFile,
+						launch.level + 1,
+						launch.signal,
+						launch.onPartial,
+					);
+				});
+				const results = run.getResults();
+				const nodeStates = run.getState().nodes;
+				const summaries = results.map((result, index) => {
+					const status = nodeStates[index]?.status ?? "completed";
+					const output = truncateModelFacingOutput(getSubagentResultOutput(result));
+					return `### [${result.role}] ${status}\n\n${output}`;
+				});
+				const finalText = `DAG: ${progress.completed}/${progress.total} completed, ${progress.failed} failed, ${progress.skipped} skipped\n\n${summaries.join("\n\n---\n\n")}`;
+				return {
+					content: [{ type: "text", text: truncateModelFacingOutput(finalText) || "(no output)" }],
+					details: { mode: "dag", results, dag: run.getState() },
 				};
 			}
 

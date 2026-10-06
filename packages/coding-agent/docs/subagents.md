@@ -47,6 +47,22 @@ Independent tasks dispatched together. At most `subagent.maxParallelTasks` tasks
 
 Sequential steps. Every occurrence of `{previous}` in a step's `instructions` is replaced with the previous step's output. A failing step throws instead of resolving: the chain stops and the call surfaces as a tool error `Chain stopped at step <n> (<role>): <output>`. Otherwise the call returns the last step's output.
 
+### DAG
+
+```json
+{
+ "dag": [
+ { "role": "map", "instructions": "Produce a file-and-line map of the parser." },
+ { "role": "style", "instructions": "Review src/core/parser for style drift.", "dependsOn": [] },
+ { "role": "reviewer", "instructions": "Merge both findings: {{nodes.map.result}} / {{nodes.style.result}}", "dependsOn": ["map", "style"] }
+ ]
+}
+```
+
+Declarative dependencies. Each node names the roles it `dependsOn`; a node starts the moment its upstream nodes have settled successfully, so independent branches overlap and only the edges serialize — at most `subagent.maxConcurrent` children at once (default 4), and every node counts against `subagent.maxTotalSpawns` (default 64; a 12-node graph asks for 12 slots up front). `{{nodes.<role>.result}}` in a node's `instructions` is replaced with that dependency's output, capped at 8000 bytes per reference (`[... N bytes omitted from this node reference; the node's full output stays in the run's tool details]` says how much was dropped). Like parallel and unlike chain, the call resolves even when nodes fail: the text opens with `DAG: <completed>/<total> completed, <failed> failed, <skipped> skipped` and then carries one `### [<role>] <status>` section per node with that node's capped output. A failed node skips its transitive dependents (`Skipped: dependency "<role>" failed`) while unrelated branches keep running; there is no partial re-run — fix the cause and dispatch the graph again. Bad graphs are refused before anything spawns: an empty `dag`, a node with an empty `role` or empty `instructions`, a duplicate or whitespace-padded role, an empty `dependsOn` entry, a dependency on an unknown role, a self-dependency, a cycle, a `{{nodes.X.result}}` reference to a node X does not depend on, or more than 32 nodes.
+
+The run mirrors its progress to `<agent dir>/subagent-dag/<runId>/dag-state.json` — statuses, timestamps, output character counts, errors, and the child task ids, never the output text — so a detached graph can be inspected after a restart. Background `dag` dispatch works like the other modes: every node gets its own task id in the immediate response, and each settle posts a `subagent-background-result`.
+
 ## Agent definition files
 
 A definition file makes a delegation reusable: it records the *configuration* of a subagent — model, tool allowlist, thinking level, standing system prompt — once, and a tool call then names it. The task itself still comes from the call, because the orchestrator knows what needs doing and the file does not.
@@ -84,7 +100,7 @@ Dispatch by name in the single-task slot:
 }
 ```
 
-`agent` replaces `role` — the definition's `name` becomes the role — and is therefore mutually exclusive with `role`, `tasks`, and `chain`; the call is refused up front rather than reinterpreted. `model` / `tools` / `thinking` / `cwd` passed on the call override the file for this dispatch only, and the standing prompt is prepended to `instructions` with a blank line between, so the per-call task always wins the last word. An unknown name does not fall back to anything: the error lists the definitions that were found (with their scope), the saved specs, and the directories that were searched, so the model can retry with a real name instead of guessing.
+`agent` replaces `role` — the definition's `name` becomes the role — and is therefore mutually exclusive with `role`, `tasks`, `chain`, and `dag`; the call is refused up front rather than reinterpreted. `model` / `tools` / `thinking` / `cwd` passed on the call override the file for this dispatch only, and the standing prompt is prepended to `instructions` with a blank line between, so the per-call task always wins the last word. An unknown name does not fall back to anything: the error lists the definitions that were found (with their scope), the saved specs, and the directories that were searched, so the model can retry with a real name instead of guessing.
 
 A file whose *known* keys are unusable — no `name`, a `thinking` value outside the CLI's enum, unreadable, invalid frontmatter — is skipped with a line on stderr prefixed `subagent-agents:`. Silently dropping it would read as "that agent does not exist", and silently dropping the bad key would run the child in a configuration nobody wrote.
 
@@ -94,15 +110,16 @@ Definitions are one of two name stores. A spec saved by `action: "save-spec"` (`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `agent` | string | Name of an [agent definition file](#agent-definition-files) or a saved spec to dispatch instead of defining one inline. Mutually exclusive with `role` / `tasks` / `chain` |
+| `agent` | string | Name of an [agent definition file](#agent-definition-files) or a saved spec to dispatch instead of defining one inline. Mutually exclusive with `role` / `tasks` / `chain` / `dag` |
 | `role` | string | Short specialist label (e.g. `scout`), used in the UI and analytics |
-| `instructions` | string | The complete task. The child never sees this conversation, so include all context it needs. `{previous}` is substituted in chain mode |
+| `instructions` | string | The complete task. The child never sees this conversation, so include all context it needs. `{previous}` is substituted in chain mode, `{{nodes.<role>.result}}` in dag mode |
 | `model` | string | Optional model id (`provider/model`). Omitted inherits the session's model and thinking level. An unknown id fails the call with an error naming the model and role |
 | `thinking` | string | Optional thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`), applied whether or not the model is inherited. Omitted takes an `agent` definition's level, else this session's level (which then rides only when the model is inherited too) |
 | `tools` | string[] | Optional allowlist of built-in tool names (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`). Omitted gives the full coding set |
 | `cwd` | string | Optional working directory. Omitted inherits the session's working directory |
 | `outputSchema` | object | Optional JSON Schema. The child is told to answer with JSON matching it, and the reply is parsed and validated by the parent (see [Output contracts](#output-contracts)) |
 | `gate` | object | Optional verify command (`{ command, cwd?, timeoutMs? }`) the host runs after the child finishes; a failing gate fails the result |
+| `dependsOn` | string[] | dag nodes only: the roles whose success gates this node. Omitted or `[]` starts the node immediately |
 
 ## Output contracts
 
@@ -182,6 +199,7 @@ With `enableAnalytics` on, each dispatched run records one `pi_subagent_tasks` r
 - **Self-contained instructions win.** The child starts with a fresh context and never sees this conversation. Name exact files, symbols, and expected outputs in `instructions` instead of "the function we discussed".
 - **Parallelize independent lookups.** Use `tasks: [...]` when tasks do not read each other's output (e.g. scouting several modules at once). Keep each task narrow enough that its 50 KB output cap is not hit.
 - **Chain when each step builds on the last.** Use `chain: [...]` for generate-then-review or map-then-summarize flows; `{previous}` carries the earlier output forward.
+- **DAG when the shape of the work is a graph, not a line.** Use `dag: [...]` when some branches are independent and others must wait — fan out research, join it at a synthesis node — `dependsOn` states the ordering instead of encoding it in array position.
 - **Match the role to the job.** The `role` is a short specialist label — it labels the run in the UI, logs, and analytics and does not alter the child's prompt. Put any stance or persona differences (e.g. `code-reviewer` vs `scout`) in `instructions`.
 - **Verify instead of trusting.** Give a write/fix step a `gate` pointing at the project's own check command, and give a research or triage step an `outputSchema` so its findings arrive as structured data the next chain step can read. Both are enforced by the host after the child settles, so a confident "tests pass" is either confirmed or reported as a failure.
 
