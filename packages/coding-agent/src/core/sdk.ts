@@ -29,6 +29,7 @@ import {
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
+	EXPERIMENT_TOOL_NAMES,
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
@@ -58,7 +59,7 @@ export interface CreateAgentSessionOptions {
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
 	 *
 	 * - "all": start with no tools enabled
-	 * - "builtin": disable the default built-in tools (read, bash, edit, write)
+	 * - "builtin": disable the default built-in tools (read, bash, edit, write, subagent)
 	 *   but keep extension/custom tools enabled
 	 */
 	noTools?: "all" | "builtin";
@@ -67,7 +68,7 @@ export interface CreateAgentSessionOptions {
 	 *
 	 * When omitted, pi uses the `defaultTools` setting for the initial built-in
 	 * selection when configured. Otherwise it enables the default built-in tools
-	 * (read, bash, edit, write). Extension/custom tools remain enabled unless
+	 * (read, bash, edit, write, subagent). Extension/custom tools remain enabled unless
 	 * `noTools` changes that default. When provided, only the listed tool names are
 	 * enabled.
 	 */
@@ -87,6 +88,16 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * Delegation depth of this session: 0 for a top-level session, 1+ for a
+	 * subagent child. Set on the child's argv as `--subagent-depth`.
+	 *
+	 * At `subagent.maxDepth` the `subagent` tool is removed from the active
+	 * tool set, so a child that has spent its depth budget cannot spawn a
+	 * grandchild. This is the load-bearing half of the depth guard — the
+	 * parent's own refusal is only advisory.
+	 */
+	subagentDepth?: number;
 }
 
 /** Result from createAgentSession */
@@ -263,14 +274,30 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write"];
+	// Plan §7 box 1: the built-in subagent tool is part of pi's out-of-the-box
+	// tool set. Registration stays gated (subagent.enabled + the Bun runtime)
+	// and setActiveToolsByName silently drops names that did not register. The
+	// experiment_* tools join the default set when the experiments flag is on —
+	// the flag is their opt-in.
+	const defaultActiveToolNames: ToolName[] = settingsManager.getSubagentEnableExperiments()
+		? ["read", "bash", "edit", "write", "subagent", ...EXPERIMENT_TOOL_NAMES]
+		: ["read", "bash", "edit", "write", "subagent"];
 	const configuredDefaultToolNames = settingsManager.getDefaultTools();
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
+	// Depth guard, child-side half (the load-bearing one). Applied AFTER the
+	// active set is resolved, so it also strips `subagent` from a configured
+	// `defaultTools` or an explicit `--tools subagent` — at max depth there is
+	// no delegation to make, so the tool must not exist rather than be refused.
+	// Filtering `defaultActiveToolNames` above would miss both of those.
+	const subagentDepth = Math.max(0, Math.floor(options.subagentDepth ?? 0));
+	const subagentDepthExhausted = subagentDepth >= settingsManager.getSubagentMaxDepth();
 	const initialActiveToolNames = (
 		options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? defaultActiveToolNames))
-	).filter((name) => !excludedToolNameSet?.has(name));
+	)
+		.filter((name) => !excludedToolNameSet?.has(name))
+		.filter((name) => !(subagentDepthExhausted && name === "subagent"));
 
 	let agent: Agent;
 
@@ -409,6 +436,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		excludedToolNames,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
+		subagentDepth,
 	});
 	const extensionsResult = resourceLoader.getExtensions();
 

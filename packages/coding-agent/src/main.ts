@@ -66,7 +66,12 @@ import {
 	MissingSessionCwdError,
 	type SessionCwdIssue,
 } from "./core/session-cwd.ts";
-import { assertValidSessionId, getSessionDefaultFromHeader, SessionManager } from "./core/session-manager.ts";
+import {
+	assertValidSessionId,
+	getSessionDefaultFromHeader,
+	loadEntriesFromFile,
+	SessionManager,
+} from "./core/session-manager.ts";
 import { deduplicateDiagnostics } from "./core/settings-diagnostics.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
@@ -392,6 +397,53 @@ function validateSessionIdFlags(parsed: Args): void {
 	}
 }
 
+function validateSessionParentFlags(parsed: Args): void {
+	if (parsed.sessionParent === undefined) return;
+
+	const conflictingFlags = [
+		parsed.noSession ? '--no-session' : undefined,
+		parsed.noSessionParent ? '--no-session-parent' : undefined,
+		parsed.fork ? '--fork' : undefined,
+	].filter((flag): flag is string => flag !== undefined);
+
+	if (conflictingFlags.length > 0) {
+		console.error(chalk.red(`Error: --session-parent cannot be combined with ${conflictingFlags.join(", ")}`));
+		process.exit(1);
+	}
+
+	const value = parsed.sessionParent;
+	if (!value.includes('/') && !value.includes('\\') && !value.endsWith('.jsonl')) {
+		console.error(chalk.red(`Error: --session-parent expects a session file path ending in .jsonl, got '${value}'`));
+		process.exit(1);
+	}
+
+	const resolved = resolvePath(value, process.cwd());
+	if (!existsSync(resolved)) {
+		console.error(chalk.red(`Error: parent session file not found: ${resolved}`));
+		process.exit(1);
+	}
+}
+
+function resolveSessionParentOrExit(parentPath: string): string {
+	try {
+		const resolved = resolvePath(parentPath, process.cwd());
+		const entries = loadEntriesFromFile(resolved);
+		const header = entries[0];
+		if (!header || header.type !== "session") {
+			console.error(chalk.red(`Error: no session header found in ${resolved}`));
+			process.exit(1);
+		}
+		// DEFERRED (Decision #1): return resolved path, not session id.
+		// session-manager.ts stores SessionHeader.parentSession as a PATH.
+		// Reshaping to id would require updating 11 files; deferred to follow-up.
+		return resolved;
+	} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(chalk.red(`Error: ${message}`));
+		process.exit(1);
+	}
+}
+
 function openSessionOrExit(path: string, sessionDir?: string): SessionManager {
 	try {
 		return SessionManager.open(path, sessionDir);
@@ -420,6 +472,14 @@ async function createSessionManager(
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
+	}
+
+	if (parsed.sessionParent && !parsed.noSessionParent) {
+		const parentPath = resolveSessionParentOrExit(parsed.sessionParent);
+		return SessionManager.create(cwd, sessionDir, {
+			id: parsed.sessionId,
+			parentSession: parentPath,
+		});
 	}
 
 	if (parsed.fork) {
@@ -816,6 +876,7 @@ async function runMainBody(
 
 	validateForkFlags(parsed);
 	validateSessionIdFlags(parsed);
+	validateSessionParentFlags(parsed);
 
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
@@ -1022,6 +1083,8 @@ async function runMainBody(
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
+			// Set by the subagent runner on the child's argv; undefined at top level.
+			subagentDepth: parsed.subagentDepth,
 		});
 		const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {

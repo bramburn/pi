@@ -62,6 +62,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	/** Delegation depth of this session: 0 at top level, 1+ for a subagent child. */
+	subagentDepth?: CreateAgentSessionOptions["subagentDepth"];
 }
 
 /**
@@ -217,5 +219,6 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
+		subagentDepth: options.subagentDepth,
 	});
 }
