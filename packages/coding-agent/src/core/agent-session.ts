@@ -105,7 +105,6 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
-import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -114,26 +113,6 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import {
-	BG_CUSTOM_MESSAGE_TYPE,
-	backgroundTaskDir,
-	claimReplayDeliveries,
-	completeReplayDelivery,
-	getBackgroundRegistry,
-} from "./subagent/background.ts";
-import {
-	CONTACT_SUPERVISOR_TOOL_NAME,
-	createContactSupervisorToolDefinition,
-} from "./subagent/contact-supervisor-tool.ts";
-import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
-import { ResearchModeTracker } from "./subagent/research-mode.ts";
-import type { CompletionEscalation, CompletionRecord } from "./subagent/result-record.ts";
-import {
-	formatOpenSupervisorRequests,
-	listOpenSupervisorRequests,
-	supervisorDirFor,
-} from "./subagent/supervisor-channel.ts";
-import { isFailedSubagentResult } from "./subagent/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -216,14 +195,7 @@ export type AgentSessionEvent =
 	  }
 	| { type: "summarization_retry_finished" }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
-	| { type: "bash_execution_update"; id?: string; delta: string }
-	| {
-			type: "background_task_settled";
-			/** Registry task id (or a chain step id whose dispatch failed). */
-			taskId: string;
-			role: string;
-			failed: boolean;
-	  };
+	| { type: "bash_execution_update"; id?: string; delta: string };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -268,11 +240,6 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
-	/**
-	 * Delegation depth of this session: 0 for a top-level session, 1+ for a
-	 * subagent child. Feeds `subagent.maxDepth` enforcement on the parent side.
-	 */
-	subagentDepth?: number;
 }
 
 export interface ExtensionBindings {
@@ -347,48 +314,6 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
 // ============================================================================
-// Background settle formatting
-// ============================================================================
-
-/**
- * Advisory warning appended to a settle notification when a role has just
- * failed the same way `threshold` times in a row (#1051).
- *
- * An identical error signature repeated across tasks is evidence against the
- * last step the model took and for the task definition itself, so the note asks
- * the model to reconsider the task rather than retry it unchanged. It is not a
- * hard stop: the caller decides what to do next.
- */
-function escalationNote(escalation: CompletionEscalation | undefined, role: string): string {
-	if (escalation === undefined) return "";
-	return `\n\nWarning: this is failure ${escalation.consecutiveFailures} in a row for the "${role}" subagent role with the same error signature (${escalation.signature}). Retrying the same task unchanged is unlikely to help — reconsider the task definition (or the role's prompt) before retrying.`;
-}
-
-/**
- * Batched body for a startup replay pass. Several tasks can have settled while
- * pi was not listening, and each separate custom message costs a model turn, so
- * they are reported as sections of one message.
- */
-function replaySettleText(records: CompletionRecord[]): string {
-	const header =
-		records.length === 1
-			? "A background subagent task settled before this session was listening. Replaying its result:"
-			: `${records.length} background subagent tasks settled before this session was listening. Replaying their results:`;
-	const sections = records.map((record) => {
-		const head =
-			record.status === "crashed"
-				? `Background task ${record.taskId} (${record.role}) crashed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
-				: record.status === "failed"
-					? `Background task ${record.taskId} (${record.role}) failed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
-					: record.status === "cancelled"
-						? `Background task ${record.taskId} (${record.role}) was cancelled.`
-						: `Background task ${record.taskId} (${record.role}) completed.`;
-		return `${head}\n\n${record.output || "(no output)"}${escalationNote(record.escalation, record.role)}`;
-	});
-	return `${header}\n\n${sections.join("\n\n")}`;
-}
-
-// ============================================================================
 // AgentSession Class
 // ============================================================================
 
@@ -455,9 +380,6 @@ export class AgentSession {
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
-	private _subagentToolCollisionWarned = false;
-	private _researchMode?: ResearchModeTracker;
-	private _subagentDepth: number;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -495,9 +417,6 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
-		// Delegation depth of this process, handed over on a child's argv as
-		// `--subagent-depth`. Read once here: it cannot change mid-session.
-		this._subagentDepth = Math.max(0, Math.floor(config.subagentDepth ?? 0));
 
 		// Seed the in-memory mirror of the DeepSeek Harness toggle from
 		// the user's settings.json. The setter is the public surface;
@@ -514,55 +433,6 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
-
-		// Startup hygiene for the background registry: crash-mark rows orphaned
-		// by a dead session (pid-liveness based, so safe from any session) and
-		// prune old terminal rows. Fire-and-forget with a catch so startup never
-		// blocks or throws.
-		const backgroundRegistry = getBackgroundRegistry();
-		void backgroundRegistry.markAllRunningAsCrashed().catch(console.warn);
-		void backgroundRegistry.prune().catch(console.warn);
-
-		// Same hygiene pass, one step further: report the tasks that settled
-		// while a previous session was not listening. Fire-and-forget and guarded
-		// so a stuck registry lock can never block or break startup.
-		void this._replayUndeliveredSettles().catch(console.warn);
-	}
-
-	/**
-	 * Replay settle notifications a previous process wrote but never delivered
-	 * (#1050): the write-before-notify record survived, so the model still finds
-	 * out that its detached task finished instead of waiting forever.
-	 *
-	 * Called once from the constructor and never awaited. The claimed records are
-	 * batched into one custom message, and each is cleared only after that batch
-	 * reached the message queue — a throw before that leaves them claimed on
-	 * disk, where a later pass reclaims them (once the claim is stale) within the
-	 * replay attempt bound.
-	 */
-	private async _replayUndeliveredSettles(): Promise<void> {
-		const receipt = claimReplayDeliveries();
-		if (receipt.delivered.length === 0) return;
-		const records = receipt.delivered.map((delivery) => delivery.record);
-		const text = replaySettleText(records);
-		const single = records.length === 1 ? records[0] : undefined;
-		await this.sendCustomMessage(
-			{
-				customType: BG_CUSTOM_MESSAGE_TYPE,
-				content: [{ type: "text", text }],
-				display: true,
-				details: {
-					taskId: single?.taskId,
-					status: "replayed",
-					role: single?.role,
-					exitCode: single?.exitCode,
-					finalOutput: text,
-					replayedTasks: records.length,
-				},
-			},
-			{ triggerTurn: true, deliverAs: "nextTurn" },
-		);
-		for (const delivery of receipt.delivered) completeReplayDelivery(delivery);
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -2941,20 +2811,6 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
-
-		// Coexistence guard (plan 5.3): a user-symlinked `subagent` extension
-		// silently shadows the native tool (extension tools win in the merged
-		// registry). Warn once per session and change nothing else.
-		if (!this._subagentToolCollisionWarned && this._baseToolDefinitions.has("subagent")) {
-			const collides = registeredTools.some((tool) => tool.definition.name === "subagent");
-			if (collides) {
-				this._subagentToolCollisionWarned = true;
-				console.warn(
-					'A user extension registers a tool named "subagent" while the native subagent tool is enabled. Remove the symlinked extension (e.g. ~/.pi/agent/extensions/subagent/) to use the native one.',
-				);
-			}
-		}
-
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
@@ -3012,14 +2868,6 @@ export class AgentSession {
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
 			toolRegistry.set(tool.name, tool);
 		}
-		// Research Mode watcher (plan 4.3): observe every tool outcome so a
-		// repeated identical error can trigger the suggestion. Telemetry-like —
-		// never alters the result or the throw.
-		if (this._researchMode) {
-			for (const tool of [...toolRegistry.values()]) {
-				toolRegistry.set(tool.name, this._wrapWithResearchModeWatcher(tool));
-			}
-		}
 		this._toolRegistry = toolRegistry;
 
 		const nextActiveToolNames = (
@@ -3047,43 +2895,6 @@ export class AgentSession {
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
-	/**
-	 * Research Mode watcher (plan 4.3): feed tool outcomes to the tracker so
-	 * `subagent.researchModeTriggerCount` consecutive identical errors trigger
-	 * the suggestion. Telemetry-like: never alters the result or the throw.
-	 */
-	private _wrapWithResearchModeWatcher(tool: AgentTool): AgentTool {
-		const tracker = this._researchMode;
-		if (!tracker) return tool;
-		return {
-			...tool,
-			execute: async (...args: Parameters<AgentTool["execute"]>) => {
-				try {
-					const result = await tool.execute(...args);
-					this._feedResearchMode(tool.name, false, undefined, tracker);
-					return result;
-				} catch (error) {
-					this._feedResearchMode(tool.name, true, error instanceof Error ? error.message : String(error), tracker);
-					throw error;
-				}
-			},
-		};
-	}
-
-	private _feedResearchMode(
-		toolName: string,
-		isError: boolean,
-		errorText: string | undefined,
-		tracker: ResearchModeTracker,
-	): void {
-		try {
-			const experimentLogPath = getActiveExperimentLogPath(this._cwd);
-			tracker.recordToolResult(this.sessionManager.getSessionId(), toolName, isError, errorText, experimentLogPath);
-		} catch {
-			// Watcher failures must never affect tool execution.
-		}
-	}
-
 	private _buildRuntime(options: {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
@@ -3102,125 +2913,11 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
-					subagent: {
-						settings: {
-							get: (key: string) => {
-								switch (key) {
-									case "subagent.enabled":
-										return this.settingsManager.getSubagentEnabled();
-									case "subagent.enableExperiments":
-										return this.settingsManager.getSubagentEnableExperiments();
-									default:
-										return undefined;
-								}
-							},
-						},
-						// Live getters: subagent settings must be read at dispatch time so
-						// mid-session changes apply without a runtime rebuild.
-						subagentSettings: () => ({
-							enabled: this.settingsManager.getSubagentEnabled(),
-							maxConcurrent: this.settingsManager.getSubagentMaxConcurrent(),
-							maxParallelTasks: this.settingsManager.getSubagentMaxParallelTasks(),
-							worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
-							enableExperiments: this.settingsManager.getSubagentEnableExperiments(),
-							researchModeTriggerCount: this.settingsManager.getSubagentResearchModeTriggerCount(),
-							maxTotalSpawns: this.settingsManager.getSubagentMaxTotalSpawns(),
-							toolTimeoutMs: this.settingsManager.getSubagentToolTimeoutMs(),
-							maxDepth: this.settingsManager.getSubagentMaxDepth(),
-						}),
-						// Parent-side depth guard. The child-side half — dropping
-						// `subagent` from the active tool set — happens in createAgentSession.
-						depth: this._subagentDepth,
-						getParentContext: () => ({
-							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
-							thinkingLevel: this.thinkingLevel,
-						}),
-						getParentSessionFile: () => this.sessionManager.getSessionFile(),
-						resolveModel: (modelId) => {
-							const match = findExactModelReferenceMatch(modelId, [...this._modelRuntime.getModels()]);
-							return match ? `${match.provider}/${match.id}` : undefined;
-						},
-						onBackgroundSettled: (taskId, result) => {
-							const failed = isFailedSubagentResult(result);
-							// Settle-time seam for UI consumers: the custom message below is
-							// only delivered at the next turn, and a detached task settles with
-							// no tool execution in flight — so the tool_execution_end pill
-							// refresh never fires for it. Interactive mode refreshes its
-							// status pills on this event instead.
-							this._emit({
-								type: "background_task_settled",
-								taskId,
-								role: result.role,
-								failed,
-							});
-							const output = result.finalOutput || result.errorMessage || "(no output)";
-							const text = failed
-								? `Background task ${taskId} (${result.role}) failed${
-										result.errorMessage ? `: ${result.errorMessage}` : ` with exit code ${result.exitCode}`
-									}.\n\n${output}`
-								: `Background task ${taskId} (${result.role}) completed.\n\n${output}`;
-							// #1051: a role that keeps failing the same way is reported as an
-							// escalation once, on the settle that crosses the threshold.
-							const warning = escalationNote(result.escalation, result.role);
-							// Issue #1048: a child that asked its supervisor and never got an answer
-							// blocked on that question and finished anyway. Raising the open questions
-							// with the completion notification is the only path that reaches the parent —
-							// otherwise the question dies in a directory nobody reads.
-							const supervisorDir = supervisorDirFor(backgroundTaskDir(taskId));
-							const openQuestions = listOpenSupervisorRequests(supervisorDir);
-							const questions =
-								openQuestions.length === 0
-									? ""
-									: `\n\nThe child asked and was never answered:\n${formatOpenSupervisorRequests(supervisorDir)}`;
-							const body = `${text}${warning}${questions}`;
-							void this.sendCustomMessage(
-								{
-									customType: BG_CUSTOM_MESSAGE_TYPE,
-									content: [{ type: "text", text: body }],
-									display: true,
-									details: {
-										taskId,
-										status: failed ? "failed" : "completed",
-										role: result.role,
-										exitCode: result.exitCode,
-										finalOutput: output,
-										...(result.escalation === undefined ? {} : { escalation: result.escalation }),
-									},
-								},
-								{ triggerTurn: true, deliverAs: "nextTurn" },
-							).catch((err: unknown) => {
-								this._extensionRunner.emitError({
-									extensionPath: "<subagent>",
-									event: "background_result",
-									error: err instanceof Error ? err.message : String(err),
-								});
-							});
-						},
-					},
 				});
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
-
-		// Supervisor channel (issue #1048): `contact_supervisor` exists only in a
-		// process the runner gave a supervisor dir to write into, so an ordinary
-		// session never sees a tool that could only ever time out. Registered here
-		// rather than in tools/index.ts to keep the built-in ToolName union closed.
-		const contactSupervisorDefinition = createContactSupervisorToolDefinition();
-		if (contactSupervisorDefinition) {
-			this._baseToolDefinitions.set(CONTACT_SUPERVISOR_TOOL_NAME, contactSupervisorDefinition as ToolDefinition);
-		}
-
-		// Research Mode watcher (plan 4.3): built before the tool registry so
-		// `_refreshToolRegistry` can decorate tool results with it. Gated on the
-		// experiments flag like the rest of the surface.
-		this._researchMode = this.settingsManager.getSubagentEnableExperiments()
-			? new ResearchModeTracker({
-					threshold: () => this.settingsManager.getSubagentResearchModeTriggerCount(),
-					notify: (message, type) => this._extensionUIContext?.notify(message, type),
-				})
-			: undefined;
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
@@ -3245,13 +2942,7 @@ export class AgentSession {
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
 			: ["read", "bash", "edit", "write"];
-		let baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
-		// A child that was given a supervisor dir gets the tool active straight away:
-		// it has no one else to ask, and requiring an explicit enable per session
-		// would defeat the point of the channel.
-		if (contactSupervisorDefinition && !baseActiveToolNames.includes(CONTACT_SUPERVISOR_TOOL_NAME)) {
-			baseActiveToolNames = [...baseActiveToolNames, CONTACT_SUPERVISOR_TOOL_NAME];
-		}
+		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,

@@ -3017,5 +3017,3 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `inline-bash.ts` | Inline bash in tool calls | `on("tool_call")` |
 | `bash-spawn-hook.ts` | Adjust bash command, cwd, and env before execution | `createBashTool`, `spawnHook` |
 | `with-deps/` | Extension with npm dependencies | Package structure with `package.json` |
-
-Pi also ships a native `subagent` tool in core, so most delegation needs no extension at all — see [Subagents](subagents.md) for its single, parallel, and chain modes, background results, and the gated experiments surface. The [`subagent/` example](../examples/extensions/subagent/) remains as a reference implementation; if a user-symlinked extension registers a tool named `subagent` while the built-in one is enabled, the extension's tool takes precedence and pi logs a one-line warning suggesting removal of the symlink.
