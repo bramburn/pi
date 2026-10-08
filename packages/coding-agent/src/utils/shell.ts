@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { spawn, spawnSync } from "child_process";
 import { getBinDir } from "../config.ts";
-import { snapshotDescendants } from "../core/subagent/win32-tree.ts";
 
 export interface ShellConfig {
 	shell: string;
@@ -206,85 +205,9 @@ export function untrackDetachedChildPid(pid: number): void {
 
 export function killTrackedDetachedChildren(): void {
 	for (const pid of trackedDetachedChildPids) {
-		if (process.platform === "win32") {
-			// Exit-path floor: every caller of this function is a signal handler
-			// that terminates the process immediately afterwards (e.g. SIGHUP →
-			// process.exit(129)). killProcessTree's enhanced win32 teardown is
-			// asynchronous (PowerShell snapshot first) and would never reach its
-			// taskkill spawn before exit, so launch the classic synchronous
-			// /F /T sweep here. It only walks the live child's tree — the
-			// pre-existing limitation — but that is strictly better than
-			// launching nothing. The enhanced snapshot teardown covers all
-			// in-session kills, where the process stays alive.
-			try {
-				spawnSync(taskkillPath(), ["/F", "/T", "/PID", String(pid)], {
-					stdio: "ignore",
-					windowsHide: true,
-					timeout: 5_000,
-				});
-			} catch {
-				// Ignore cleanup failures.
-			}
-		} else {
-			killProcessTree(pid);
-		}
+		killProcessTree(pid);
 	}
 	trackedDetachedChildPids.clear();
-}
-
-/** The trusted System32 taskkill, so cleanup does not depend on PATH. */
-function taskkillPath(): string {
-	return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
-}
-
-/**
- * Fire taskkill and absorb both failure modes: a synchronous spawn throw and
- * the asynchronous `error` event a failed spawn emits (which would otherwise
- * crash Node).
- */
-function spawnTaskkill(args: string[]): void {
-	try {
-		const child = spawn(taskkillPath(), args, {
-			stdio: "ignore",
-			detached: true,
-			windowsHide: true,
-		});
-		child.once("error", () => {});
-	} catch {
-		// Ignore errors if taskkill fails.
-	}
-}
-
-/**
- * win32 teardown: every descendant of `pid` visible in the process table is
- * force-killed by its own pid (leaf-first), then the unchanged `taskkill /F /T`
- * sweep runs as the final, tree-walking pass.
- *
- * Why the snapshot exists: Windows has no process groups, and `/T` walks the
- * tree only through a LIVE direct child. A descendant that outlives the direct
- * child is re-parented and the sweep misses it, leaving an orphan holding ports
- * and files. Snapshotting first means those descendants are already known by
- * pid, so each can be killed directly.
- *
- * Honest remaining limitation: the snapshot is a point-in-time read, so a
- * descendant spawned AFTER it is taken can still escape `/T` — and a pid that
- * was recycled (started before the root) is filtered rather than killed. An
- * empty snapshot (no Bun runtime, no PowerShell, timeout, no root row) degrades
- * to exactly the previous behaviour.
- *
- * Deliberately asynchronous and not awaited by `killProcessTree`: the snapshot
- * is a PowerShell round-trip and no caller awaits teardown. The synchronous
- * spawn inside `snapshotDescendants` still launches immediately, and the
- * descendant kills plus the `/T` sweep follow on the microtask queue.
- */
-async function killProcessTreeWin32(pid: number): Promise<void> {
-	const descendants = await snapshotDescendants(pid);
-	// Leaf-first, each failure ignored: a descendant that exited on its own is
-	// not an error, and the final sweep below is the safety net.
-	for (const descendantPid of descendants) {
-		spawnTaskkill(["/F", "/PID", String(descendantPid)]);
-	}
-	spawnTaskkill(["/F", "/T", "/PID", String(pid)]);
 }
 
 /**
@@ -292,7 +215,22 @@ async function killProcessTreeWin32(pid: number): Promise<void> {
  */
 export function killProcessTree(pid: number): void {
 	if (process.platform === "win32") {
-		void killProcessTreeWin32(pid).catch(() => {});
+		// Use the trusted System32 executable so cleanup does not depend on PATH.
+		try {
+			const child = spawn(
+				join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"),
+				["/F", "/T", "/PID", String(pid)],
+				{
+					stdio: "ignore",
+					detached: true,
+					windowsHide: true,
+				},
+			);
+			// A failed spawn emits "error" asynchronously; consume it to avoid crashing Node.
+			child.once("error", () => {});
+		} catch {
+			// Ignore errors if taskkill fails.
+		}
 	} else {
 		// Use SIGKILL on Unix/Linux/Mac
 		try {

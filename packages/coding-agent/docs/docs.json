@@ -42,10 +42,6 @@
         {
           "title": "Compaction",
           "path": "compaction.md"
-        },
-        {
-          "title": "Subagents",
-          "path": "subagents.md"
         }
       ]
     },

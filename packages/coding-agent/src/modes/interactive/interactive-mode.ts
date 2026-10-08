@@ -110,21 +110,6 @@ import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../cor
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
-import { type BackgroundTask, getBackgroundRegistry } from "../../core/subagent/background.ts";
-import { listExperiments } from "../../core/subagent/experiment-registry.ts";
-import {
-	clearBackgroundDashboard,
-	clearBackgroundLogOverlay,
-	clearDashboard,
-	type ExperimentsUi,
-	readBackgroundLogTail,
-	renderBackgroundPill,
-	renderExperimentsStatusPill,
-	showBackgroundDashboard,
-	showBackgroundLogOverlay,
-	showDashboard,
-	UI_KEYS,
-} from "../../core/subagent/experiments-dashboard.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
@@ -635,17 +620,6 @@ export class InteractiveMode {
 
 	// Auto-compaction state
 	private autoCompactionEscapeHandler?: () => void;
-	// Experiments dashboard (subagent.enableExperiments, plan 4.6)
-	private experimentsDashboardOpen = false;
-	private experimentsDashboardEscapeHandler?: () => void;
-
-	// Background-task dashboard (the Fleet TUI surface for /subagents)
-	private bgDashboardOpen = false;
-	private bgDashboardEscapeHandler?: () => void;
-	private bgDashboardSelectedRow = 0;
-	private bgDashboardTasks: BackgroundTask[] = [];
-	private bgLogOverlayOpen = false;
-	private bgLogOverlayEscapeHandler?: () => void;
 
 	// Auto-retry state
 	private retryEscapeHandler?: () => void;
@@ -2066,9 +2040,6 @@ export class InteractiveMode {
 			this.editor.setPaddingX?.(editorPaddingX);
 			this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
 		}
-		// Refresh the subagent pills against the current project (and clear them
-		// when the feature is off or there is nothing to show).
-		this.updateSubagentStatusPills();
 	}
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
@@ -2958,12 +2929,6 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
-		// Registered only when the experiments feature is enabled at registration
-		// time, so the dashboard key is not intercepted (and a "dashboard is off"
-		// notice shown) for users who never opted in.
-		if (this.settingsManager.getSubagentEnableExperiments()) {
-			this.defaultEditor.onAction("app.subagent.experimentsDashboard", () => this.toggleExperimentsDashboard());
-		}
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -3063,19 +3028,7 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (payload: { text: string; attachments: PasteAttachment[] }) => {
-			// Enter with an empty editor while the background dashboard is open
-			// is the documented "open log" gesture for the selected row — not
-			// a regular submit. Slash-command handling stays below.
-			if (isEmptySubmit(payload)) {
-				if (this.bgDashboardOpen && this.bgDashboardTasks.length > 0) {
-					const task = this.bgDashboardTasks[this.bgDashboardSelectedRow];
-					if (task) {
-						this.openBackgroundLogOverlay(task);
-						return;
-					}
-				}
-				return;
-			}
+			if (isEmptySubmit(payload)) return;
 			const media = buildMediaContent(payload.attachments, this.session.model);
 			for (const kind of media.dropped) {
 				this.showWarning(mediaNotSupportedMessage(this.session.model, kind));
@@ -3208,11 +3161,6 @@ export class InteractiveMode {
 			}
 			if (text === "/resume") {
 				this.showSessionSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/subagents") {
-				this.toggleBackgroundDashboard();
 				this.editor.setText("");
 				return;
 			}
@@ -3523,18 +3471,8 @@ export class InteractiveMode {
 					this.pendingTools.delete(event.toolCallId);
 					this.ui.requestRender();
 				}
-				if (event.toolName === "subagent" || event.toolName.startsWith("experiment_")) {
-					this.updateSubagentStatusPills();
-				}
 				break;
 			}
-
-			case "background_task_settled":
-				// A detached task settles with no tool execution in flight, so the
-				// tool_execution_end refresh above never fires for it (see the emit in
-				// AgentSession's onBackgroundSettled). Refresh the pills at settle time.
-				this.updateSubagentStatusPills();
-				break;
 
 			case "agent_end":
 				if (this.settingsManager.getShowTerminalProgress()) {
@@ -4418,137 +4356,6 @@ export class InteractiveMode {
 		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
 		this.updateThinkingBlockVisibility();
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
-	}
-
-	// =========================================================================
-	// Experiments dashboard and status pills (subagent.enableExperiments)
-	// =========================================================================
-
-	/** `ExperimentsUi` adapter over the extension UI surface (plan 4.6). */
-	private createExperimentsUi(): ExperimentsUi {
-		return {
-			mode: "tui",
-			setWidget: (key, lines, options) =>
-				this.setExtensionWidget(
-					key,
-					lines,
-					options?.placement === "belowEditor" ? { placement: "belowEditor" } : undefined,
-				),
-			setStatus: (key, text) => this.setExtensionStatus(key, text),
-			notify: (message, type) => this.showExtensionNotify(message, type),
-		};
-	}
-
-	private toggleExperimentsDashboard(): void {
-		if (!this.settingsManager.getSubagentEnableExperiments()) {
-			this.showStatus("Experiments dashboard is off. Set subagent.enableExperiments to true.");
-			return;
-		}
-		if (this.experimentsDashboardOpen) {
-			this.closeExperimentsDashboard();
-			return;
-		}
-		showDashboard(this.createExperimentsUi(), theme, this.sessionManager.getCwd());
-		this.experimentsDashboardOpen = true;
-		this.experimentsDashboardEscapeHandler = this.defaultEditor.onEscape;
-		this.defaultEditor.onEscape = () => this.closeExperimentsDashboard();
-	}
-
-	private closeExperimentsDashboard(): void {
-		if (!this.experimentsDashboardOpen) return;
-		this.experimentsDashboardOpen = false;
-		clearDashboard(this.createExperimentsUi());
-		if (this.experimentsDashboardEscapeHandler) {
-			this.defaultEditor.onEscape = this.experimentsDashboardEscapeHandler;
-			this.experimentsDashboardEscapeHandler = undefined;
-		}
-	}
-
-	/**
-	 * Background-task dashboard toggle (the Fleet TUI surface for `/subagents`).
-	 * Mirrors `toggleExperimentsDashboard`: each invocation either opens or
-	 * closes the overlay, and Esc is the only documented close path. Enter
-	 * with an empty editor opens the log overlay for the currently selected
-	 * row (the most recent task by default — see renderBackgroundLines sort
-	 * order).
-	 */
-	private toggleBackgroundDashboard(): void {
-		if (this.bgDashboardOpen) {
-			// The log overlay sits on top of the dashboard and binds its own
-			// escape handler; close it first so the stack unwinds in the
-			// right order before the dashboard itself is torn down.
-			if (this.bgLogOverlayOpen) this.closeBackgroundLogOverlay();
-			this.closeBackgroundDashboard();
-			return;
-		}
-		const tasks = getBackgroundRegistry()
-			.snapshot()
-			.tasks.slice()
-			.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
-		this.bgDashboardTasks = tasks;
-		this.bgDashboardSelectedRow = 0;
-		showBackgroundDashboard(this.createExperimentsUi(), theme, tasks, 0);
-		this.bgDashboardOpen = true;
-		this.bgDashboardEscapeHandler = this.defaultEditor.onEscape;
-		this.defaultEditor.onEscape = () => this.closeBackgroundDashboard();
-	}
-
-	private closeBackgroundDashboard(): void {
-		if (!this.bgDashboardOpen) return;
-		this.bgDashboardOpen = false;
-		clearBackgroundDashboard(this.createExperimentsUi());
-		if (this.bgDashboardEscapeHandler) {
-			this.defaultEditor.onEscape = this.bgDashboardEscapeHandler;
-			this.bgDashboardEscapeHandler = undefined;
-		}
-	}
-
-	/** Open the log-tail overlay for one task. The dashboard is the dispatcher. */
-	private openBackgroundLogOverlay(task: BackgroundTask): void {
-		const tail = readBackgroundLogTail(task.id);
-		showBackgroundLogOverlay(this.createExperimentsUi(), theme, task, tail);
-		this.bgLogOverlayOpen = true;
-		this.bgLogOverlayEscapeHandler = this.defaultEditor.onEscape;
-		this.defaultEditor.onEscape = () => this.closeBackgroundLogOverlay();
-	}
-
-	private closeBackgroundLogOverlay(): void {
-		if (!this.bgLogOverlayOpen) return;
-		this.bgLogOverlayOpen = false;
-		clearBackgroundLogOverlay(this.createExperimentsUi());
-		if (this.bgLogOverlayEscapeHandler) {
-			this.defaultEditor.onEscape = this.bgLogOverlayEscapeHandler;
-			this.bgLogOverlayEscapeHandler = undefined;
-		}
-	}
-
-	/** Footer pills for experiments and background tasks (plan 4.6 surface). */
-	private updateSubagentStatusPills(): void {
-		// path.resolve on both sides: task rows record the dispatch cwd, which can
-		// differ from getCwd() in slash or drive-letter form on Windows.
-		const cwd = path.resolve(this.sessionManager.getCwd());
-		// Undefined clears the pill: nothing to show when the feature is off or the
-		// current project has no experiments.
-		this.setExtensionStatus(
-			UI_KEYS.STATUS_KEY,
-			this.settingsManager.getSubagentEnableExperiments() && listExperiments(cwd, "all").length > 0
-				? renderExperimentsStatusPill(theme, cwd, true)
-				: undefined,
-		);
-		// The registry is user-level and spans every session and project — count
-		// only this session's project. renderBackgroundPill returns undefined at
-		// zero total, which clears the pill.
-		const tasks = getBackgroundRegistry()
-			.snapshot()
-			.tasks.filter((t) => path.resolve(t.cwd) === cwd);
-		this.setExtensionStatus(
-			UI_KEYS.BG_STATUS_KEY,
-			renderBackgroundPill(
-				theme,
-				tasks.filter((t) => t.status === "running" || t.status === "pending").length,
-				tasks.length,
-			),
-		);
 	}
 
 	private async handleOpenExternalEditor(): Promise<void> {

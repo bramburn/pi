@@ -15,7 +15,6 @@ import type {
 	Model,
 } from "@earendil-works/pi-ai/compat";
 import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat";
-import { ENV_AGENT_DIR } from "../../src/config.ts";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
@@ -101,13 +100,6 @@ function createTempDir(): string {
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 	const tempDir = createTempDir();
-	// AgentSession's constructor runs background-registry hygiene
-	// (markAllRunningAsCrashed + prune) against getAgentDir(); without this seam
-	// every harness run mutates the developer's real agent dir (prune deletes
-	// terminal rows in <agentDir>/subagent-bg). The registry resolves
-	// getAgentDir() per operation, so the override takes effect immediately.
-	const previousAgentDir = process.env[ENV_AGENT_DIR];
-	process.env[ENV_AGENT_DIR] = join(tempDir, "agent");
 	const fauxProvider: FauxProviderRegistration = registerFauxProvider({
 		models: options.models,
 	});
@@ -225,11 +217,6 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		cleanup() {
 			session.dispose();
 			fauxProvider.unregister();
-			if (previousAgentDir === undefined) {
-				delete process.env[ENV_AGENT_DIR];
-			} else {
-				process.env[ENV_AGENT_DIR] = previousAgentDir;
-			}
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true });
 			}

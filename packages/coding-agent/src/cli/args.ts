@@ -28,13 +28,6 @@ export interface Args {
 	noSession?: boolean;
 	session?: string;
 	sessionId?: string;
-	/**
-	 * Parent session file or id for lineage tracking when spawning a nested
-	 * session. Phase 1 accepts a PATH and errors on a bare session id.
-	 */
-	sessionParent?: string;
-	/** Explicitly drop the parent session link and run with no session lineage. */
-	noSessionParent?: boolean;
 	fork?: string;
 	sessionDir?: string;
 	models?: string[];
@@ -54,12 +47,6 @@ export interface Args {
 	useTheme?: string;
 	noThemes?: boolean;
 	noContextFiles?: boolean;
-	/**
-	 * Delegation depth of this process: 0 for a top-level session, incremented
-	 * for each `pi` subagent child. Internal — set on the child's argv by the
-	 * subagent runner, not by users. Governs `subagent.maxDepth`.
-	 */
-	subagentDepth?: number;
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
@@ -145,12 +132,6 @@ export function parseArgs(args: string[]): Args {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
 			result.session = args[++i];
-		} else if (arg === "--session-parent" && i + 1 < args.length) {
-			// Phase 1: accept a PATH to a parent session file. A bare session id
-			// is rejected because id resolution is deferred to Phase 2.
-			result.sessionParent = args[++i];
-		} else if (arg === "--no-session-parent") {
-			result.noSessionParent = true;
 		} else if (arg === "--session-id" && i + 1 < args.length) {
 			result.sessionId = args[++i];
 		} else if (arg === "--fork" && i + 1 < args.length) {
@@ -222,18 +203,6 @@ export function parseArgs(args: string[]): Args {
 			result.noThemes = true;
 		} else if (arg === "--no-context-files" || arg === "-nc") {
 			result.noContextFiles = true;
-		} else if (arg === "--subagent-depth") {
-			const raw = args[i + 1];
-			const v = raw === undefined ? Number.NaN : parseInt(raw, 10);
-			if (Number.isFinite(v) && v >= 0) {
-				result.subagentDepth = v;
-				i += 1;
-			} else {
-				result.diagnostics.push({
-					type: "error",
-					message: "--subagent-depth requires a non-negative integer",
-				});
-			}
 		} else if (arg === "--list-models") {
 			// Check if next arg is a search pattern (not a flag or file arg)
 			if (i + 1 < args.length && !args[i + 1].startsWith("-") && !args[i + 1].startsWith("@")) {
@@ -319,8 +288,6 @@ ${chalk.bold("Options:")}
   --session-id <id>              Use exact project session ID, creating it if missing
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
-  --session-parent <path>        Parent session file for lineage tracking
-  --no-session-parent            Drop the parent session link for this run
   --no-session                   Don't save session (ephemeral)
   --name, -n <name>              Set session display name
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
@@ -342,7 +309,6 @@ ${chalk.bold("Options:")}
   --use-theme <name[/name]>      Set the initial interactive theme for this run
   --no-themes                    Disable theme discovery and loading
   --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
-  --subagent-depth <n>           Internal: delegation depth of this process (0 = top level)
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)

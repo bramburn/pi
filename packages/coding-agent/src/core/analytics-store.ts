@@ -210,7 +210,6 @@ class AnalyticsStore {
 		this._ttftMs = null;
 		this._pendingToolInvocations = [];
 		this._pendingCompactionEvents = [];
-		this._pendingSubagentTasks = new Map();
 		return this._currentRunId;
 	}
 
@@ -350,44 +349,11 @@ class AnalyticsStore {
 		});
 		compInsertMany(this._pendingCompactionEvents);
 
-		// Sub-agent spans are inserted only here: pi_subagent_tasks.run_id
-		// references pi_runs(run_id), whose row is inserted above, so an INSERT
-		// from endSubagentTask during the run always violated the foreign key.
-		// Spans that settle after this flush are closed in place by
-		// endSubagentTask's UPDATE path below.
-		const insertSubagent = this.db!.prepare(`
-			INSERT INTO pi_subagent_tasks
-				(id, run_id, span_id, parent_span_id, agent_name, task_label,
-				 start_time, end_time, success, error_message, duration_ms)
-			VALUES
-				(@id, @runId, @spanId, @parentSpanId, @agentName, @taskLabel,
-				 @startTime, @endTime, @success, @errorMessage, @durationMs)
-		`);
-		const subagentInsertMany = this.db!.transaction((rows: SubagentTaskRow[]) => {
-			for (const row of rows) {
-				insertSubagent.run({
-					id: row.id,
-					runId: row.runId,
-					spanId: row.spanId,
-					parentSpanId: row.parentSpanId,
-					agentName: row.agentName,
-					taskLabel: row.taskLabel,
-					startTime: row.startTime,
-					endTime: row.endTime,
-					success: row.success === null ? null : row.success ? 1 : 0,
-					errorMessage: row.errorMessage,
-					durationMs: row.durationMs,
-				});
-			}
-		});
-		subagentInsertMany([...this._pendingSubagentTasks.values()]);
-
 		this._currentRunId = null;
 		this._currentSessionId = null;
 		this._currentTrackingId = null;
 		this._pendingToolInvocations = [];
 		this._pendingCompactionEvents = [];
-		this._pendingSubagentTasks = new Map();
 	}
 
 	// -------------------------------------------------------------------------
@@ -415,42 +381,43 @@ class AnalyticsStore {
 	}
 
 	endSubagentTask(spanId: string, success: boolean, errorMessage?: string): void {
-		const endTime = Date.now();
 		const row = this._pendingSubagentTasks.get(spanId);
-		if (row) {
-			// First settle wins: a double settle must not rewrite the outcome or
-			// extend the duration.
-			if (row.endTime !== null) return;
-			// Fast path: no DB write here — the row is inserted by flushRun together
-			// with its pi_runs parent (see the foreign-key note there).
-			this._pendingSubagentTasks.set(spanId, {
-				...row,
-				endTime,
-				success: !!success,
-				errorMessage: errorMessage ?? null,
-				durationMs: endTime - row.startTime,
-			});
-			return;
-		}
-		// The span was already flushed (e.g. a background task settling after
-		// flushRun): close its row in place so the outcome is not lost.
-		if (!this.db) return;
-		// First settle wins here too: `AND end_time IS NULL` makes a late double
-		// settle a no-op instead of inflating the duration with a new timestamp.
-		const update = this.db.prepare(`
-			UPDATE pi_subagent_tasks
-			SET end_time = @endTime,
-				success = @success,
-				error_message = @errorMessage,
-				duration_ms = @endTime - start_time
-			WHERE span_id = @spanId AND end_time IS NULL
-		`);
-		update.run({
-			spanId,
+		if (!row || !this.db) return;
+		const endTime = Date.now();
+		const durationMs = endTime - row.startTime;
+
+		const updated: SubagentTaskRow = {
+			...row,
 			endTime,
-			success: success ? 1 : 0,
+			success: !!success,
 			errorMessage: errorMessage ?? null,
-		});
+			durationMs,
+		};
+
+		this.db
+			.prepare(`
+			INSERT INTO pi_subagent_tasks
+				(id, run_id, span_id, parent_span_id, agent_name, task_label,
+				 start_time, end_time, success, error_message, duration_ms)
+			VALUES
+				(@id, @runId, @spanId, @parentSpanId, @agentName, @taskLabel,
+				 @startTime, @endTime, @success, @errorMessage, @durationMs)
+		`)
+			.run({
+				id: updated.id,
+				runId: updated.runId,
+				spanId: updated.spanId,
+				parentSpanId: updated.parentSpanId,
+				agentName: updated.agentName,
+				taskLabel: updated.taskLabel,
+				startTime: updated.startTime,
+				endTime: updated.endTime,
+				success: updated.success ? 1 : 0,
+				errorMessage: updated.errorMessage,
+				durationMs: updated.durationMs,
+			});
+
+		this._pendingSubagentTasks.delete(spanId);
 	}
 
 	close(): void {
@@ -481,7 +448,6 @@ export function newTaskSpanId(): string {
 /**
  * Start a sub-agent task span.
  * Idempotent — safe to call multiple times with the same spanId.
- * Best-effort telemetry — never throws, so analytics I/O cannot fail a run.
  */
 export function startSubagentTask(params: {
 	spanId: string;
@@ -489,22 +455,13 @@ export function startSubagentTask(params: {
 	agentName: string;
 	taskLabel: string;
 }): void {
-	try {
-		getAnalyticsStore().startSubagentTask(params);
-	} catch {
-		// telemetry only — ignore
-	}
+	getAnalyticsStore().startSubagentTask(params);
 }
 
 /**
  * End a sub-agent task span.
  * Idempotent — safe to call multiple times with the same spanId.
- * Best-effort telemetry — never throws, so analytics I/O cannot fail a run.
  */
 export function endSubagentTask(spanId: string, success: boolean, errorMessage?: string): void {
-	try {
-		getAnalyticsStore().endSubagentTask(spanId, success, errorMessage);
-	} catch {
-		// telemetry only — ignore
-	}
+	getAnalyticsStore().endSubagentTask(spanId, success, errorMessage);
 }
