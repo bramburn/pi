@@ -1,11 +1,22 @@
-import { compare, valid } from "semver";
-import { fetchWithRetry } from "./management-http.ts";
-import { getPiUserAgent } from "./pi-user-agent.ts";
+import { compare, rcompare, valid } from "semver";
+import { PACKAGE_NAME } from "../config.ts";
 
-const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+// ADR-0002 / D4 severed the upstream version-check endpoint (fork hard cut).
+// Self-update now resolves the latest version of the current package from the npm
+// registry metadata for PACKAGE_NAME (human decision 2026-10-20: port `update --self`
+// to the npm registry, not to upstream hosts or GitHub releases).
+const NPM_REGISTRY_BASE_URL = "https://registry.npmjs.org";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
+/** Total attempts (1 initial + retries) when `retry` is requested. */
+const VERSION_CHECK_RETRY_ATTEMPTS = 3;
+const VERSION_CHECK_RETRY_DELAY_MS = 200;
 
-export interface LatestPiRelease {
+/** Registry metadata URL for a package name (`@scope/name` -> `@scope%2Fname`). */
+export function getNpmRegistryUrl(packageName: string = PACKAGE_NAME): string {
+	return `${NPM_REGISTRY_BASE_URL}/${encodeURIComponent(packageName).replace(/^%40/, "@")}`;
+}
+
+export interface LatestQiRelease {
 	version: string;
 	packageName?: string;
 	note?: string;
@@ -48,57 +59,89 @@ export function isNewerPackageVersion(candidateVersion: string, currentVersion: 
 	return candidateVersion.trim() !== currentVersion.trim();
 }
 
-export async function getLatestPiRelease(
-	currentVersion: string,
-	options: { timeoutMs?: number; retry?: boolean } = {},
-): Promise<LatestPiRelease | undefined> {
-	if (process.env.PI_OFFLINE) return undefined;
-
-	const response = await fetchWithRetry(
-		LATEST_VERSION_URL,
-		{
-			headers: {
-				"User-Agent": getPiUserAgent(currentVersion),
-				accept: "application/json",
-			},
-		},
-		{
-			maxRetries: options.retry ? 2 : 0,
-			timeoutMs: options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS,
-		},
-	);
-	if (!response.ok) return undefined;
-
-	const data = (await response.json()) as {
-		packageName?: unknown;
-		version?: unknown;
-		note?: unknown;
-	};
-	if (typeof data.version !== "string" || !data.version.trim()) {
-		return undefined;
-	}
-	const packageName =
-		typeof data.packageName === "string" && data.packageName.trim() ? data.packageName.trim() : undefined;
-	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
-	return {
-		version: data.version.trim(),
-		packageName,
-		...(note ? { note } : {}),
-	};
+interface NpmRegistryMetadata {
+	name?: unknown;
+	"dist-tags"?: { latest?: unknown } | undefined;
+	versions?: unknown;
 }
 
-export async function getLatestPiVersion(
+/** Extract the latest version from npm registry metadata. */
+function pickLatestNpmVersion(metadata: unknown, packageName: string): string {
+	if (typeof metadata !== "object" || metadata === null) {
+		throw new Error(`Unexpected npm registry metadata for ${packageName}`);
+	}
+	const document = metadata as NpmRegistryMetadata;
+	const distLatest = document["dist-tags"]?.latest;
+	if (typeof distLatest === "string" && valid(distLatest.trim())) {
+		return distLatest.trim();
+	}
+	if (typeof document.versions === "object" && document.versions !== null) {
+		const latest = Object.keys(document.versions)
+			.filter((candidate) => valid(candidate))
+			.sort(rcompare)[0];
+		if (latest) {
+			return latest;
+		}
+	}
+	throw new Error(`npm registry metadata for ${packageName} does not advertise a latest version`);
+}
+
+/**
+ * Resolve the latest published version of the current package from the npm
+ * registry. Returns undefined (without touching the network) when offline
+ * (`QI_OFFLINE`); throws on network/registry errors so callers can format the
+ * failure (`formatVersionCheckError`).
+ */
+export async function getLatestQiRelease(
+	currentVersion: string,
+	options: { timeoutMs?: number; retry?: boolean } = {},
+): Promise<LatestQiRelease | undefined> {
+	if (process.env.QI_OFFLINE) return undefined;
+
+	const url = getNpmRegistryUrl();
+	const timeoutMs = options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS;
+	const attempts = options.retry ? VERSION_CHECK_RETRY_ATTEMPTS : 1;
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			const response = await fetch(url, {
+				headers: {
+					"User-Agent": `qi/${currentVersion}`,
+					Accept: "application/vnd.npm.install-v1+json, application/json",
+				},
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			if (!response.ok) {
+				throw new Error(`npm registry returned HTTP ${response.status} for ${PACKAGE_NAME}`);
+			}
+			const metadata: unknown = await response.json();
+			const version = pickLatestNpmVersion(metadata, PACKAGE_NAME);
+			// The registry metadata may advertise a renamed package (fork renames);
+			// prefer the name the registry itself reports.
+			const advertisedName = (metadata as NpmRegistryMetadata)?.name;
+			return { version, packageName: typeof advertisedName === "string" ? advertisedName : PACKAGE_NAME };
+		} catch (error: unknown) {
+			lastError = error;
+			if (attempt < attempts) {
+				await new Promise((resolve) => setTimeout(resolve, VERSION_CHECK_RETRY_DELAY_MS));
+			}
+		}
+	}
+	throw lastError;
+}
+
+export async function getLatestQiVersion(
 	currentVersion: string,
 	options: { timeoutMs?: number; retry?: boolean } = {},
 ): Promise<string | undefined> {
-	return (await getLatestPiRelease(currentVersion, options))?.version;
+	return (await getLatestQiRelease(currentVersion, options))?.version;
 }
 
-export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
-	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+export async function checkForNewQiVersion(currentVersion: string): Promise<LatestQiRelease | undefined> {
+	if (process.env.QI_SKIP_VERSION_CHECK) return undefined;
 
 	try {
-		const latestRelease = await getLatestPiRelease(currentVersion);
+		const latestRelease = await getLatestQiRelease(currentVersion);
 		if (latestRelease && isNewerPackageVersion(latestRelease.version, currentVersion)) {
 			return latestRelease;
 		}

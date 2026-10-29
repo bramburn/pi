@@ -1,0 +1,188 @@
+--- /dev/null
++++ b/packages/coding-agent/test/suite/compaction-skip-typed.test.ts
+@@ -0,0 +1,196 @@
++import { describe, expect, it } from "vitest";
++import type { AgentSessionEvent } from "../../src/core/agent-session.ts";
++import {
++	DEFAULT_COMPACTION_SETTINGS,
++	prepareCompaction,
++	prepareCompactionResult,
++} from "../../src/core/compaction/index.ts";
++import type { SessionEntry } from "../../src/core/session-manager.ts";
++import { createSuiteHarness } from "./harness.ts";
++
++describe("compaction typed skip result and threshold latch", () => {
++	it("distinguishes already-compacted, no-cut-point, and nothing-to-summarize in prepareCompactionResult", () => {
++		const compactionTail: SessionEntry[] = [
++			{
++				type: "compaction",
++				id: "c-1",
++				parentId: null,
++				timestamp: new Date().toISOString(),
++				summary: "prev",
++				firstKeptEntryId: "m-1",
++				tokensBefore: 1000,
++			},
++		];
++		const r1 = prepareCompactionResult(compactionTail, DEFAULT_COMPACTION_SETTINGS);
++		expect(r1).toEqual({
++			skipped: true,
++			skipReason: "already-compacted",
++			reason: "Already compacted (no new entries since last compaction)",
++		});
++		expect(prepareCompaction(compactionTail, DEFAULT_COMPACTION_SETTINGS)).toBeUndefined();
++
++		const emptyEntries: SessionEntry[] = [];
++		const r2 = prepareCompactionResult(emptyEntries, DEFAULT_COMPACTION_SETTINGS);
++		expect(r2).toEqual({
++			skipped: true,
++			skipReason: "no-cut-point",
++			reason: "No valid cut point found for compaction",
++		});
++		expect(prepareCompaction(emptyEntries, DEFAULT_COMPACTION_SETTINGS)).toBeUndefined();
++
++		const smallSession: SessionEntry[] = [
++			{
++				type: "message",
++				id: "m-1",
++				parentId: null,
++				timestamp: new Date().toISOString(),
++				message: {
++					role: "user",
++					content: [{ type: "text", text: "short prompt" }],
++					timestamp: Date.now(),
++				},
++			},
++		];
++		const r3 = prepareCompactionResult(smallSession, DEFAULT_COMPACTION_SETTINGS);
++		expect(r3).toEqual({
++			skipped: true,
++			skipReason: "nothing-to-summarize",
++			reason: "Nothing to summarize (all entries since last compaction are within the retained recent-token window)",
++		});
++		expect(prepareCompaction(smallSession, DEFAULT_COMPACTION_SETTINGS)).toBeUndefined();
++	});
++
++	it("emits skipped compaction_end without errorMessage or throwing on manual compact() and compactInBackground()", async () => {
++		const harness = await createSuiteHarness();
++		try {
++			await harness.Prompt("hello");
++
++			const events: Extract<AgentSessionEvent, { type: "compaction_end" }>[] = [];
++			const unsub = harness.session.subscribe((ev) => {
++				if (ev.type === "compaction_end") {
++					events.push(ev);
++				}
++			});
++
++			const blockingResult = await harness.session.compact();
++			expect(blockingResult).toBeUndefined();
++			expect(events).toHaveLength(1);
++			expect(events[0]).toMatchObject({
++				type: "compaction_end",
++				reason: "manual",
++				result: undefined,
++				aborted: false,
++				skipped: true,
++				skipReason: "nothing-to-summarize",
++			});
++			expect(events[0].errorMessage).toBeUndefined();
++
++			const bgResult = await harness.session.compactInBackground();
++			expect(bgResult).toBeUndefined();
++			expect(events).toHaveLength(2);
++			expect(events[1]).toMatchObject({
++				type: "compaction_end",
++				reason: "manual",
++				result: undefined,
++				aborted: false,
++				skipped: true,
++				skipReason: "nothing-to-summarize",
++				background: true,
++			});
++			expect(events[1].errorMessage).toBeUndefined();
++
++			unsub();
++		} finally {
++			await harness.cleanup();
++		}
++	});
++
++	it("latches threshold compaction skip and does not re-fire until the branch grows", async () => {
++		const harness = await createSuiteHarness();
++		try {
++			await harness.Prompt("small turn");
++
++			const startEvents: Extract<AgentSessionEvent, { type: "compaction_start" }>[] = [];
++			const endEvents: Extract<AgentSessionEvent, { type: "compaction_end" }>[] = [];
++			const unsub = harness.session.subscribe((ev) => {
++				if (ev.type === "compaction_start") startEvents.push(ev);
++				if (ev.type === "compaction_end") endEvents.push(ev);
++			});
++
++			// Directly trigger threshold background check while session is below keepRecentTokens
++			const triggerThreshold = () =>
++				(harness.session as unknown as { _startThresholdBackgroundCompaction: () => void })
++					._startThresholdBackgroundCompaction();
++
++			triggerThreshold();
++			triggerThreshold();
++
++			expect(startEvents).toHaveLength(0);
++			expect(endEvents).toHaveLength(0);
++
++			const latchedLeaf = (
++				harness.session as unknown as { _thresholdCompactionSkippedAtLeafId: string | null | undefined }
++			)._thresholdCompactionSkippedAtLeafId;
++			expect(latchedLeaf).toBe(harness.session.sessionManager.getLeafId());
++
++			// Advancing the branch changes the leaf id so a fresh check is permitted
++			await harness.Prompt("second small turn");
++			expect(harness.session.sessionManager.getLeafId()).not.toBe(latchedLeaf);
++
++			triggerThreshold();
++			expect(
++				(harness.session as unknown as { _thresholdCompactionSkippedAtLeafId: string | null | undefined })
++					._thresholdCompactionSkippedAtLeafId,
++			).toBe(harness.session.sessionManager.getLeafId());
++			expect(startEvents).toHaveLength(0);
++
++			unsub();
++		} finally {
++			await harness.cleanup();
++		}
++	});
++
++	it("still throws and emits errorMessage when a genuine summarization failure occurs", async () => {
++		const harness = await createSuiteHarness();
++		try {
++			// Lower keepRecentTokens so prepareCompaction succeeds on a multi-turn session
++			harness.session.settingsManager.setCompactionKeepRecentTokens(1);
++			await harness.Prompt("first message with enough tokens to exceed keepRecentTokens=1");
++			await harness.Prompt("second message to keep as recent tail");
++
++			// Force the summarization stream call to fail
++			const originalStreamFn = harness.session.agent.streamFunction;
++			harness.session.agent.streamFunction = () => {
++				throw new Error("Simulated provider network failure");
++			};
++
++			const endEvents: Extract<AgentSessionEvent, { type: "compaction_end" }>[] = [];
++			const unsub = harness.session.subscribe((ev) => {
++				if (ev.type === "compaction_end") endEvents.push(ev);
++			});
++
++			try {
++				await expect(harness.session.compact()).rejects.toThrow("Simulated provider network failure");
++				expect(endEvents).toHaveLength(1);
++				expect(endEvents[0].skipped).toBeUndefined();
++				expect(endEvents[0].errorMessage).toContain("Compaction failed: Simulated provider network failure");
++			} finally {
++				harness.session.agent.streamFunction = originalStreamFn;
++				unsub();
++			}
++		} finally {
++			await harness.cleanup();
++		}
++	});
++});

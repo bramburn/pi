@@ -7,6 +7,8 @@ import { describe, it } from "node:test";
 import {
 	decodeKittyPrintable,
 	decodePrintableKey,
+	isKeyRelease,
+	isKeyRepeat,
 	Key,
 	matchesKey,
 	parseKey,
@@ -415,7 +417,7 @@ describe("matchesKey", () => {
 			);
 		});
 
-		it("should parse legacy alt-prefixed sequences when kitty inactive", () => {
+		it("should parse legacy alt-prefixed sequences regardless of Kitty state", () => {
 			setKittyProtocolActive(false);
 			assert.strictEqual(matchesKey("\x1b ", "alt+space"), true);
 			assert.strictEqual(parseKey("\x1b "), "alt+space");
@@ -441,26 +443,28 @@ describe("matchesKey", () => {
 			assert.strictEqual(parseKey("\x1bz"), "alt+z");
 
 			setKittyProtocolActive(true);
-			assert.strictEqual(matchesKey("\x1b ", "alt+space"), false);
-			assert.strictEqual(parseKey("\x1b "), undefined);
+			// Tabby/xterm.js announce Kitty but still send legacy ESC-prefixed
+			// sequences, so they must keep matching while Kitty is active.
+			assert.strictEqual(matchesKey("\x1b ", "alt+space"), true);
+			assert.strictEqual(parseKey("\x1b "), "alt+space");
 			assert.strictEqual(matchesKey("\x1b\b", "alt+backspace"), true);
 			assert.strictEqual(parseKey("\x1b\b"), "alt+backspace");
-			assert.strictEqual(matchesKey("\x1b\x03", "ctrl+alt+c"), false);
-			assert.strictEqual(parseKey("\x1b\x03"), undefined);
-			assert.strictEqual(matchesKey("\x1bB", "alt+left"), false);
-			assert.strictEqual(parseKey("\x1bB"), undefined);
-			assert.strictEqual(matchesKey("\x1bF", "alt+right"), false);
-			assert.strictEqual(parseKey("\x1bF"), undefined);
-			assert.strictEqual(matchesKey("\x1ba", "alt+a"), false);
-			assert.strictEqual(parseKey("\x1ba"), undefined);
-			assert.strictEqual(matchesKey("\x1b1", "alt+1"), false);
-			assert.strictEqual(parseKey("\x1b1"), undefined);
-			assert.strictEqual(matchesKey("\x1b,", "alt+,"), false);
-			assert.strictEqual(parseKey("\x1b,"), undefined);
-			assert.strictEqual(matchesKey("\x1b.", "alt+."), false);
-			assert.strictEqual(parseKey("\x1b."), undefined);
-			assert.strictEqual(matchesKey("\x1by", "alt+y"), false);
-			assert.strictEqual(parseKey("\x1by"), undefined);
+			assert.strictEqual(matchesKey("\x1b\x03", "ctrl+alt+c"), true);
+			assert.strictEqual(parseKey("\x1b\x03"), "ctrl+alt+c");
+			assert.strictEqual(matchesKey("\x1bB", "alt+left"), true);
+			assert.strictEqual(parseKey("\x1bB"), "alt+left");
+			assert.strictEqual(matchesKey("\x1bF", "alt+right"), true);
+			assert.strictEqual(parseKey("\x1bF"), "alt+right");
+			assert.strictEqual(matchesKey("\x1ba", "alt+a"), true);
+			assert.strictEqual(parseKey("\x1ba"), "alt+a");
+			assert.strictEqual(matchesKey("\x1b1", "alt+1"), true);
+			assert.strictEqual(parseKey("\x1b1"), "alt+1");
+			assert.strictEqual(matchesKey("\x1b,", "alt+,"), true);
+			assert.strictEqual(parseKey("\x1b,"), "alt+,");
+			assert.strictEqual(matchesKey("\x1b.", "alt+."), true);
+			assert.strictEqual(parseKey("\x1b."), "alt+.");
+			assert.strictEqual(matchesKey("\x1by", "alt+y"), true);
+			assert.strictEqual(parseKey("\x1by"), "alt+y");
 			setKittyProtocolActive(false);
 		});
 
@@ -534,6 +538,26 @@ describe("decodePrintableKey", () => {
 		assert.strictEqual(decodePrintableKey("\x1b[27;2;32~"), " ");
 		assert.strictEqual(decodePrintableKey("\x1b[27;2;13~"), undefined);
 		assert.strictEqual(decodePrintableKey("\x1b[27;6;69~"), undefined);
+	});
+});
+
+describe("isKeyRelease / isKeyRepeat CSI guards", () => {
+	it("detects release and repeat events inside CSI sequences", () => {
+		assert.strictEqual(isKeyRelease("\x1b[97;3:3u"), true);
+		assert.strictEqual(isKeyRepeat("\x1b[97;3:2u"), true);
+	});
+
+	it("does not classify plain text containing event-type markers", () => {
+		// Unbracketed pastes can carry literal text like these; only an
+		// ESC-prefixed payload can be a release/repeat event.
+		assert.strictEqual(isKeyRelease("http://example.com:3u"), false);
+		assert.strictEqual(isKeyRelease("90:62:3F:A5"), false);
+		assert.strictEqual(isKeyRepeat("volume:2F"), false);
+	});
+
+	it("still ignores bracketed paste content", () => {
+		assert.strictEqual(isKeyRelease("\x1b[200~\x1b[97;3:3u\x1b[201~"), false);
+		assert.strictEqual(isKeyRepeat("\x1b[200~\x1b[97;3:2u\x1b[201~"), false);
 	});
 });
 

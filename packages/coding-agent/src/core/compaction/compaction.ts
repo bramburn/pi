@@ -5,10 +5,10 @@
  * and after compaction the session is reloaded.
  */
 
-import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@earendil-works/pi-ai";
-import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai/compat";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { AgentMessage, StreamFn, ThinkingLevel } from "@bramburn/qi-agent-core";
+import { contentText, type RetryCallbacks, type RetryPolicy, retryAssistantCall, uuidv7 } from "@bramburn/qi-ai";
+import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@bramburn/qi-ai/compat";
+import { completeSimple } from "@bramburn/qi-ai/compat";
 import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
@@ -248,6 +248,15 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
+	// `thresholdRatio` (when set) takes precedence over the legacy
+	// `reserveTokens` subtraction. Both express the same intent — a budget
+	// reserved for the response — but the ratio is portable across models
+	// while the subtraction is absolute tokens. Mirrors the agent-harness
+	// implementation in `packages/agent/src/harness/compaction/compaction.ts`
+	// so the two packages agree.
+	if (settings.thresholdRatio !== undefined && settings.thresholdRatio > 0 && contextWindow > 0) {
+		return contextTokens > contextWindow * settings.thresholdRatio;
+	}
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 
@@ -628,6 +637,7 @@ export async function generateSummary(
 	env?: Record<string, string>,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	summaryMaxTokens?: number,
 ): Promise<string> {
 	return (
 		await generateSummaryWithUsage(
@@ -644,12 +654,14 @@ export async function generateSummary(
 			env,
 			retry,
 			callbacks,
+			undefined,
+			undefined,
+			summaryMaxTokens,
 		)
 	).text;
 }
 
-/** Generate or update a conversation summary and return its provider usage. */
-export async function generateSummaryWithUsage(
+async function generateSummaryChunk(
 	currentMessages: AgentMessage[],
 	model: Model<any>,
 	reserveTokens: number,
@@ -664,14 +676,17 @@ export async function generateSummaryWithUsage(
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
 	replayPrefix: boolean = false,
+	summaryMaxTokens?: number,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
-		Math.floor(0.8 * reserveTokens),
+		Math.max(Math.floor(0.8 * reserveTokens), MIN_SUMMARY_OUTPUT_TOKENS),
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
+		summaryMaxTokens ?? SUMMARY_MAX_TOKENS_CEILING,
 	);
 
 	// Use update prompt if we have a previous summary, otherwise initial prompt
 	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+	basePrompt = `${basePrompt}\n\nBudget: keep the complete summary under ${Math.floor(maxTokens * 0.75)} words.`;
 	if (customInstructions) {
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
@@ -754,6 +769,128 @@ export async function generateSummaryWithUsage(
 	return { text: textContent, usage: response.usage };
 }
 
+/** Floor for summary output budget so thinking tokens do not exhaust it. */
+const MIN_SUMMARY_OUTPUT_TOKENS = 16_000;
+/**
+ * Absolute ceiling on summariser output tokens. Reserve tokens and model
+ * headroom can raise the budget far beyond what a summary needs; this caps it.
+ * Overridable per call via the `summaryMaxTokens` parameter.
+ */
+const SUMMARY_MAX_TOKENS_CEILING = 16_384;
+const MIN_CHUNK_TOKENS = 20_000;
+const MAX_CHUNK_TOKENS = 100_000;
+const MAX_SPLIT_DEPTH = 2;
+
+function isLengthFailure(error: unknown): boolean {
+	return error instanceof Error && error.message.includes("hit the token cap");
+}
+
+/**
+ * Generate or update a conversation summary and return its provider usage.
+ * Large inputs are summarized in sequential chunks (each folding into the previous
+ * summary), and a chunk whose output hits the token cap is split in half and retried.
+ * Any other error stops immediately.
+ */
+export async function generateSummaryWithUsage(
+	currentMessages: AgentMessage[],
+	model: Model<any>,
+	reserveTokens: number,
+	apiKey: string | undefined,
+	headers?: Record<string, string>,
+	signal?: AbortSignal,
+	customInstructions?: string,
+	previousSummary?: string,
+	thinkingLevel?: ThinkingLevel,
+	streamFn?: StreamFn,
+	env?: Record<string, string>,
+	retry?: RetryPolicy,
+	callbacks?: RetryCallbacks,
+	replayPrefix: boolean = false,
+	depth: number = 0,
+	summaryMaxTokens?: number,
+): Promise<{ text: string; usage: Usage }> {
+	const budget = Math.min(
+		MAX_CHUNK_TOKENS,
+		Math.max(MIN_CHUNK_TOKENS, Math.floor((model.contextWindow || 128_000) * 0.4)),
+	);
+	const sizes = currentMessages.map(estimateTokens);
+	const total = sizes.reduce((a, b) => a + b, 0);
+
+	const chunks: AgentMessage[][] = [];
+	if (total <= budget || currentMessages.length < 2) {
+		chunks.push(currentMessages);
+	} else {
+		let current: AgentMessage[] = [];
+		let used = 0;
+		currentMessages.forEach((m, i) => {
+			if (current.length > 0 && used + sizes[i] > budget) {
+				chunks.push(current);
+				current = [];
+				used = 0;
+			}
+			current.push(m);
+			used += sizes[i];
+		});
+		if (current.length > 0) chunks.push(current);
+	}
+
+	let summary = previousSummary;
+	let usage: Usage | undefined;
+	for (const chunk of chunks) {
+		let result: { text: string; usage: Usage };
+		try {
+			result = await generateSummaryChunk(
+				chunk,
+				model,
+				reserveTokens,
+				apiKey,
+				headers,
+				signal,
+				customInstructions,
+				summary,
+				thinkingLevel,
+				streamFn,
+				env,
+				retry,
+				callbacks,
+				replayPrefix,
+				summaryMaxTokens,
+			);
+		} catch (error) {
+			if (!isLengthFailure(error) || chunk.length < 2 || depth >= MAX_SPLIT_DEPTH) throw error;
+			const mid = Math.floor(chunk.length / 2);
+			let partial = summary;
+			let partialUsage: Usage | undefined;
+			for (const half of [chunk.slice(0, mid), chunk.slice(mid)]) {
+				const r = await generateSummaryWithUsage(
+					half,
+					model,
+					reserveTokens,
+					apiKey,
+					headers,
+					signal,
+					customInstructions,
+					partial,
+					thinkingLevel,
+					streamFn,
+					env,
+					retry,
+					callbacks,
+					replayPrefix,
+					depth + 1,
+					summaryMaxTokens,
+				);
+				partial = r.text;
+				partialUsage = partialUsage ? combineUsage(partialUsage, r.usage) : r.usage;
+			}
+			result = { text: partial ?? "", usage: partialUsage as Usage };
+		}
+		summary = result.text;
+		usage = usage ? combineUsage(usage, result.usage) : result.usage;
+	}
+	return { text: summary ?? "", usage: usage as Usage };
+}
+
 // ============================================================================
 // Compaction Preparation (for extensions)
 // ============================================================================
@@ -776,12 +913,61 @@ export interface CompactionPreparation {
 	settings: CompactionSettings;
 }
 
+export type CompactionSkipReason = "already-compacted" | "nothing-to-summarize" | "no-cut-point";
+
+export type CompactionPreparationOutcome =
+	| { skipped: false; preparation: CompactionPreparation }
+	| { skipped: true; skipReason: CompactionSkipReason; reason: string };
+
+export function formatCompactionSkipReason(skipReason: CompactionSkipReason): string {
+	switch (skipReason) {
+		case "already-compacted":
+			return "Already compacted (no new entries since last compaction)";
+		case "nothing-to-summarize":
+			return "Nothing to summarize (all entries since last compaction are within the retained recent-token window)";
+		case "no-cut-point":
+			return "No valid cut point found for compaction";
+	}
+}
+
+/**
+ * Typed error raised by the blocking `AgentSession.compact()` path when
+ * compaction is a benign no-op (skip) rather than a genuine failure.
+ *
+ * The skip emits `compaction_end` with `skipped: true` and
+ * `errorMessage: undefined` *before* this error is thrown, so direct RPC/SDK
+ * callers can distinguish a typed skip from a real summarisation failure via
+ * `error instanceof CompactionSkippedError`. The background path
+ * (`compactInBackground()`) never throws it: it resolves `undefined` instead.
+ */
+export class CompactionSkippedError extends Error {
+	readonly skipReason: CompactionSkipReason;
+
+	constructor(skipReason: CompactionSkipReason, message?: string) {
+		super(message ?? formatCompactionSkipReason(skipReason));
+		this.name = "CompactionSkippedError";
+		this.skipReason = skipReason;
+	}
+}
+
 export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 ): CompactionPreparation | undefined {
+	const outcome = prepareCompactionResult(pathEntries, settings);
+	return outcome.skipped ? undefined : outcome.preparation;
+}
+
+export function prepareCompactionResult(
+	pathEntries: SessionEntry[],
+	settings: CompactionSettings,
+): CompactionPreparationOutcome {
 	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
-		return undefined;
+		return {
+			skipped: true,
+			skipReason: "already-compacted",
+			reason: formatCompactionSkipReason("already-compacted"),
+		};
 	}
 
 	let prevCompactionIndex = -1;
@@ -809,7 +995,11 @@ export function prepareCompaction(
 	// Get UUID of first kept entry
 	const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
 	if (!firstKeptEntry?.id) {
-		return undefined; // Session needs migration
+		return {
+			skipped: true,
+			skipReason: "no-cut-point",
+			reason: formatCompactionSkipReason("no-cut-point"),
+		}; // Session needs migration
 	}
 	const firstKeptEntryId = firstKeptEntry.id;
 
@@ -832,7 +1022,11 @@ export function prepareCompaction(
 	}
 
 	if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) {
-		return undefined;
+		return {
+			skipped: true,
+			skipReason: "nothing-to-summarize",
+			reason: formatCompactionSkipReason("nothing-to-summarize"),
+		};
 	}
 
 	// Extract file operations from messages and previous compaction
@@ -846,14 +1040,17 @@ export function prepareCompaction(
 	}
 
 	return {
-		firstKeptEntryId,
-		messagesToSummarize,
-		turnPrefixMessages,
-		isSplitTurn: cutPoint.isSplitTurn,
-		tokensBefore,
-		previousSummary,
-		fileOps,
-		settings,
+		skipped: false,
+		preparation: {
+			firstKeptEntryId,
+			messagesToSummarize,
+			turnPrefixMessages,
+			isSplitTurn: cutPoint.isSplitTurn,
+			tokensBefore,
+			previousSummary,
+			fileOps,
+			settings,
+		},
 	};
 }
 
@@ -896,6 +1093,7 @@ export async function compact(
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
 	replayPrefix: boolean = false,
+	summaryMaxTokens?: number,
 ): Promise<CompactionResult> {
 	const {
 		firstKeptEntryId,
@@ -931,6 +1129,8 @@ export async function compact(
 				retry,
 				callbacks,
 				replayPrefix,
+				0,
+				summaryMaxTokens,
 			);
 			historyText = historyResult.text;
 			historyUsage = historyResult.usage;
@@ -947,6 +1147,7 @@ export async function compact(
 			streamFn,
 			retry,
 			callbacks,
+			summaryMaxTokens,
 		);
 		// Merge into single summary
 		summary = `${historyText}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
@@ -968,6 +1169,8 @@ export async function compact(
 			retry,
 			callbacks,
 			replayPrefix,
+			0,
+			summaryMaxTokens,
 		);
 		summary = result.text;
 		summaryUsage = result.usage;
@@ -1005,14 +1208,16 @@ async function generateTurnPrefixSummary(
 	streamFn?: StreamFn,
 	retry?: RetryPolicy,
 	callbacks?: RetryCallbacks,
+	summaryMaxTokens?: number,
 ): Promise<{ text: string; usage: Usage }> {
 	const maxTokens = Math.min(
-		Math.floor(0.5 * reserveTokens),
+		Math.max(Math.floor(0.8 * reserveTokens), MIN_SUMMARY_OUTPUT_TOKENS),
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-	); // Smaller budget for turn prefix
+		summaryMaxTokens ?? SUMMARY_MAX_TOKENS_CEILING,
+	);
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
+	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}\n\nBudget: keep the complete summary under ${Math.floor(maxTokens * 0.75)} words.`;
 	const summarizationMessages = [
 		{
 			role: "user" as const,

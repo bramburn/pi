@@ -58,6 +58,11 @@ export async function readClipboardText(): Promise<string | null> {
 		}
 	}
 
+	// Intentional even on Wayland: when wl-paste is unavailable or failed
+	// above, the native addon is the next best reader. On a Wayland
+	// session it reads the X11 clipboard (possibly stale), which beats
+	// returning nothing — pinned by the test "falls back to the native
+	// clipboard when wl-paste is unavailable".
 	if (!clipboard) {
 		return null;
 	}

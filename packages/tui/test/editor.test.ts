@@ -3,11 +3,27 @@ import { describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { type AutocompleteProvider, CombinedAutocompleteProvider } from "../src/autocomplete.ts";
 import { Editor, wordWrapLine } from "../src/components/editor.ts";
+import { matchesKey, setKittyProtocolActive } from "../src/keys.ts";
 import type { TUI } from "../src/tui.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
 import { visibleWidth } from "../src/utils.ts";
 import { defaultEditorTheme } from "./test-themes.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
+
+it("matches legacy alt+v even when Kitty protocol is active", () => {
+	setKittyProtocolActive(true);
+	try {
+		// Tabby/xterm.js on Windows announces Kitty but still sends legacy
+		// `\x1bv` for Alt+V. See #<your-issue-number>.
+		assert.strictEqual(matchesKey("\x1bv", "alt+v"), true);
+		// Alt+Shift+V must still not match.
+		assert.strictEqual(matchesKey("\x1bV", "alt+v"), false);
+		// Kitty CSI-u form must still match.
+		assert.strictEqual(matchesKey("\x1b[118;3u", "alt+v"), true);
+	} finally {
+		setKittyProtocolActive(false);
+	}
+});
 
 /** Create a TUI with a virtual terminal for testing */
 function createTestTUI(cols = 80, rows = 24): TUI {

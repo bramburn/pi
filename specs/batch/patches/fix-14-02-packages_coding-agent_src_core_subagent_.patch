@@ -1,0 +1,37 @@
+--- a/packages/coding-agent/src/core/subagent/types.ts
++++ b/packages/coding-agent/src/core/subagent/types.ts
+@@ -16,6 +16,9 @@
+ import type { Message } from "@earendil-works/pi-ai";
+ import type { CompletionEscalation } from "./result-record.ts";
+ 
++/** Worktree isolation mode for a subagent dispatch (REQ-I01). */
++export type SubagentIsolation = "none" | "worktree";
++
+ /** How the orchestrator dispatched a set of subagent tasks. */
+ export type SubagentMode = "single" | "parallel" | "chain" | "resume" | "dag";
+ 
+@@ -89,6 +92,18 @@
+ 	tools?: string[];
+ 	/** Working directory for the child process. Omit to inherit the parent's cwd. */
+ 	cwd?: string;
++	/**
++	 * Worktree isolation mode (REQ-I01). `"worktree"` creates an isolated git worktree
++	 * before spawning and passes its path as the child's `cwd`, releasing it on settle.
++	 * Default `"none"`. Creation failure raises an E1-class error and never downgrades silently.
++	 */
++	isolation?: SubagentIsolation;
++	/**
++	 * Explicit admission for detached (`background: true`) execution when the child's
++	 * tool set is not narrowed to non-shell tools (`read`, `grep`, `find`, `ls`) (REQ-P02).
++	 */
++	allowDetachedShell?: boolean;
+ 	/** Persisted child session file to resume. Wins over `parentSessionFile`. */
+ 	sessionFile?: string;
+ 	/**
+@@ -330,6 +345,8 @@
+ 	outputValidation?: SubagentOutputValidation;
+ 	/** Host-run verify command outcome, when the spec declared `gate`. */
+ 	gate?: SubagentGateOutcome;
++	/** Isolated git worktree path used by this run when `isolation: "worktree"` was requested (REQ-I01.5). */
++	worktreePath?: string;
+ }

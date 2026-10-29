@@ -3,7 +3,7 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'pi — Local AI Coding Agent',
+  title: 'qi — Local AI Coding Agent',
   tagline: 'A self-extensible, local-first AI coding agent that runs on your machine with your credentials.',
   favicon: 'img/favicon.svg',
 
@@ -73,26 +73,26 @@ const config: Config = {
     metadata: [
       {
         name: 'keywords',
-        content: 'AI coding agent, local AI, Claude, GPT, coding assistant, CLI, pi, pi.dev',
+        content: 'AI coding agent, local AI, Claude, GPT, coding assistant, CLI, qi',
       },
       {name: 'twitter:card', content: 'summary_large_image'},
       {name: 'og:type', content: 'website'},
-      {name: 'og:site_name', content: 'pi — Local AI Coding Agent'},
+      {name: 'og:site_name', content: 'qi — Local AI Coding Agent'},
     ],
 
     announcementBar: {
       id: 'v0842',
       content:
-        'You are reading the <strong>bramburn/pi</strong> fork docs. For the upstream project visit <a href="https://pi.dev/docs/latest" target="_blank" rel="noopener noreferrer">pi.dev/docs/latest</a>.',
+        'You are reading the <strong>qi</strong> coding agent documentation.',
       backgroundColor: '#1a1f2e',
       textColor: '#e0e6f0',
       isCloseable: true,
     },
 
     navbar: {
-      title: 'pi [bramburn fork]',
+      title: 'qi [bramburn fork]',
       logo: {
-        alt: 'pi logo',
+        alt: 'qi logo',
         src: 'img/logo.svg',
         srcDark: 'img/logo-dark.svg',
       },
@@ -147,15 +147,10 @@ const config: Config = {
           title: 'Community',
           items: [
             {label: 'GitHub', href: 'https://github.com/bramburn/pi'},
-            {
-              label: 'Upstream (earendil-works/pi)',
-              href: 'https://github.com/earendil-works/pi',
-            },
-            {label: 'pi.dev', href: 'https://pi.dev'},
           ],
         },
       ],
-      copyright: `Built with Docusaurus. pi is MIT-licensed. The bramburn/pi fork is MIT-licensed. Copyright ${new Date().getFullYear()} bramburn.`,
+      copyright: `Built with Docusaurus. qi is MIT-licensed. Copyright ${new Date().getFullYear()} bramburn.`,
     },
 
     prism: {

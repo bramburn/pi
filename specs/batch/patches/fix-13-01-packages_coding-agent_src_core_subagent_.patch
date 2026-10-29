@@ -1,0 +1,94 @@
+--- a/packages/coding-agent/src/core/subagent/worktree-lock.ts
++++ b/packages/coding-agent/src/core/subagent/worktree-lock.ts
+@@ -66,13 +66,22 @@
+  */
+ const CORRUPT_LOCK_STALE_MS = 30_000;
+ 
++export type WorktreeLockErrorReason = "unresolved" | "contended";
++
+ /** Thrown when the lock stays held past the wait budget, or the repo cannot be locked. */
+ export class WorktreeLockError extends Error {
+-	readonly lockPath: string;
+-	constructor(message: string, lockPath: string) {
++	readonly lockPath: string | null;
++	readonly reason: WorktreeLockErrorReason;
++	readonly repoRoot: string;
++	constructor(
++		message: string,
++		lockPath: string | null,
++		opts?: { reason?: WorktreeLockErrorReason; repoRoot?: string },
++	) {
+ 		super(message);
+ 		this.name = "WorktreeLockError";
+ 		this.lockPath = lockPath;
++		this.reason = opts?.reason ?? (lockPath === null || lockPath === "" ? "unresolved" : "contended");
++		this.repoRoot = opts?.repoRoot ?? "";
+ 	}
+ }
+ 
+@@ -111,7 +120,8 @@
+ 		const detail = res.stderr.trim() || res.stdout.trim() || "(no output)";
+ 		throw new WorktreeLockError(
+ 			`cannot lock worktree mutations: git rev-parse --git-common-dir failed in ${repoRoot} (exit ${res.exitCode}): ${detail}`,
+-			"",
++			null,
++			{ reason: "unresolved", repoRoot },
+ 		);
+ 	}
+ 	return join(resolvePath(repoRoot, out), WORKTREE_LOCK_FILE_NAME);
+@@ -200,16 +210,19 @@
+ 	}
+ }
+ 
+-function heldMessage(record: LockRecord | undefined, lockPath: string): string {
++function heldMessage(record: LockRecord | undefined, lockPath: string, brokeStaleLock: boolean): string {
+ 	const holder = record ? `pid ${record.pid} since ${new Date(record.startedAt).toISOString()}` : "unknown pid";
+-	return `another run is mutating worktrees in this repo (${holder}) [${lockPath}]`;
++	const budgetNote = brokeStaleLock ? "; stale-break budget (1) was spent" : "";
++	return `another run is mutating worktrees in this repo (${holder}${budgetNote}) [${lockPath}]`;
+ }
+ 
+ /**
+  * Acquire the exclusive lock, waiting up to `waitMs`. Returns the
+  * per-acquisition token that release() must match.
+  */
+-async function acquireLock(lockPath: string, waitMs: number): Promise<string> {
++async function acquireLock(lockPath: string, waitMs: number, repoRoot: string): Promise<string> {
+ 	const deadline = Date.now() + waitMs;
+ 	let brokeStaleLock = false;
+ 	let delay = RETRY_BASE_MS;
+@@ -230,7 +243,13 @@
+ 		const snapshot = readSnapshot(lockPath);
+ 		if (snapshot === undefined) {
+ 			// Someone just released — retry promptly, but never spin.
+-			if (Date.now() >= deadline) throw new WorktreeLockError(heldMessage(undefined, lockPath), lockPath);
++			if (Date.now() >= deadline) {
++				throw new WorktreeLockError(heldMessage(undefined, lockPath, brokeStaleLock), lockPath, {
++					reason: "contended",
++					repoRoot,
++				});
++			}
+ 			await sleep(delay);
+ 			delay = Math.min(delay * 2, RETRY_MAX_MS);
+ 			continue;
+@@ -245,7 +264,10 @@
+ 			continue;
+ 		}
+ 		if (Date.now() >= deadline) {
+-			throw new WorktreeLockError(heldMessage(record, lockPath), lockPath);
++			throw new WorktreeLockError(heldMessage(record, lockPath, brokeStaleLock), lockPath, {
++				reason: "contended",
++				repoRoot,
++			});
+ 		}
+ 		await sleep(delay);
+ 		delay = Math.min(delay * 2, RETRY_MAX_MS);
+@@ -288,7 +310,7 @@
+ 	opts?: { waitMs?: number },
+ ): Promise<T> {
+ 	const lockPath = await resolveWorktreeLockPath(repoRoot);
+-	const token = await acquireLock(lockPath, opts?.waitMs ?? DEFAULT_WORKTREE_LOCK_WAIT_MS);
++	const token = await acquireLock(lockPath, opts?.waitMs ?? DEFAULT_WORKTREE_LOCK_WAIT_MS, repoRoot);
+ 	try {
+ 		return await action();
+ 	} finally {

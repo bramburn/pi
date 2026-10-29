@@ -1,0 +1,124 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://bramburn.github.io/qi/schemas/extension-compat-manifest.v1.schema.json",
+	"title": "extension-compat manifest (v1)",
+	"description": "Checked-in compatibility manifest mapping known third-party extensions (npm pi-package keyword and 0.85 gallery snapshot) to 0.85-compatible version constraints. Backwards-compatibility policy: additive-only within v1 (new optional properties may be added to root or PackageCompatEntry without a version bump); any breaking change (removing required fields, narrowing types/patterns, or changing resolution semantics) requires bumping the top-level version field to 2. Companion examples and resolution traces live in specs/contracts/json-schema/extension-compat-manifest.examples.md.",
+	"$comment": "Traceability — Realises: REQ-EXT (R-EXT-001, R-EXT-005, R-EXT-006, R-EXT-007). Depends on: ADR-0003. References: specs/contracts/json-schema/extension-compat-manifest.examples.md, IMPL-EXTENSIONS. Keying & incompatibility policy: npm-published extensions are keyed by canonical npm package name and git-only gallery extensions are keyed by 'git:<host>/<owner>/<repo>' matching packages/coding-agent/src/core/package-manager.ts:1691-1704; deprecated or abandoned extensions with no 0.85-compatible release use compatibleRange '<0.0.0' with notes explaining the incompatibility so installs fail with E_EXT_NO_COMPATIBLE_VERSION and surface the note.",
+	"type": "object",
+	"required": ["version", "baselineVersion", "generatedAt", "packages"],
+	"additionalProperties": false,
+	"properties": {
+		"version": {
+			"type": "integer",
+			"const": 1,
+			"description": "Manifest contract major version. Must be 1 for all v1 manifests; breaking schema changes increment this integer.",
+			"examples": [1]
+		},
+		"baselineVersion": {
+			"type": "string",
+			"pattern": "^0\\.85\\.\\d+(?:-[0-9A-Za-z.-]+)?$",
+			"description": "Host compatibility baseline version that entries in this manifest were verified against.",
+			"examples": ["0.85.0-b1"]
+		},
+		"generatedAt": {
+			"type": "string",
+			"format": "date",
+			"pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+			"description": "ISO-8601 date (YYYY-MM-DD) when this manifest snapshot was last updated.",
+			"examples": ["2026-10-20"]
+		},
+		"packages": {
+			"type": "object",
+			"description": "Dictionary mapping canonical npm package names (e.g. '@scope/pkg' or 'pkg') or normalized git keys ('git:github.com/owner/repo') to their 0.85 compatibility constraint entry.",
+			"minProperties": 1,
+			"propertyNames": {
+				"type": "string",
+				"pattern": "^((@[a-z0-9-~][a-z0-9-._~]*\\/)?[a-z0-9-~][a-z0-9-._~]*|git:[a-zA-Z0-9.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+)$"
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/PackageCompatEntry"
+			}
+		}
+	},
+	"$defs": {
+		"PackageCompatEntry": {
+			"type": "object",
+			"required": ["name", "compatibleRange", "lastReviewed"],
+			"additionalProperties": false,
+			"dependentRequired": {
+				"gitUrl": ["gitRef"]
+			},
+			"properties": {
+				"name": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 214,
+					"pattern": "^((@[a-z0-9-~][a-z0-9-._~]*\\/)?[a-z0-9-~][a-z0-9-._~]*|git:[a-zA-Z0-9.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+)$",
+					"description": "Canonical npm registry package name (or 'git:<host>/<owner>/<repo>' identifier for git-only packages). Must match the enclosing key in 'packages'.",
+					"examples": ["shitty-extensions", "@foo/pi-tools", "git:github.com/user/custom-ext"]
+				},
+				"compatibleRange": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 128,
+					"description": "Valid node-semver range (parsed via semver.validRange) or exact semver version designating all releases of this package compatible with the 0.85 host API. Use '<0.0.0' for deprecated/incompatible packages that have no 0.85-compatible release.",
+					"examples": ["<=1.4.2", "^1.0.0 <1.5.0", "0.9.3", "<0.0.0"]
+				},
+				"recommendedVersion": {
+					"type": "string",
+					"pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+					"description": "Optional exact semver version known to satisfy compatibleRange, used as a reference pin in diagnostics and tests.",
+					"examples": ["1.4.2"]
+				},
+				"gitUrl": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512,
+					"pattern": "^(git:([a-zA-Z0-9.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+|git@[a-zA-Z0-9.-]+:[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+)|https:\\/\\/[a-zA-Z0-9.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+|ssh:\\/\\/git@[a-zA-Z0-9.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+)(\\.git)?$",
+					"description": "Optional source-control repository URL alternative for the package. When present, gitRef is required.",
+					"examples": ["https://github.com/user/shitty-extensions", "git:github.com/user/shitty-extensions"]
+				},
+				"gitRef": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 128,
+					"pattern": "^[A-Za-z0-9._/-]+$",
+					"description": "Pinned git tag or full 40-character commit SHA corresponding to the 0.85-compatible revision when installed via gitUrl.",
+					"examples": ["v1.4.2", "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"]
+				},
+				"lastReviewed": {
+					"type": "string",
+					"format": "date",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+					"description": "ISO-8601 calendar date (YYYY-MM-DD) when the entry was last audited against the 0.85 extension API.",
+					"examples": ["2026-10-20"]
+				},
+				"notes": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 1000,
+					"description": "Optional human-readable audit notes explaining version upper bounds or breaking changes in newer upstream versions.",
+					"examples": ["Versions >=2.0.0 require upstream 0.86 session hooks; pin to <=1.4.2."]
+				}
+			}
+		}
+	},
+	"examples": [
+		{
+			"version": 1,
+			"baselineVersion": "0.85.0-b1",
+			"generatedAt": "2026-10-20",
+			"packages": {
+				"shitty-extensions": {
+					"name": "shitty-extensions",
+					"compatibleRange": "<=1.0.1",
+					"recommendedVersion": "1.0.1",
+					"gitUrl": "https://github.com/example/shitty-extensions",
+					"gitRef": "v1.0.1",
+					"lastReviewed": "2026-10-20",
+					"notes": "Verified against 0.85.0-b1."
+				}
+			}
+		}
+	]
+}

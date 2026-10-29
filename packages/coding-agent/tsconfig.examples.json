@@ -3,14 +3,41 @@
 	"compilerOptions": {
 		"noEmit": true,
 		"paths": {
-			"@earendil-works/pi-coding-agent": ["./src/index.ts"],
-			"@earendil-works/pi-coding-agent/hooks": ["./src/core/hooks/index.ts"],
-			"@earendil-works/pi-tui": ["../tui/src/index.ts"],
-			"@earendil-works/pi-ai": ["../ai/src/index.ts"],
-			"typebox": ["../../node_modules/typebox"]
+			"@earendil-works/pi-coding-agent": [
+				"./src/index.ts"
+			],
+			"@earendil-works/pi-coding-agent/hooks": [
+				"./src/core/hooks/index.ts"
+			],
+			"@earendil-works/pi-tui": [
+				"../tui/src/index.ts"
+			],
+			"@earendil-works/pi-ai": [
+				"../ai/src/index.ts"
+			],
+			"typebox": [
+				"../../node_modules/typebox"
+			],
+			"@bramburn/qi-coding-agent": [
+				"./src/index.ts"
+			],
+			"@bramburn/qi-coding-agent/hooks": [
+				"./src/core/hooks/index.ts"
+			],
+			"@bramburn/qi-tui": [
+				"../tui/src/index.ts"
+			],
+			"@bramburn/qi-ai": [
+				"../ai/src/index.ts"
+			]
 		},
 		"skipLibCheck": true
 	},
-	"include": ["examples/**/*.ts"],
-	"exclude": ["node_modules", "dist"]
+	"include": [
+		"examples/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
 }

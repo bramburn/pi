@@ -533,6 +533,13 @@ export function isKeyRelease(data: string): boolean {
 		return false;
 	}
 
+	// Event-type markers (:3u, :3~, ...) are only meaningful inside a CSI
+	// sequence. Without this guard, plain text like "http://example.com:3u"
+	// from an unbracketed paste would be misclassified as a key release.
+	if (!data.startsWith("\x1b[")) {
+		return false;
+	}
+
 	// Quick check: release events with flag 2 contain ":3"
 	// Format: \x1b[<codepoint>;<modifier>:3u
 	if (
@@ -558,6 +565,12 @@ export function isKeyRepeat(data: string): boolean {
 	// Don't treat bracketed paste content as key repeat, even if it contains
 	// patterns like ":2F". See isKeyRelease() for details.
 	if (data.includes("\x1b[200~")) {
+		return false;
+	}
+
+	// Same CSI-prefix guard as isKeyRelease(): a bare "...:2F" substring in
+	// plain text is not a repeat event.
+	if (!data.startsWith("\x1b[")) {
 		return false;
 	}
 
@@ -839,13 +852,13 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			);
 
 		case "space":
-			if (!_kittyProtocolActive) {
-				if (modifier === MODIFIERS.ctrl && data === "\x00") {
-					return true;
-				}
-				if (modifier === MODIFIERS.alt && data === "\x1b ") {
-					return true;
-				}
+			// Legacy ctrl+space/alt+space match even when Kitty is active:
+			// Tabby and xterm.js announce Kitty but keep sending legacy bytes.
+			if (modifier === MODIFIERS.ctrl && data === "\x00") {
+				return true;
+			}
+			if (modifier === MODIFIERS.alt && data === "\x1b ") {
+				return true;
 			}
 			if (modifier === 0) {
 				return (
@@ -1075,7 +1088,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			if (modifier === MODIFIERS.alt) {
 				return (
 					data === "\x1b[1;3D" ||
-					(!_kittyProtocolActive && data === "\x1bB") ||
+					data === "\x1bB" ||
 					data === "\x1bb" ||
 					matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt)
 				);
@@ -1102,7 +1115,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			if (modifier === MODIFIERS.alt) {
 				return (
 					data === "\x1b[1;3C" ||
-					(!_kittyProtocolActive && data === "\x1bF") ||
+					data === "\x1bF" ||
 					data === "\x1bf" ||
 					matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt)
 				);
@@ -1152,15 +1165,16 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		const isLetter = key >= "a" && key <= "z";
 		const isDigit = isDigitKey(key);
 
-		if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && !_kittyProtocolActive && rawCtrl) {
+		if (modifier === MODIFIERS.ctrl + MODIFIERS.alt && rawCtrl) {
 			// Legacy: ctrl+alt+key is ESC followed by the control character.
 			// If that legacy form does not match, continue so CSI-u and
 			// modifyOtherKeys sequences from tmux can still be recognized.
 			if (data === `\x1b${rawCtrl}`) return true;
 		}
 
-		if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit || SYMBOL_KEYS.has(key))) {
-			// Legacy: alt+printable key is ESC followed by the key
+		if (modifier === MODIFIERS.alt && (isLetter || isDigit || SYMBOL_KEYS.has(key))) {
+			// Legacy: alt+printable key is ESC followed by the key. Matches even
+			// when Kitty is active — Tabby advertises Kitty but sends this form.
 			if (data === `\x1b${key}`) return true;
 		}
 
@@ -1286,12 +1300,12 @@ export function parseKey(data: string): string | undefined {
 	if (data === "\x7f") return "backspace";
 	if (data === "\x08") return isWindowsTerminalSession() ? "ctrl+backspace" : "backspace";
 	if (data === "\x1b[Z") return "shift+tab";
-	if (!_kittyProtocolActive && data === "\x1b\r") return "alt+enter";
-	if (!_kittyProtocolActive && data === "\x1b ") return "alt+space";
+	if (data === "\x1b\r") return "alt+enter";
+	if (data === "\x1b ") return "alt+space";
 	if (data === "\x1b\x7f" || data === "\x1b\b") return "alt+backspace";
-	if (!_kittyProtocolActive && data === "\x1bB") return "alt+left";
-	if (!_kittyProtocolActive && data === "\x1bF") return "alt+right";
-	if (!_kittyProtocolActive && data.length === 2 && data[0] === "\x1b") {
+	if (data === "\x1bB") return "alt+left";
+	if (data === "\x1bF") return "alt+right";
+	if (data.length === 2 && data[0] === "\x1b") {
 		const code = data.charCodeAt(1);
 		if (code >= 1 && code <= 26) {
 			return `ctrl+alt+${String.fromCharCode(code + 96)}`;

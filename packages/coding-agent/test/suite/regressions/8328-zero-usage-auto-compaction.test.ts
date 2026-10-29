@@ -1,10 +1,19 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@bramburn/qi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHarness, type Harness } from "../harness.ts";
 
 type SessionWithCompactionInternals = {
 	_checkCompaction: (assistantMessage: AssistantMessage) => Promise<boolean>;
-	_runAutoCompaction: (reason: "overflow" | "threshold", willRetry: boolean) => Promise<boolean>;
+	// Threshold compaction is started in the background since the hot-swap
+	// refactor: _checkCompaction -> _startThresholdBackgroundCompaction ->
+	// (feasibility pre-check) -> _launchBackgroundCompaction. The regression is
+	// pinned at the launch seam so the test fails if either the threshold
+	// decision or the feasibility pre-check stops firing for a genuinely
+	// compactable session.
+	_launchBackgroundCompaction: (
+		reason: "manual" | "threshold",
+		customInstructions: string | undefined,
+	) => Promise<unknown>;
 };
 
 function createZeroUsageAssistant(harness: Harness): AssistantMessage {
@@ -44,37 +53,54 @@ describe("issue #8328 zero-usage auto-compaction", () => {
 			settings: { compaction: { enabled: true, reserveTokens: 10 } },
 		});
 		harnesses.push(harness);
+		// New contract: the threshold path runs a feasibility pre-check against
+		// the session branch before launching, so the branch must be genuinely
+		// compactable (keep the retained window below the seeded history).
+		harness.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
 		return harness;
+	}
+
+	/**
+	 * Seed the session branch (the source the feasibility pre-check reads) and
+	 * mirror it into agent state (the source the zero-usage threshold estimate
+	 * reads), so both halves of the threshold decision see the same history —
+	 * the same invariant the live prompt flow maintains.
+	 */
+	function seedBranch(harness: Harness, assistant: AssistantMessage, userText: string): void {
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: userText }],
+			timestamp: Date.now() - 1,
+		});
+		harness.sessionManager.appendMessage(assistant);
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 	}
 
 	it("uses the message estimate when no assistant has reported usage", async () => {
 		const harness = await createCompactionHarness();
 		const assistant = createZeroUsageAssistant(harness);
-		harness.session.agent.state.messages = [
-			{ role: "user", content: [{ type: "text", text: "x".repeat(400) }], timestamp: Date.now() - 1 },
-			assistant,
-		];
+		seedBranch(harness, assistant, "x".repeat(400));
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const launchSpy = vi.spyOn(sessionInternals, "_launchBackgroundCompaction").mockResolvedValue(undefined);
 
 		await sessionInternals._checkCompaction(assistant);
 
-		expect(runAutoCompactionSpy).toHaveBeenCalledOnce();
-		expect(runAutoCompactionSpy).toHaveBeenCalledWith("threshold", false);
+		// 400 chars of user text is over the threshold for the 100-token window
+		// with only zero usage reported, so the message estimate must drive the
+		// threshold compaction all the way to launch.
+		expect(launchSpy).toHaveBeenCalledOnce();
+		expect(launchSpy).toHaveBeenCalledWith("threshold", undefined);
 	});
 
 	it("does not compact when the zero-usage message estimate is below the threshold", async () => {
 		const harness = await createCompactionHarness();
 		const assistant = createZeroUsageAssistant(harness);
-		harness.session.agent.state.messages = [
-			{ role: "user", content: [{ type: "text", text: "short" }], timestamp: Date.now() - 1 },
-			assistant,
-		];
+		seedBranch(harness, assistant, "short");
 		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
-		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+		const launchSpy = vi.spyOn(sessionInternals, "_launchBackgroundCompaction").mockResolvedValue(undefined);
 
 		await sessionInternals._checkCompaction(assistant);
 
-		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(launchSpy).not.toHaveBeenCalled();
 	});
 });

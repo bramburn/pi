@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@bramburn/qi-ai";
 import { existsSync, readFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";

@@ -1,0 +1,38 @@
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -42,6 +42,7 @@ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth
+ import {
+ 	type CompactionPreparationOutcome,
+ 	type CompactionResult,
++	CompactionSkippedError,
+ 	type CompactionSkipReason,
+ 	calculateContextTokens,
+ 	collectEntriesForBranchSummary,
+@@ -2186,7 +2187,7 @@ export class AgentSession {
+ 	 * path remains for RPC and extension callers that await the result.
+ 	 * @param customInstructions Optional instructions for the compaction summary
+ 	 */
+-	async compact(customInstructions?: string): Promise<CompactionResult | undefined> {
++	async compact(customInstructions?: string): Promise<CompactionResult> {
+ 		this._abortBackgroundCompaction();
+ 		await this.abort();
+ 		this._compactionAbortController = new AbortController();
+@@ -2215,7 +2216,7 @@ export class AgentSession {
+ 					skipReason: prepOutcome.skipReason,
+ 					skipMessage: prepOutcome.reason,
+ 				});
+-				return undefined;
++				throw new CompactionSkippedError(prepOutcome.skipReason, prepOutcome.reason);
+ 			}
+ 			const preparation = prepOutcome.preparation;
+ 
+@@ -2343,6 +2344,9 @@ export class AgentSession {
+ 			});
+ 			return compactionResult;
+ 		} catch (error) {
++			if (error instanceof CompactionSkippedError) {
++				throw error;
++			}
+ 			const message = error instanceof Error ? error.message : String(error);
+ 			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
+ 			this._compactionAbortController = undefined;

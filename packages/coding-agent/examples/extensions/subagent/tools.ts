@@ -6,7 +6,7 @@
  * so they double as inline documentation.
  */
 
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@bramburn/qi-ai";
 import { Type } from "typebox";
 
 export const StartParams = Type.Object({

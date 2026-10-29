@@ -1,0 +1,8 @@
+--- a/packages/coding-agent/src/core/session-share.ts
++++ b/packages/coding-agent/src/core/session-share.ts
+@@ -26,7 +26,7 @@
+ 	gistId: string;
+ }
+ 
+-export const SESSION_SHARE_CUSTOM_TYPE = "pi.share";
++export const SESSION_SHARE_CUSTOM_TYPE = "qi.share";

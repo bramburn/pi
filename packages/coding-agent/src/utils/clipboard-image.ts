@@ -48,9 +48,19 @@ export function extensionForImageMimeType(mimeType: string): string | null {
 	}
 }
 
+/** Known video subtypes whose subtype is not a usable file extension. */
+const VIDEO_MIME_EXTENSIONS: Record<string, string> = {
+	quicktime: "mov",
+	"x-matroska": "mkv",
+	"x-msvideo": "avi",
+	"3gpp": "3gp",
+	"3gpp2": "3gp2",
+	"x-m4v": "m4v",
+};
+
 export function extensionForVideoMimeType(mimeType: string): string {
 	const subtype = baseMimeType(mimeType).split("/")[1] ?? "video";
-	return subtype === "quicktime" ? "mov" : subtype;
+	return VIDEO_MIME_EXTENSIONS[subtype] ?? subtype;
 }
 
 function selectPreferredMimeType(mimeTypes: string[], preferred: readonly string[], anyPrefix: string): string | null {
@@ -126,7 +136,29 @@ function runCommand(
 	return { ok: true, stdout };
 }
 
-function readClipboardImageViaWlPaste(): ClipboardImage | null {
+type ClipboardToolReadOptions = {
+	preferred: readonly string[];
+	anyPrefix: string;
+	/** stdout ceiling; defaults to the 50 MB image limit. */
+	maxBufferBytes?: number;
+};
+
+const IMAGE_CLIPBOARD_READ: ClipboardToolReadOptions = {
+	preferred: SUPPORTED_IMAGE_MIME_TYPES,
+	anyPrefix: "image/",
+};
+const VIDEO_CLIPBOARD_READ: ClipboardToolReadOptions = {
+	preferred: SUPPORTED_VIDEO_MIME_TYPES,
+	anyPrefix: "video/",
+	maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
+};
+const PDF_CLIPBOARD_READ: ClipboardToolReadOptions = {
+	preferred: SUPPORTED_PDF_MIME_TYPES,
+	anyPrefix: "application/pdf",
+	maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
+};
+
+function readClipboardViaWlPaste(options: ClipboardToolReadOptions): ClipboardImage | null {
 	const list = runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
 	if (!list.ok) {
 		return null;
@@ -138,12 +170,14 @@ function readClipboardImageViaWlPaste(): ClipboardImage | null {
 		.map((t) => t.trim())
 		.filter(Boolean);
 
-	const selectedType = selectPreferredMimeType(types, SUPPORTED_IMAGE_MIME_TYPES, "image/");
+	const selectedType = selectPreferredMimeType(types, options.preferred, options.anyPrefix);
 	if (!selectedType) {
 		return null;
 	}
 
-	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"]);
+	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"], {
+		maxBufferBytes: options.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES,
+	});
 	if (!data.ok || data.stdout.length === 0) {
 		return null;
 	}
@@ -277,7 +311,7 @@ function readClipboardImageViaPowerShellBase64(): ClipboardImage | null {
 	return { bytes: new Uint8Array(bytes), mimeType: "image/png" };
 }
 
-function readClipboardImageViaXclip(): ClipboardImage | null {
+function readClipboardViaXclip(options: ClipboardToolReadOptions): ClipboardImage | null {
 	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
 		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
 	});
@@ -292,11 +326,13 @@ function readClipboardImageViaXclip(): ClipboardImage | null {
 	}
 
 	const preferred =
-		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, SUPPORTED_IMAGE_MIME_TYPES, "image/") : null;
-	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
+		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, options.preferred, options.anyPrefix) : null;
+	const tryTypes = preferred ? [preferred, ...options.preferred] : [...options.preferred];
 
 	for (const mimeType of tryTypes) {
-		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
+		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"], {
+			maxBufferBytes: options.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES,
+		});
 		if (data.ok && data.stdout.length > 0) {
 			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
 		}
@@ -324,7 +360,9 @@ async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | 
 		return null;
 	}
 
-	let imageData: Array<number> | null;
+	// Fork addon returns a Buffer (Uint8Array); older prebuilds and the
+	// upstream addon return Array<number>. Both are handled below.
+	let imageData: Uint8Array | Array<number> | null;
 	try {
 		imageData = await clipboard.getImageBinary();
 	} catch {
@@ -363,22 +401,24 @@ export async function readClipboardImage(options?: {
 		const wayland = isWaylandSession(env);
 
 		if (wayland || wsl) {
-			image = readClipboardImageViaWlPaste() ?? readClipboardImageViaXclip();
+			image = readClipboardViaWlPaste(IMAGE_CLIPBOARD_READ) ?? readClipboardViaXclip(IMAGE_CLIPBOARD_READ);
 		}
 
 		if (!image && wsl) {
 			image = readClipboardImageViaPowerShell();
 		}
 
-		// Linux fallback: if Wayland/wl-paste/xclip found nothing, try
-		// the native addon last. The "unavailable" sentinel from the
-		// native path means the read itself failed (e.g. X server hung);
+		// X11 fallback: try the native addon last. The bundled arboard
+		// crate is X11-only, so on a Wayland session the addon cannot see
+		// the clipboard at all and is skipped (consistent with the crate's
+		// known limitation) instead of being probed for a guaranteed miss.
+		// The "unavailable" sentinel from the native path means the read itself failed (e.g. X server hung);
 		// we don't fall back to xclip again because xclip would hit the
 		// same broken state, but we still try once in case it differs.
 		if (!image && !wayland) {
 			const native = await readClipboardImageViaNativeClipboard();
 			image = native === "unavailable" ? null : native;
-			image = image ?? readClipboardImageViaXclip();
+			image = image ?? readClipboardViaXclip(IMAGE_CLIPBOARD_READ);
 		}
 	} else {
 		// Native Windows / macOS: try the addon first. If it returns
@@ -414,63 +454,6 @@ export async function readClipboardImage(options?: {
 	return image;
 }
 
-function readClipboardMediaViaWlPaste(preferredMimeTypes: readonly string[], anyPrefix: string): ClipboardImage | null {
-	const list = runCommand("wl-paste", ["--list-types"], { timeoutMs: DEFAULT_LIST_TIMEOUT_MS });
-	if (!list.ok) {
-		return null;
-	}
-
-	const types = list.stdout
-		.toString("utf-8")
-		.split(/\r?\n/)
-		.map((t) => t.trim())
-		.filter(Boolean);
-
-	const selectedType = selectPreferredMimeType(types, preferredMimeTypes, anyPrefix);
-	if (!selectedType) {
-		return null;
-	}
-
-	const data = runCommand("wl-paste", ["--type", selectedType, "--no-newline"], {
-		maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
-	});
-	if (!data.ok || data.stdout.length === 0) {
-		return null;
-	}
-
-	return { bytes: data.stdout, mimeType: baseMimeType(selectedType) };
-}
-
-function readClipboardMediaViaXclip(preferredMimeTypes: readonly string[], anyPrefix: string): ClipboardImage | null {
-	const targets = runCommand("xclip", ["-selection", "clipboard", "-t", "TARGETS", "-o"], {
-		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
-	});
-
-	let candidateTypes: string[] = [];
-	if (targets.ok) {
-		candidateTypes = targets.stdout
-			.toString("utf-8")
-			.split(/\r?\n/)
-			.map((t) => t.trim())
-			.filter(Boolean);
-	}
-
-	const preferred =
-		candidateTypes.length > 0 ? selectPreferredMimeType(candidateTypes, preferredMimeTypes, anyPrefix) : null;
-	const tryTypes = preferred ? [preferred, ...preferredMimeTypes] : [...preferredMimeTypes];
-
-	for (const mimeType of tryTypes) {
-		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"], {
-			maxBufferBytes: DEFAULT_MEDIA_MAX_BUFFER_BYTES,
-		});
-		if (data.ok && data.stdout.length > 0) {
-			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
-		}
-	}
-
-	return null;
-}
-
 /**
  * Read a video payload from the clipboard, if one is present. Only the
  * Wayland/X11 backends expose video/* clipboard types; the native addon and
@@ -492,12 +475,9 @@ export function readClipboardVideo(options?: {
 	}
 
 	if (isWaylandSession(env) || isWSL(env)) {
-		return (
-			readClipboardMediaViaWlPaste(SUPPORTED_VIDEO_MIME_TYPES, "video/") ??
-			readClipboardMediaViaXclip(SUPPORTED_VIDEO_MIME_TYPES, "video/")
-		);
+		return readClipboardViaWlPaste(VIDEO_CLIPBOARD_READ) ?? readClipboardViaXclip(VIDEO_CLIPBOARD_READ);
 	}
-	return readClipboardMediaViaXclip(SUPPORTED_VIDEO_MIME_TYPES, "video/");
+	return readClipboardViaXclip(VIDEO_CLIPBOARD_READ);
 }
 
 /**
@@ -520,10 +500,7 @@ export function readClipboardPdf(options?: {
 	}
 
 	if (isWaylandSession(env) || isWSL(env)) {
-		return (
-			readClipboardMediaViaWlPaste(SUPPORTED_PDF_MIME_TYPES, "application/pdf") ??
-			readClipboardMediaViaXclip(SUPPORTED_PDF_MIME_TYPES, "application/pdf")
-		);
+		return readClipboardViaWlPaste(PDF_CLIPBOARD_READ) ?? readClipboardViaXclip(PDF_CLIPBOARD_READ);
 	}
-	return readClipboardMediaViaXclip(SUPPORTED_PDF_MIME_TYPES, "application/pdf");
+	return readClipboardViaXclip(PDF_CLIPBOARD_READ);
 }

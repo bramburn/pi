@@ -11,11 +11,12 @@ import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent } from "@earendil-works/pi-agent-core";
-import { getModel, streamSimple } from "@earendil-works/pi-ai/compat";
+import { Agent } from "@bramburn/qi-agent-core";
+import { getModel, streamSimple } from "@bramburn/qi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { CompactionSkippedError } from "../src/core/compaction/index.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createCodingTools } from "../src/index.ts";
@@ -94,9 +95,12 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 		// Manually compact
 		const result = await session.compact();
 
-		expect(result.summary).toBeDefined();
-		expect(result.summary.length).toBeGreaterThan(0);
-		expect(result.tokensBefore).toBeGreaterThan(0);
+		// Typed-skip contract: compact() resolves to undefined when it skips.
+		// This session is seeded to compact, so a skip must fail loudly here.
+		expect(result, "manual compaction must not skip for a seeded session").toBeDefined();
+		expect(result!.summary).toBeDefined();
+		expect(result!.summary.length).toBeGreaterThan(0);
+		expect(result!.tokensBefore).toBeGreaterThan(0);
 
 		// Verify messages were compacted (should have summary + recent)
 		const messages = session.messages;
@@ -173,8 +177,9 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 		// Compact should work even without file persistence
 		const result = await session.compact();
 
-		expect(result.summary).toBeDefined();
-		expect(result.summary.length).toBeGreaterThan(0);
+		expect(result, "manual compaction must not skip for a seeded session").toBeDefined();
+		expect(result!.summary).toBeDefined();
+		expect(result!.summary.length).toBeGreaterThan(0);
 
 		// In-memory entries should have the compaction
 		const entries = sessionManager.getEntries();
@@ -189,8 +194,11 @@ describe.skipIf(!API_KEY)("AgentSession compaction e2e", () => {
 		await session.prompt("Say hello");
 		await session.agent.waitForIdle();
 
-		// Manually trigger compaction and check events
-		await session.compact();
+		// Manually trigger compaction and check events. This single-exchange
+		// session has nothing eligible to summarise, so the blocking path
+		// rejects with the typed skip (ADR-0005 / R28) after emitting its
+		// terminal compaction events.
+		await expect(session.compact()).rejects.toBeInstanceOf(CompactionSkippedError);
 
 		const compactionEvents = events.filter((e) => e.type === "compaction_start" || e.type === "compaction_end");
 		expect(compactionEvents).toHaveLength(2);

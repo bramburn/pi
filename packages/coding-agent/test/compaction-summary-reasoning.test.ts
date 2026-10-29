@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@bramburn/qi-agent-core";
+import type { AssistantMessage, Context, Model } from "@bramburn/qi-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type CompactionPreparation,
@@ -8,13 +8,14 @@ import {
 	generateSummary,
 	generateSummaryWithUsage,
 } from "../src/core/compaction/index.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 
 const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai/compat", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@earendil-works/pi-ai/compat")>();
+vi.mock("@bramburn/qi-ai/compat", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@bramburn/qi-ai/compat")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
@@ -272,7 +273,7 @@ describe("generateSummary reasoning options", () => {
 		expect(completeSimpleMock.mock.calls[0][2]).not.toHaveProperty("refusalFallbacks");
 	});
 
-	it("clamps compaction summary maxTokens to the model output cap", async () => {
+	it("clamps compaction summary maxTokens to the 16384 ceiling when reserve and model headroom are huge", async () => {
 		const preparation: CompactionPreparation = {
 			firstKeptEntryId: "entry-keep",
 			messagesToSummarize: messages,
@@ -292,6 +293,88 @@ describe("generateSummary reasoning options", () => {
 			totalTokens: 40,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		});
-		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([16384, 16384]);
+	});
+
+	it("keeps the model output cap when it sits below the ceiling", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: messages,
+			isSplitTurn: true,
+			tokensBefore: 600000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		await compact(preparation, createModel(false, 8192), "test-key");
+
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([8192, 8192]);
+	});
+
+	it("lets the summaryMaxTokens parameter override the ceiling", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: messages,
+			isSplitTurn: true,
+			tokensBefore: 600000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		await compact(
+			preparation,
+			createModel(false, 128000),
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			false,
+			4096,
+		);
+
+		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([4096, 4096]);
+	});
+
+	it("adds a word budget derived from the effective maxTokens to the summary prompt", async () => {
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 600000,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		await compact(preparation, createModel(false, 128000), "test-key");
+
+		const requestContext = completeSimpleMock.mock.calls[0][1] as Context;
+		const prompt = JSON.stringify(requestContext.messages);
+		expect(prompt).toContain(`Budget: keep the complete summary under ${Math.floor(16384 * 0.75)} words.`);
+	});
+});
+
+describe("compaction summary settings defaults", () => {
+	it("defaults summaryMaxTokens to 16384 and summaryThinking to off", () => {
+		const settings = SettingsManager.inMemory();
+
+		expect(settings.getCompactionSummaryMaxTokens()).toBe(16384);
+		expect(settings.getCompactionSummaryThinking()).toBe("off");
+	});
+
+	it("honors configured compaction summary settings", () => {
+		const settings = SettingsManager.inMemory({
+			compaction: { summaryMaxTokens: 4096, summaryThinking: "low" },
+		});
+
+		expect(settings.getCompactionSummaryMaxTokens()).toBe(4096);
+		expect(settings.getCompactionSummaryThinking()).toBe("low");
 	});
 });

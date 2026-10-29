@@ -1,7 +1,7 @@
 {
-	"name": "@earendil-works/pi-protocol",
+	"name": "@bramburn/qi-protocol",
 	"version": "0.85.0-b1",
-	"description": "Transport-neutral CBOR protocol for remote pi sessions",
+	"description": "Transport-neutral CBOR protocol for remote qi sessions",
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -22,7 +22,7 @@
 		"prepublishOnly": "bun --bun run clean && bun --bun run build"
 	},
 	"keywords": [
-		"pi",
+		"qi",
 		"protocol",
 		"cbor",
 		"binary",
@@ -32,7 +32,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/bramburn/pi.git",
 		"directory": "packages/protocol"
 	},
 	"engines": {

@@ -1,0 +1,11 @@
+--- a/scripts/sync-versions.js
++++ b/scripts/sync-versions.js
+@@ -1,6 +1,8 @@
+ #!/usr/bin/env bun
+ 
+ /**
++ * NOTE (ADR-0002): Upstream sync with earendil-works/pi is DISABLED. This script
++ * is retained solely for internal qi-monorepo workspace lockstep version sync.
+  * Validates lockstep versions for published packages, then synchronizes
+  * internal dependency versions in all workspace packages, including private ones.
+  *

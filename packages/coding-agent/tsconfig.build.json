@@ -3,17 +3,67 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@earendil-works/pi-agent-core": ["../agent/dist/index.d.ts"],
-			"@earendil-works/pi-agent-core/*": ["../agent/dist/*.d.ts"],
-			"@earendil-works/pi-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/pi-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
-			"@earendil-works/pi-client": ["../client/dist/index.d.ts"],
-			"@earendil-works/pi-protocol": ["../protocol/dist/index.d.ts"],
-			"@earendil-works/pi-tui": ["../tui/dist/index.d.ts"],
-			"@earendil-works/pi-tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+			"@earendil-works/pi-agent-core": [
+				"../agent/dist/index.d.ts"
+			],
+			"@earendil-works/pi-agent-core/*": [
+				"../agent/dist/*.d.ts"
+			],
+			"@earendil-works/pi-ai": [
+				"../ai/dist/index.d.ts"
+			],
+			"@earendil-works/pi-ai/*": [
+				"../ai/dist/*.d.ts",
+				"../ai/dist/providers/*.d.ts"
+			],
+			"@earendil-works/pi-client": [
+				"../client/dist/index.d.ts"
+			],
+			"@earendil-works/pi-protocol": [
+				"../protocol/dist/index.d.ts"
+			],
+			"@earendil-works/pi-tui": [
+				"../tui/dist/index.d.ts"
+			],
+			"@earendil-works/pi-tui/*": [
+				"../tui/dist/*.d.ts",
+				"../tui/dist/components/*.d.ts"
+			],
+			"@bramburn/qi-agent-core": [
+				"../agent/dist/index.d.ts"
+			],
+			"@bramburn/qi-agent-core/*": [
+				"../agent/dist/*.d.ts"
+			],
+			"@bramburn/qi-ai": [
+				"../ai/dist/index.d.ts"
+			],
+			"@bramburn/qi-ai/*": [
+				"../ai/dist/*.d.ts",
+				"../ai/dist/providers/*.d.ts"
+			],
+			"@bramburn/qi-client": [
+				"../client/dist/index.d.ts"
+			],
+			"@bramburn/qi-protocol": [
+				"../protocol/dist/index.d.ts"
+			],
+			"@bramburn/qi-tui": [
+				"../tui/dist/index.d.ts"
+			],
+			"@bramburn/qi-tui/*": [
+				"../tui/dist/*.d.ts",
+				"../tui/dist/components/*.d.ts"
+			]
 		},
 		"rootDir": "./src"
 	},
-	"include": ["src/**/*.ts", "src/**/*.d.ts"],
-	"exclude": ["node_modules", "dist"]
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.d.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
 }

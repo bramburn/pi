@@ -7,13 +7,13 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledPiAgentCore from "@earendil-works/pi-agent-core";
-import type { Provider } from "@earendil-works/pi-ai";
-import * as _bundledPiAiCompat from "@earendil-works/pi-ai/compat";
-import * as _bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
-import * as _bundledPiAiProviders from "@earendil-works/pi-ai/providers/all";
-import type { KeyId } from "@earendil-works/pi-tui";
-import * as _bundledPiTui from "@earendil-works/pi-tui";
+import * as _bundledPiAgentCore from "@bramburn/qi-agent-core";
+import type { Provider } from "@bramburn/qi-ai";
+import * as _bundledPiAiCompat from "@bramburn/qi-ai/compat";
+import * as _bundledPiAiOauth from "@bramburn/qi-ai/oauth";
+import * as _bundledPiAiProviders from "@bramburn/qi-ai/providers/all";
+import type { KeyId } from "@bramburn/qi-tui";
+import * as _bundledPiTui from "@bramburn/qi-tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -23,7 +23,7 @@ import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @earendil-works/pi-coding-agent.
+// avoiding a circular dependency. Extensions can import from @bramburn/qi-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
@@ -54,11 +54,22 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@earendil-works/pi-agent-core": _bundledPiAgentCore,
-	"@earendil-works/pi-tui": _bundledPiTui,
+	"@bramburn/qi-agent-core": _bundledPiAgentCore,
+	"@bramburn/qi-tui": _bundledPiTui,
 	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
+	"@bramburn/qi-ai": _bundledPiAiCompat,
+	"@bramburn/qi-ai/compat": _bundledPiAiCompat,
+	"@bramburn/qi-ai/oauth": _bundledPiAiOauth,
+	"@bramburn/qi-ai/providers/all": _bundledPiAiProviders,
+	"@bramburn/qi-coding-agent": _bundledPiCodingAgent,
+	// Legacy published scope: extensions installed from npm import
+	// @earendil-works/* (the scope docs/extensions.md documents). Without these
+	// keys jiti falls back to node_modules resolution, which fails when the
+	// host package is not installed next to the extension.
+	"@earendil-works/pi-agent-core": _bundledPiAgentCore,
+	"@earendil-works/pi-tui": _bundledPiTui,
 	"@earendil-works/pi-ai": _bundledPiAiCompat,
 	"@earendil-works/pi-ai/compat": _bundledPiAiCompat,
 	"@earendil-works/pi-ai/oauth": _bundledPiAiOauth,
@@ -78,8 +89,8 @@ const require = createRequire(import.meta.url);
 const isNodeSeaBinary =
 	("sea" in process.features && process.features.sea === true) ||
 	process.getBuiltinModule("node:sea")?.isSea() === true;
-declare const PI_BUNDLED_NODE: boolean;
-const isBundledNode = typeof PI_BUNDLED_NODE !== "undefined" && PI_BUNDLED_NODE;
+declare const QI_BUNDLED_NODE: boolean;
+const isBundledNode = typeof QI_BUNDLED_NODE !== "undefined" && QI_BUNDLED_NODE;
 const isTypeScriptSourceRuntime = !isBunBinary && path.extname(fileURLToPath(import.meta.url)) === ".ts";
 
 /**
@@ -88,7 +99,7 @@ const isTypeScriptSourceRuntime = !isBunBinary && path.extname(fileURLToPath(imp
  */
 let _aliases: Record<string, string> | null = null;
 
-function getAliases(): Record<string, string> {
+export function getAliases(): Record<string, string> {
 	if (_aliases) return _aliases;
 
 	const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -108,19 +119,24 @@ function getAliases(): Record<string, string> {
 	};
 
 	const piCodingAgentEntry = packageIndex;
-	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/pi-agent-core");
-	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/pi-tui");
+	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@bramburn/qi-agent-core");
+	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@bramburn/qi-tui");
 	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
 	// superset of the core entrypoint): existing extensions using the old
 	// global API keep working at runtime until compat is removed.
-	const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@earendil-works/pi-ai/compat");
-	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/pi-ai/oauth");
-	const piAiProvidersEntry = resolveWorkspaceOrImport(
-		"ai/dist/providers/all.js",
-		"@earendil-works/pi-ai/providers/all",
-	);
+	const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@bramburn/qi-ai/compat");
+	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@bramburn/qi-ai/oauth");
+	const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "@bramburn/qi-ai/providers/all");
 
 	_aliases = {
+		"@bramburn/qi-coding-agent": piCodingAgentEntry,
+		"@bramburn/qi-agent-core": piAgentCoreEntry,
+		"@bramburn/qi-tui": piTuiEntry,
+		"@bramburn/qi-ai/providers/all": piAiProvidersEntry,
+		"@bramburn/qi-ai/compat": piAiCompatEntry,
+		"@bramburn/qi-ai/oauth": piAiOauthEntry,
+		"@bramburn/qi-ai": piAiCompatEntry,
+		// Legacy published scope, see VIRTUAL_MODULES above.
 		"@earendil-works/pi-coding-agent": piCodingAgentEntry,
 		"@earendil-works/pi-agent-core": piAgentCoreEntry,
 		"@earendil-works/pi-tui": piTuiEntry,
@@ -570,7 +586,24 @@ async function loadExtension(
 	runtime: ExtensionRuntime,
 	cacheToken?: ExtensionCacheToken,
 ): Promise<{ extension: Extension | null; error: string | null }> {
-	const resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
+	let resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
+
+	// If the resolved path is a directory, resolve to index.ts or index.js
+	// to match the behaviour of resolveExtensionEntries used during auto-discovery.
+	try {
+		const stats = fs.statSync(resolvedPath);
+		if (stats.isDirectory()) {
+			const indexTs = path.join(resolvedPath, "index.ts");
+			const indexJs = path.join(resolvedPath, "index.js");
+			if (fs.existsSync(indexTs)) {
+				resolvedPath = indexTs;
+			} else if (fs.existsSync(indexJs)) {
+				resolvedPath = indexJs;
+			}
+		}
+	} catch {
+		// Not a directory or stat failed — proceed with the original path.
+	}
 
 	try {
 		const factory = await loadExtensionModule(resolvedPath, cacheToken);
@@ -803,4 +836,52 @@ export async function discoverAndLoadExtensions(
 	}
 
 	return loadExtensions(allPaths, resolvedCwd, eventBus);
+}
+
+/**
+ * Expand extension paths to concrete entry points.
+ *
+ * Directories are resolved via `package.json → pi.extensions` (preferred), then
+ * `index.ts`/`index.js`, then discovery of direct `*.ts` / `*.js` children.
+ * Files pass through unchanged. Deduplicates by resolved path so callers can
+ * safely merge package-manager output with default directory paths.
+ *
+ * Callers should pass the result to `loadExtensionsCached`; `loadExtension`
+ * still resolves `index.ts`/`index.js` and normalizes unicode spaces.
+ */
+export function resolveExtensionPaths(paths: string[], cwd: string): string[] {
+	const resolvedCwd = resolvePath(cwd);
+	const result: string[] = [];
+	const seen = new Set<string>();
+
+	const add = (p: string) => {
+		const key = path.resolve(p);
+		if (seen.has(key)) return;
+		seen.add(key);
+		result.push(p);
+	};
+
+	for (const p of paths) {
+		const resolvedPath = resolvePath(p, resolvedCwd, { normalizeUnicodeSpaces: true });
+		try {
+			const stats = fs.statSync(resolvedPath);
+			if (stats.isDirectory()) {
+				const entries = resolveExtensionEntries(resolvedPath);
+				if (entries) {
+					for (const entry of entries) add(entry);
+					continue;
+				}
+				const discovered = discoverExtensionsInDir(resolvedPath);
+				if (discovered.length > 0) {
+					for (const d of discovered) add(d);
+					continue;
+				}
+			}
+		} catch {
+			// Not a directory or stat failed — use the path as-is.
+		}
+		add(resolvedPath);
+	}
+
+	return result;
 }

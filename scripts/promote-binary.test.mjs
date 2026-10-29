@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const sourceScript = fileURLToPath(new URL("./promote-binary.mjs", import.meta.url));
-const BINARY_NAME = process.platform === "win32" ? "pi.exe" : "pi";
+const BINARY_NAME = process.platform === "win32" ? "qi.exe" : "qi";
 
 function runScript(cwd) {
 	return spawnSync(process.execPath, [join(cwd, "scripts", "promote-binary.mjs")], {

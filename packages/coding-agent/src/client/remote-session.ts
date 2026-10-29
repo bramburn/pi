@@ -1,10 +1,4 @@
-import type {
-	ConnectionState,
-	ConnectionStateChange,
-	PiClient,
-	SessionLease,
-	Unsubscribe,
-} from "@earendil-works/pi-client";
+import type { ConnectionState, ConnectionStateChange, PiClient, SessionLease, Unsubscribe } from "@bramburn/qi-client";
 import type {
 	ModelMetadata,
 	ModelRef,
@@ -14,7 +8,7 @@ import type {
 	SessionSnapshot,
 	ThinkingLevel,
 	TranscriptItem,
-} from "@earendil-works/pi-protocol";
+} from "@bramburn/qi-protocol";
 import {
 	applyTranscriptProgress,
 	applyTranscriptSnapshot,

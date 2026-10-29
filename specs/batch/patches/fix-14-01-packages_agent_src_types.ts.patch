@@ -1,0 +1,13 @@
+--- a/packages/agent/src/types.ts
++++ b/packages/agent/src/types.ts
+@@ -425,4 +425,11 @@
+ 	 * If omitted, the default execution mode applies.
+ 	 */
+ 	executionMode?: ToolExecutionMode;
++	/**
++	 * Whether this tool is safe to execute concurrently across parallel subagents or tool batches (REQ-I02).
++	 * Pure read-only tools set `true`; tools that mutate files or spawn processes (`bash`, `edit`, `write`, `subagent`)
++	 * default to `false`. Parallel subagent admission serialises any batch whose tools are not all `concurrentSafe: true`.
++	 */
++	concurrentSafe?: boolean;
+ }

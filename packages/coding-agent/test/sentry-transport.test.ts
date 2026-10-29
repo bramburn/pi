@@ -49,17 +49,17 @@ async function startSentryMockServer(
 
 describe("Sentry gate", () => {
 	beforeEach(() => {
-		delete process.env.PI_AI_DEBUG;
+		delete process.env.QI_AI_DEBUG;
 		delete process.env.SENTRY_DSN;
 	});
 
-	it("requires both PI_AI_DEBUG=1 and SENTRY_DSN", () => {
+	it("requires both QI_AI_DEBUG=1 and SENTRY_DSN", () => {
 		expect(isSentryDebugEnabled()).toBe(false);
-		process.env.PI_AI_DEBUG = "1";
+		process.env.QI_AI_DEBUG = "1";
 		expect(isSentryDebugEnabled()).toBe(false);
 		process.env.SENTRY_DSN = DSN;
 		expect(isSentryDebugEnabled()).toBe(true);
-		process.env.PI_AI_DEBUG = "0";
+		process.env.QI_AI_DEBUG = "0";
 		expect(isSentryDebugEnabled()).toBe(false);
 	});
 });
@@ -68,7 +68,7 @@ describe("Sentry Node SDK wiring (end-to-end)", () => {
 	let mock: Awaited<ReturnType<typeof startSentryMockServer>> | undefined;
 
 	beforeEach(() => {
-		delete process.env.PI_AI_DEBUG;
+		delete process.env.QI_AI_DEBUG;
 		delete process.env.SENTRY_DSN;
 	});
 
@@ -84,7 +84,7 @@ describe("Sentry Node SDK wiring (end-to-end)", () => {
 		});
 		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
 		process.env.SENTRY_DSN = dsn;
-		process.env.PI_AI_DEBUG = "1";
+		process.env.QI_AI_DEBUG = "1";
 		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
 
 		// Import the wiring AFTER env vars are set so Sentry.init picks them up.
@@ -121,10 +121,10 @@ describe("Sentry Node SDK wiring (end-to-end)", () => {
 		expect(event.environment).toBe("test");
 	});
 
-	it("is a no-op when PI_AI_DEBUG is unset even if SENTRY_DSN is set", async () => {
+	it("is a no-op when QI_AI_DEBUG is unset even if SENTRY_DSN is set", async () => {
 		mock = await startSentryMockServer(() => ({ status: 200 }));
 		process.env.SENTRY_DSN = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
-		// PI_AI_DEBUG intentionally unset.
+		// QI_AI_DEBUG intentionally unset.
 		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
 		const handle = initSentryIfEnabled();
 		expect(handle).toBeUndefined();
@@ -136,7 +136,7 @@ describe("reportProviderError (provider/stream error path)", () => {
 	let mock: Awaited<ReturnType<typeof startSentryMockServer>> | undefined;
 
 	beforeEach(() => {
-		delete process.env.PI_AI_DEBUG;
+		delete process.env.QI_AI_DEBUG;
 		delete process.env.SENTRY_DSN;
 		// Reset the module-level `sentryInitialized` flag from any prior test that
 		// called initSentryIfEnabled. Without this, the "is a no-op" test would
@@ -169,7 +169,7 @@ describe("reportProviderError (provider/stream error path)", () => {
 		});
 		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
 		process.env.SENTRY_DSN = dsn;
-		process.env.PI_AI_DEBUG = "1";
+		process.env.QI_AI_DEBUG = "1";
 		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
 
 		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
@@ -206,7 +206,7 @@ describe("reportProviderError (provider/stream error path)", () => {
 		mock = await startSentryMockServer(() => ({ status: 200 }));
 		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
 		process.env.SENTRY_DSN = dsn;
-		process.env.PI_AI_DEBUG = "1";
+		process.env.QI_AI_DEBUG = "1";
 		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
 
 		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");
@@ -230,7 +230,7 @@ describe("reportProviderError (provider/stream error path)", () => {
 		mock = await startSentryMockServer(() => ({ status: 200 }));
 		const dsn = `http://public@127.0.0.1:${mock.port}/${DSN.split("/").pop()}`;
 		process.env.SENTRY_DSN = dsn;
-		process.env.PI_AI_DEBUG = "1";
+		process.env.QI_AI_DEBUG = "1";
 		process.env.SENTRY_TRACES_SAMPLE_RATE = "0";
 
 		const { initSentryIfEnabled } = await import("../src/core/sentry.ts");

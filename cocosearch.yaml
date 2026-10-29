@@ -1,0 +1,21 @@
+# CocoSearch Configuration
+# https://github.com/VioletCranberry/coco-search
+
+# Index name (defaults to directory name)
+indexName: pi
+
+# Indexing settings — file patterns and chunking use tool defaults
+# (.gitignore-aware, all supported languages/grammars).
+
+embedding:
+  provider: ollama
+  # Tool default. Do NOT switch to a tag-qualified name like qwen3-embedding:0.6b:
+  # the preflight model check strips tags (name.split(":")[0]) and always fails
+  # for names containing a colon.
+  model: nomic-embed-text
+  outputDimension: 768
+
+# Query-rewrite controller (optional, default-off) — leave disabled:
+# pi agents formulate precise queries themselves.
+controller:
+  enabled: false

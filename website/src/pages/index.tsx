@@ -93,8 +93,8 @@ export default function Home(): ReactNode {
                 description="A full terminal UI with a scrollback buffer, syntax highlighting, and keybindings you already know."
               />
               <Feature
-                title="Fork of pi.dev"
-                description="This is the bramburn/pi fork. It diverges from upstream in build tooling, release process, and selected features."
+                title="Hardened fork"
+                description="qi is a hardened, standalone fork with native Bun runtime support, native subagents, and pinned extension compatibility."
                 link="/docs/fork/why-fork"
                 linkLabel="See what's different"
               />
@@ -113,7 +113,7 @@ export default function Home(): ReactNode {
               Quick install
             </Heading>
             <pre className={styles.installCode}>
-              <code>npm install -g @bramburn/pi-codes</code>
+              <code>npm install -g @bramburn/qi-coding-agent</code>
             </pre>
             <p className={styles.installNote}>
               Or download a prebuilt binary from the{' '}

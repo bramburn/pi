@@ -3,12 +3,36 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@earendil-works/pi-telemetry": ["../telemetry/dist/index.d.ts"],
-			"@earendil-works/pi-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/pi-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+			"@earendil-works/pi-telemetry": [
+				"../telemetry/dist/index.d.ts"
+			],
+			"@earendil-works/pi-ai": [
+				"../ai/dist/index.d.ts"
+			],
+			"@earendil-works/pi-ai/*": [
+				"../ai/dist/*.d.ts",
+				"../ai/dist/providers/*.d.ts"
+			],
+			"@bramburn/qi-telemetry": [
+				"../telemetry/dist/index.d.ts"
+			],
+			"@bramburn/qi-ai": [
+				"../ai/dist/index.d.ts"
+			],
+			"@bramburn/qi-ai/*": [
+				"../ai/dist/*.d.ts",
+				"../ai/dist/providers/*.d.ts"
+			]
 		},
 		"rootDir": "./src"
 	},
-	"include": ["src/**/*.ts"],
-	"exclude": ["node_modules", "dist", "**/*.d.ts", "src/**/*.d.ts"]
+	"include": [
+		"src/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"**/*.d.ts",
+		"src/**/*.d.ts"
+	]
 }

@@ -1,0 +1,11 @@
+--- a/packages/coding-agent/src/core/defaults.ts
++++ b/packages/coding-agent/src/core/defaults.ts
+@@ -32,6 +32,8 @@
+ 	maxTotalSpawns: 64,
+ 	/** Per-tool-call budget inside a child subagent. */
+ 	toolTimeoutMs: 300_000,
++	/** Max assistant turns per child subagent before the parent kills the run (REQ-D03). */
++	maxTurns: 30,
+ 	/**
+ 	 * Deepest delegation level this process may spawn.
+ 	 *

@@ -1,9 +1,9 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@bramburn/qi-tui";
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
-import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
+import { addUsageToTotals, createUsageTotals, promptTokensOf, totalPromptTokens } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
 
 /**
@@ -97,8 +97,7 @@ export class FooterComponent implements Component {
 			if (entry.type === "message" && entry.message.role === "assistant") {
 				addUsageToTotals(usageTotals, entry.message.usage);
 
-				const latestPromptTokens =
-					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
+				const latestPromptTokens = promptTokensOf(entry.message.usage);
 				latestCacheHitRate =
 					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
 			} else if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.usage) {
@@ -136,7 +135,18 @@ export class FooterComponent implements Component {
 		if (usageTotals.output) statsParts.push(`↓${formatTokens(usageTotals.output)}`);
 		if (usageTotals.cacheRead) statsParts.push(`R${formatTokens(usageTotals.cacheRead)}`);
 		if (usageTotals.cacheWrite) statsParts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
-		if ((usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0) && latestCacheHitRate !== undefined) {
+		// Prompt total: non-cached input + cache reads + cache writes. This is the
+		// number that matches a provider's `prompt_tokens` (OpenRouter, Anthropic,
+		// ...), so `↑` (non-cached input only) can be read against a provider
+		// invoice directly via `P`. Only shown when the session actually used
+		// prompt caching — otherwise `↑` already equals `P` and the extra bucket
+		// is noise.
+		const hasCacheActivity = usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0;
+		if (hasCacheActivity) {
+			const promptTotal = totalPromptTokens(usageTotals);
+			if (promptTotal > 0) statsParts.push(`P${formatTokens(promptTotal)}`);
+		}
+		if (hasCacheActivity && latestCacheHitRate !== undefined) {
 			statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
 		}
 

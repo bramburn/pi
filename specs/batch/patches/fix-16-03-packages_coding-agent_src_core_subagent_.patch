@@ -1,0 +1,100 @@
+--- a/packages/coding-agent/src/core/subagent/subagent-tool.ts
++++ b/packages/coding-agent/src/core/subagent/subagent-tool.ts
+@@ -106,6 +106,24 @@
+  */
+ export const PER_TASK_OUTPUT_CAP = 50 * 1024;
+ 
++/**
++ * Default per-tool cross-process concurrency safety (REQ-I02 / REQ-C01,
++ * `specs/subagent/features/isolation/spec.md §4.2`). Pure read/search tools are
++ * safe; mutating or shell tools (`bash`, `powershell`, `edit`, `write`, `subagent`)
++ * are not. Omitting `spec.tools` inherits the full default coding set, which
++ * includes mutating tools and is therefore not concurrent-safe.
++ */
++const DEFAULT_CONCURRENT_SAFE_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "find", "ls"]);
++
++export function isSpecConcurrentSafe(
++	spec: { tools?: readonly string[] },
++	isToolConcurrentSafe?: (toolName: string) => boolean | undefined,
++): boolean {
++	if (!spec.tools || spec.tools.length === 0) return false;
++	const check = (name: string): boolean => isToolConcurrentSafe?.(name) ?? DEFAULT_CONCURRENT_SAFE_TOOLS.has(name);
++	return spec.tools.every(check);
++}
++
+ const subagentSpecProperties = {
+ 	role: Type.String({
+ 		description:
+@@ -340,6 +358,12 @@
+ 	 * registry and the task log.
+ 	 */
+ 	onBackgroundSettled?: (taskId: string, result: SubagentResult) => void;
++	/**
++	 * Query whether a named tool is marked `concurrentSafe: true` (REQ-I02 / REQ-C01).
++	 * Falls back to the built-in read-only allowlist (`read`, `grep`, `find`, `ls`)
++	 * when omitted.
++	 */
++	isToolConcurrentSafe?: (toolName: string) => boolean | undefined;
+ 	/** Background registry. Defaults to the on-disk singleton. Injectable for tests. */
+ 	registry?: BackgroundRegistry;
+ 	/** Called after experiment registry mutations so the UI can refresh its status pill. */
+@@ -1276,8 +1300,10 @@
+ 		name: "subagent",
+ 		label: "Subagent",
+ 		description: [
+-			"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
+-			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
++			"Delegate work to a subagent that runs in a fresh, isolated context.",
++			"Output contract: you receive ONLY the subagent's final summary (capped at 50 KiB), never its intermediate tool calls or transcript, and the subagent cannot see this conversation.",
++			"When NOT to delegate: do not delegate single-file edits, known-location lookups (`read`/`grep`/`find` you can run in 1-2 calls), or tasks that depend on conversation history you cannot concisely inline into `instructions`.",
++			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete self-contained task), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
+ 			"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
+ 			"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs (with any filed control requests, their receipt state, and the questions a run has asked you), 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'supervisor' (`id` + `replyTo` + `message`) answers a question a run asked with `contact_supervisor`, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing. Controlling a run whose child has detached is not lost: steer/stop/interrupt file the request in the run's control inbox and the child picks it up itself.",
+ 		].join(" "),
+@@ -1566,9 +1592,14 @@
+ 					// reference) closes its own registry row via onSyntheticSettle.
+ 					const runId = makeDagRunId();
+ 					const ids = dag.map(() => registry.makeTaskId());
++					const dagConcurrentSafe = dag.every((node) =>
++						isSpecConcurrentSafe(node, options?.isToolConcurrentSafe),
++					);
++					const effectiveDagMaxConcurrent = dagConcurrentSafe ? subagentSettings.maxConcurrent : 1;
+ 					const run = createDagRun({
+ 						nodes: dag,
+ 						runId,
++						maxConcurrent: effectiveDagMaxConcurrent,
+ 						signal,
+ 						taskIds: ids,
+ 						onSyntheticSettle: (index, result) => {
+@@ -1619,10 +1650,14 @@
+ 			// ----------------------------------------------------------------
+ 			if (dag.length > 0) {
+ 				const runId = makeDagRunId();
++				const dagConcurrentSafe = dag.every((node) =>
++					isSpecConcurrentSafe(node, options?.isToolConcurrentSafe),
++				);
++				const effectiveDagMaxConcurrent = dagConcurrentSafe ? subagentSettings.maxConcurrent : 1;
+ 				const run = createDagRun({
+ 					nodes: dag,
+ 					runId,
+-					maxConcurrent: subagentSettings.maxConcurrent,
++					maxConcurrent: effectiveDagMaxConcurrent,
+ 					signal,
+ 					onUpdate: (progress) => {
+ 						onUpdate?.({
+@@ -1725,9 +1760,14 @@
+ 					});
+ 				};
+ 
++				const batchConcurrentSafe = tasks.every((task) =>
++					isSpecConcurrentSafe(task, options?.isToolConcurrentSafe),
++				);
++				const effectiveConcurrency = batchConcurrentSafe ? subagentSettings.maxConcurrent : 1;
++
+ 				const results = await mapWithConcurrencyLimit(
+ 					tasks,
+-					subagentSettings.maxConcurrent,
++					effectiveConcurrency,
+ 					async (task, index) => {
+ 						const result = await runOne(
+ 							runner,

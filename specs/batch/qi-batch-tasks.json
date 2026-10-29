@@ -1,0 +1,159 @@
+{
+	"system_prompt": "You are a Principal Staff Engineer and specification author working on 'qi' — our hardened fork of the pi coding agent (TypeScript/Bun monorepo at the repo root). The fork is cutting all ties with upstream earendil/pi: rebranding to qi as a FULL HARD CUT (no legacy aliases), publishing as @bramburn/qi-*, pinning extensions to 0.85-compatible versions, closing every open defect in our native subagent subsystem, and fixing compaction errors that surface as repeated red errors in the TUI. Your inputs are three shared documents: specs/batch/batch-context.md (binding human decisions D1-D6, verified evidence tables with path:line citations, and MANDATORY output conventions), specs/manifest.json (the spec index — destination paths and IDs are fixed there), and specs/GUIDE.md (the Universal Spec Guidance — follow its writing rules, sizing limits, marker protocol, and quality gates). Rules: follow output conventions in batch-context.md section 4 exactly. Cite path:line evidence for every claim; trust symbol names if line numbers drift. Never invent behaviour the specs leave open — emit an [UNRESOLVED] marker instead. Requirements statements must not name technologies (rationale blocks may). Do not comment on or propose reverting the uncommitted summariser-model changes in the tree — they are intentional. Do not pad; machine-importable output only.",
+	"shared_context": {
+		"include_files": [
+			"specs/batch/batch-context.md",
+			"specs/manifest.json",
+			"specs/GUIDE.md"
+		]
+	},
+	"default_context": {
+		"mode": "selected"
+	},
+	"tasks": [
+		{
+			"custom_id": "spec-01-rebrand-requirements-adrs",
+			"title": "Spec set: qi rebrand requirements + hard-cut ADRs",
+			"prompt": "Draft exactly three spec files per GUIDE.md (Phase C draft stage: include [ASSUMPTION]/[UNRESOLVED] markers and a ## Traceability section in each; emit via === FILE: ... === fences):\n\n1. specs/00-requirements/features/rebrand-requirements.md — requirements R-REBRAND-001 onward, one per ### block, falsifiable ACs, MUST/SHOULD/MAY priorities, no technology names in statements. MUST cover: CLI identity is qi; published package identity is @bramburn/qi-*; user state dir and project dir are .qi (and .qi/agent); every current PI_* configuration capability is available under QI_* with NO pi/PI_* fallback (decision D1: hard cut); user-visible branding strings (help, banner, titles, docs, website CTAs) say qi; the running system makes no calls to earendil-controlled endpoints (list them from batch-context D4); no earendil identifiers remain in runtime-config surfaces; fork identity is consistent; distribution docs describe the qi install; upstream-sync tooling is removed or disabled; manual migration of existing user state is documented (no automatic migration). Also include SHOULD fallbacks where noted.\n2. specs/adr/0001-qi-hard-cut-rebrand.md — decision: full hard cut, no aliases (D1). Alternatives rejected: phased dual-name period, deprecated alias layer. Compliance checklist must be testable (grep/lint assertions, build assertions on bin name and env parsing).\n3. specs/adr/0002-sever-upstream-endpoints.md — decision: sever every earendil-controlled endpoint and sync tooling (D4). Alternatives rejected: keep version-check only, keep install telemetry, mirror upstream endpoints. Compliance checklist testable via a no-network-hostile-grep assertion.\n\nGround every requirement in the evidence table in batch-context.md section 3.1. Status of all three files is draft.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/package.json",
+					"packages/coding-agent/src/config.ts",
+					"packages/coding-agent/src/cli/args.ts",
+					"packages/coding-agent/src/main.ts",
+					"packages/coding-agent/src/cli/startup-ui.ts",
+					"packages/coding-agent/src/core/settings-manager.ts",
+					"packages/coding-agent/src/core/session-manager.ts",
+					"scripts/fork-publish-rename.mjs",
+					"packages/coding-agent/docs/environment-variables.md",
+					"README.md"
+				],
+				"max_input_tokens": 110000
+			}
+		},
+		{
+			"custom_id": "spec-02-extensions-spec-set",
+			"title": "Spec set: extension 0.85 compat pinning (requirements, ADR, contract, behavior, impl)",
+			"prompt": "Draft exactly five spec files per GUIDE.md (Phase C draft stage: [ASSUMPTION]/[UNRESOLVED] markers + ## Traceability in each; emit via === FILE: ... === fences):\n\n1. specs/00-requirements/features/extensions-requirements.md — requirements R-EXT-001 onward. Cover: unpinned registry installs resolve against a checked-in compatibility manifest (D3) and persist the exact resolved version; the existing pinned-version semantics are preserved (pinned packages are not moved by update); unknown packages warn and fall back to latest (explicit decision D3, do not refuse); the manifest covers the upstream-listed extension ecosystem (npm keyword pi-package + the pi.dev gallery list as of 0.85) with per-package 0.85-compatible version constraints; git-source installs continue to pin by ref; install failure surfaces a typed reason; the extension host never claims compatibility it cannot verify.\n2. specs/adr/0003-extension-compat-manifest.md — decision: checked-in compatibility manifest resolved at install time via existing range machinery. Alternatives rejected: refuse-unknown strict mode, semver range cap only, self-hosted registry mirror, no validation (status quo). Testable compliance checklist.\n3. specs/contracts/json-schema/extension-compat-manifest.schema.json — the manifest v1 contract: fully typed ($schema header, version field, per-package entries with registry name, git URL alternative, compatible range, notes, last-reviewed), constraints, and a mandatory ## Examples section in a sibling specs/contracts/json-schema/extension-compat-manifest.examples.md (valid manifest + invalid manifest + example resolution). State backwards-compatibility policy: additive-only within v1; breaking changes bump the version field.\n4. specs/features/extensions/install-pinning.feature — Gherkin per GUIDE.md 5.4, tagged @domain:extensions and @requirement:R-EXT-NNN; at least one happy path and one error path per pinning requirement; black-box (public install/update surface only); note in the file that bindings are aspirational until impl.\n5. specs/impl/extensions-phase.md — DAG work items with Realises mapping to R-EXT-* IDs, verification strategy (which bun tests), rollback, and a mandatory Out of scope section (registry mirror, gallery scraping, extension authoring guide = out of scope).\n\nGround everything in batch-context.md section 3.2 evidence (install()/installAndPersist() at package-manager.ts:1005/:1029, verbatim latest at :1811, pinned semantics :59-66/:1456/:1107/:1204, maxSatisfying at :1526, no compat check in loader.ts).",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/core/package-manager.ts",
+					"packages/coding-agent/src/package-manager-cli.ts",
+					"packages/coding-agent/src/core/extensions/loader.ts",
+					"packages/coding-agent/docs/packages.md"
+				],
+				"max_input_tokens": 150000
+			}
+		},
+		{
+			"custom_id": "spec-03-subagents-spec-set",
+			"title": "Spec set: native subagent self-sufficiency + defect-closure plan",
+			"prompt": "Draft exactly three spec files per GUIDE.md (Phase C draft: markers + Traceability; === FILE: ... === fences):\n\n1. specs/00-requirements/features/subagents-requirements.md — process-level requirements R-SUBAG-001 onward (do NOT renumber the existing register IDs REQ-D01..REQ-IP01 in specs/subagent/requirements.md; cross-reference them instead). Cover: every actionable open item in the register (decision D5: P1 DEFECTs REQ-L02/C02/C03/I04, P1 GAPs REQ-I01/I02/P02, all P2 rows except REQ-IP01) is closed with a passing test before release; REQ-O03 is re-audited first because its evidence is stale and it may already be implemented; docs no longer reference the upstream npm pi-subagents package or the upstream-era example extension; the native subsystem is the only subagent implementation (packages/agent/src carries zero subagent code today — keep it that way); agent definitions load only from local directories (no remote fetch) — keep; every new numeric limit is registered in the budgets component spec.\n2. specs/adr/0004-native-subagent-self-sufficiency.md — decision: the native subsystem under packages/coding-agent/src/core/subagent/ is the sole subagent implementation; upstream pi-subagents package and upstream example extension are removed. Alternatives rejected: continue recommending the npm package for long-lived agents, keep the upstream example extension as a compatibility shim. Testable compliance checklist (grep assertions on docs, import assertions on packages/agent/src).\n3. specs/impl/subagents-phase.md — DAG for closing the register: order REQ-O03 re-audit (may no-op) first; then P1 defects (L02 lease writer; C02/C03 shared concurrency; I04 composite worktree locking), then P1 gaps (I01 isolation field depends on I02 concurrentSafe for C01; P02 admission), then P2 batch (D03, D04, D05+CXT01, O01, O02, C04, L01). Each row Realises a REQ-SUBAG-* or cross-references a register ID; each names its verification test file under packages/coding-agent/test/. Respect specs/subagent/rejected.md: do not schedule rejected designs (no foreground-to-background promotion, no task-graph claim system). Mandatory Out of scope section (REQ-IP01, performance tuning, TUI-native dashboard beyond reusing the background renderer).\n\nGround in batch-context.md section 3.3 (fix sketches are starting points; the register feature specs under specs/subagent/features/ are normative — read them before writing impl rows).",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": ["packages/coding-agent/docs/subagents.md"],
+				"max_input_tokens": 140000
+			}
+		},
+		{
+			"custom_id": "spec-04-compaction-spec-set",
+			"title": "Spec set: compaction no-op is a typed skip, not an error",
+			"prompt": "Draft exactly three spec files per GUIDE.md (Phase C draft: markers + Traceability; === FILE: ... === fences):\n\n1. specs/00-requirements/features/compaction-requirements.md — requirements R-COMPACTION-001 onward. Cover: a compaction attempt with nothing to summarise is a typed skip, never a user-facing error; skip reasons are distinct (already compacted / nothing new since last compaction / below keep-recent budget); the threshold trigger pre-checks feasibility before launching background work and latches a skip decision until the branch grows, so the same condition does not re-fire every prompt; automatic and hot-swap paths surface skips as informational status, manual triggers surface them as a visible non-error notice; genuine compaction failures (provider errors, aborts) remain errors and still reach the error channel and telemetry; benign skips never reach telemetry error reporting; the user-visible reason text never mislabels 'nothing new since last compaction' as 'session too small'.\n2. specs/adr/0005-compaction-skip-not-error.md — decision: prepareCompaction communicates a typed skip reason; every consumer maps skip to a non-error outcome. Alternatives rejected: keep throwing and downgrade at the UI only, pre-filter at each trigger without a typed result, disable automatic compaction. Testable compliance checklist.\n3. specs/impl/compaction-phase.md — DAG: typed skip result (prepareCompaction) -> consumers (blocking compact, background, auto) -> trigger pre-check + latch -> interactive-mode rendering split (skip vs failure) -> telemetry guard -> extension-side background:true (note the out-of-repo extension c:/dev/ai-compact-hot-swap/index.ts is fixed in the companion fix task). Verification via new tests under packages/coding-agent/test/suite/. Mandatory Out of scope section (summariser model selection — already handled by uncommitted work; compaction quality/prompts; branch summarization algorithm).\n\nGround in batch-context.md section 3.4 — it is a verified root-cause analysis; cite its path:line anchors rather than re-deriving.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/core/agent-session.ts",
+					"packages/coding-agent/src/core/compaction/compaction.ts",
+					"packages/coding-agent/docs/compaction.md"
+				],
+				"max_input_tokens": 160000
+			}
+		},
+		{
+			"custom_id": "fix-01-compaction-errors",
+			"title": "Fix: compaction 'Nothing to compact' red-error loop (core + extension)",
+			"prompt": "Produce unified diffs (=== DIFF: <file> === blocks; --- a/... +++ b/...; each followed by a one-line rationale and the verifying test(s)) that fix the repeated red compaction errors. Required changes:\n\n1. packages/coding-agent/src/core/compaction/compaction.ts — change prepareCompaction (currently returns undefined for three distinct reasons at ~:910, :941, :962-964) to communicate a typed skip reason (e.g. a discriminated result: {skip: 'already-compacted'|'nothing-to-summarize'|'no-cut-point'} vs a preparation). Keep a convenience wrapper if call sites prefer boolean, but the three reasons must be distinguishable.\n2. packages/coding-agent/src/core/agent-session.ts — blocking compact() (~:2245) and _runBackgroundCompaction (~:2480): map skip reasons to a compaction_end event carrying skipped:true + reason instead of throwing 'Nothing to compact (session too small)'. Genuine failures keep throwing. Threshold trigger sites (~:769-777 pre-prompt, ~:2809-2812 post-run): pre-check feasibility before starting background compaction and latch a skip decision that clears when the branch grows (note _backgroundCompaction is cleared in finally at ~:2581, which is why the error re-fires every prompt today). _runAutoCompaction's silent skip (~:2845) is the pattern to generalise.\n3. packages/coding-agent/src/modes/interactive/interactive-mode.ts — manual-trigger and threshold compaction result handling (~:3624-3636): render skipped compaction via the status/warning channel, NOT showError; do not call reportProviderError for skips; check event.background before rendering. Genuine provider failures keep the current red error + telemetry.\n4. Reason text — replace the misleading 'session too small' label with reason-specific text ('nothing new since last compaction' / 'below keep-recent budget'), keeping 'already compacted' distinct.\n5. Tests — new file(s) under packages/coding-agent/test/suite/ (follow the existing suite harness conventions; see compaction-model-preference.test.ts as a template): assert skip result types, assert no error event on skip, assert latch prevents re-fire, assert genuine failure still errors.\n\nEXTENSION FIX (outside the repo; diffs target c:/dev/ai-compact-hot-swap/index.ts — a standalone pi/qi extension, 964 lines). Its runCompaction function (lines ~417-467) currently calls ctx.compact({customInstructions, onComplete, onError}) WITHOUT background:true, which forces the abort-first blocking path, and its onError renders 'Hot-swap compaction failed: <message>' at severity 'error' — this is what produced the user's repeated red errors. Quote of the current call site:\n\n    notify(ctx, `Hot-swap compaction started in background (entry ${triggerEntryCount ?? \"?\"})...`, \"info\");\n    ctx.compact({\n        customInstructions,\n        onComplete: () => { ... },\n        onError: (error) => {\n            ...\n            notify(ctx, cancelled ? \"Hot-swap compaction cancelled.\" : `Hot-swap compaction failed: ${error.message}`, cancelled ? \"warning\" : \"error\");\n        },\n    });\n\nProduce an extension-side diff that: (a) passes background: true in the compact options (supported since commit 6ef071008, agent-session.ts:3236); (b) downgrades skip-class outcomes (messages matching /Nothing to compact|Already compacted|nothing to summarize/i) to severity 'warning' (or 'info') and clears its compacting/pending state; (c) keeps true provider failures at 'error'.\n\nDo not touch the summariser-model changes elsewhere in the tree.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/core/agent-session.ts",
+					"packages/coding-agent/src/core/compaction/compaction.ts",
+					"packages/coding-agent/src/modes/interactive/interactive-mode.ts"
+				],
+				"max_input_tokens": 170000
+			}
+		},
+		{
+			"custom_id": "fix-02-subagent-p1-defects",
+			"title": "Fix: subagent P1 defects + P1 gaps (lease writer, concurrency, worktree locking, isolation, admission)",
+			"prompt": "Produce unified diffs (=== DIFF: <file> === blocks with rationale + verifying tests per fix) closing these P1 rows of specs/subagent/requirements.md. The specs under specs/subagent/features/ are NORMATIVE — read the cited feature spec sections before writing code; where the spec and the batch-context sketch disagree, the spec wins (emit an [UNRESOLVED] line if genuinely ambiguous). Respect specs/subagent/rejected.md (no foreground-to-background promotion; no task-graph/claim system).\n\n1. REQ-L02 (DEFECT, durability spec 2): session-lease.ts updateWriter is declared (:107) and implemented (:455) but has ZERO call sites; defaultGetProcessStartIdentity returns undefined on win32 (:284-296). Call updateWriter everywhere a lease and its child row are written together (dispatch, settle, pid-record). Add test asserting writerState != 'none' after dispatch.\n2. REQ-C02 (DEFECT, concurrency spec 2.4): the background budget (subagent-tool.ts ~:693,:717), inline pool mapWithConcurrencyLimit (~:1665-1667), chain (~:1603) and single (~:1715) are independent limits. Replace with ONE shared per-process concurrency counter across all modes (reuse the totalSpawnCount closure pattern at ~:770 / runner.listRunning()).\n3. REQ-C03 (DEFECT, concurrency spec 2.5): the inline pool is per-invocation (:565-583) with no cross-call state; packages/agent/src/types.ts:275 defaults toolExecution to 'parallel'. Introduce a session-scoped semaphore mirroring the totalSpawnCount closure, released on settle/abort.\n4. REQ-I04 (DEFECT, isolation spec 2.6, three sub-defects): experiment-tools.ts:297-301 bare catch{} followed by :302 writing status:'merged' (never mark merged on failure — typed error with reason/location); worktree.ts:216-219 deletes exp/<slug> before the keep_branch check (experiment-tools.ts:613 vs :623 — honour keepBranch inside removeWorktreeLocked); worktree-lock.ts:112-115 lockPath:'' (repo-scoped lock held across the whole check-and-mutate).\n5. REQ-I01 (GAP, isolation spec 2): add isolation: 'none'|'worktree' to the subagent schema (subagent-tool.ts:92-210, types.ts:66-84), plumb to spawn, reuse existing createWorktree (currently gated by enableExperiments — experiment-tools.ts:347, src/core/defaults.ts:29); fail loudly on worktree creation failure, no silent downgrade.\n6. REQ-I02 (GAP): add concurrentSafe?: boolean to ToolDef (packages/agent/src/types.ts), default false for mutating tools (packages/agent/src/... tool registry around file-mutation-queue.ts:4 consumers).\n7. REQ-P02 (GAP, permissions spec 3): before accepting background:true dispatch, require an explicit opt-in field or a narrowed tool set — one field, one admission check, with a typed refusal message.\n\nTests: new files under packages/coding-agent/test/ following existing subagent test conventions (see subagent-bg-concurrency-cap.test.ts, subagent-experiment-tools.test.ts as templates). Each fix names its verifying test; a fix with no test is incomplete.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/session-lease.ts",
+					"packages/coding-agent/src/core/subagent/experiment-tools.ts",
+					"packages/coding-agent/src/core/subagent/worktree.ts",
+					"packages/coding-agent/src/core/subagent/worktree-lock.ts",
+					"packages/coding-agent/src/core/subagent/types.ts",
+					"packages/coding-agent/src/core/defaults.ts",
+					"packages/agent/src/types.ts"
+				],
+				"max_input_tokens": 170000
+			}
+		},
+		{
+			"custom_id": "fix-03-subagent-p2-gaps",
+			"title": "Fix: subagent P2 gaps (O03 re-audit, docs de-upstream, descriptions, lease expiry, admission gate)",
+			"prompt": "Produce unified diffs (=== DIFF: <file> === blocks with rationale + verifying tests) closing these P2 rows of specs/subagent/requirements.md. specs/subagent/features/ is normative; respect rejected.md.\n\n1. REQ-O03 — RE-AUDIT FIRST. The register marks it GAP with stale evidence; direct reading today shows claimRecord/writeRecordFile used at background.ts:1212-1307, called from agent-session.ts:569,590, with test/subagent-bg-replay.test.ts passing. First emit a verdict block '=== O03 RE-AUDIT: IMPLEMENTED | STILL-GAP ===' with evidence. If IMPLEMENTED: no code diff — provide the register-flip note (row change to IMPLEMENTED with refreshed citation). If STILL-GAP: wire the remaining path or delete the stale docs at background.ts:9-26.\n2. REQ-C04 (docs drift): replace the outdated wording in packages/coding-agent/docs/settings.md (~:255, 'per session') and packages/coding-agent/docs/subagents.md (~:62, DAG 'at most maxConcurrent') with the exact corrected rows from specs/subagent/features/concurrency/spec.md sections 2.6.1/2.6.2 — read those sections and quote their text.\n3. REQ-L01 (durability): session-lease.ts:36-46 leases have no time expiry and Windows cannot break them — add a minimal timestamp-based expiry (heartbeat or acquired-at + TTL) with reaping semantics consistent with the cancellation spec; if the spec forbids a design, emit [UNRESOLVED] with options instead of inventing one.\n4. REQ-D03 (delegation): enforce maxTurns using the existing free liveUsage.turns counter (subagent-tool.ts:~513); wrap the child up gracefully on exhaustion (stdin is 'ignore' — see budgets V25); respect toolTimeoutMs per-call semantics (src/core/defaults.ts, bun-process-runner.ts:235-267).\n5. REQ-D04 (delegation): add description to SavedSpecFile (saved-specs.ts:38-44), persist on save, and render saved agents into the subagent tool description.\n6. REQ-D05 + REQ-CXT01 (delegation/context): extend the tool description with when-NOT-to-delegate guidance and the output contract (the parent model receives only the child's final summary). Keep it terse; flag that D05 wants an A/B check per its spec note.\n7. REQ-O01 (observability): buildStatusInjection (status-injector.ts:43) has zero call sites. Check the 'do not poll' prompt constraint noted in the observability spec first; then either wire it once per parent turn or delete it and its exports — state which and why.\n8. REQ-O02 (observability): the dashboard (interactive-mode.ts:3214,4475-4494) is background-only; inline runs are invisible. Reuse the existing background log layout/renderer to include inline runIds.\n9. REQ-C01 (concurrency): gate parallel/DAG admission on every participating tool's concurrentSafe (consumes REQ-I02 from the companion P1 task — if I02's field is absent in your context, emit the diff gated behind that field landing and note the dependency).\n\nTests: new/updated files under packages/coding-agent/test/ per fix; doc-only changes need a grep-style assertion noted in the rationale if the repo has a docs check, otherwise call them manual.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/session-lease.ts",
+					"packages/coding-agent/src/core/subagent/status-injector.ts",
+					"packages/coding-agent/src/core/subagent/saved-specs.ts",
+					"packages/coding-agent/src/core/subagent/background.ts",
+					"packages/coding-agent/src/core/subagent/control.ts",
+					"packages/coding-agent/src/core/subagent/bun-process-runner.ts",
+					"packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+					"packages/coding-agent/docs/subagents.md",
+					"packages/coding-agent/docs/settings.md"
+				],
+				"max_input_tokens": 200000
+			}
+		},
+		{
+			"custom_id": "fix-04-rebrand-critical-path",
+			"title": "Fix: qi rebrand critical-path rename (bin, config, env, endpoints, publish) + full sweep checklist",
+			"prompt": "Produce the critical-path portion of the pi-to-qi hard-cut rename as unified diffs (=== DIFF: <file> === blocks; prioritised in the order below; one-line rationale + verifying command per diff). Decisions D1 (hard cut, no aliases) and D2 (@bramburn/qi-*) and D4 (sever endpoints) are binding — see batch-context.md section 1. Evidence anchors: section 3.1.\n\nOrder of work:\n1. packages/coding-agent/package.json — piConfig block: name qi, title, configDir .qi; bin 'pi' becomes 'qi' (plus pi-ai becomes qi-ai in packages/ai/package.json); name field to @bramburn/qi-coding-agent; repository.url to the bramburn remote.\n2. All 11 packages/*/package.json + packages/session-backends/sqlite-node/package.json — name @bramburn/qi-*, repository.url, workspace name updates; root package.json pi-monorepo becomes qi-monorepo; internal workspace dependency references @earendil-works/pi-* become @bramburn/qi-*. List every file you changed in a summary block.\n3. packages/coding-agent/src/config.ts — APP_NAME default 'pi' becomes 'qi'; APP_TITLE 'π' becomes 'qi' (or a chosen ASCII title — if a decision is needed, emit [UNRESOLVED]); CONFIG_DIR_NAME '.pi' becomes '.qi'; env var name derivations PI_* become QI_*; the share-viewer pi.dev default URL is removed (D4 — replace with an offline/no-op default and a TODO(deferred-porting) note).\n4. Environment surface — rename every literal PI_* env var to QI_* across packages/*/src (the full inventory is in batch-context.md section 3.1 and packages/coding-agent/docs/environment-variables.md; document both docs update and code update). Hard cut: no fallback reads of PI_*.\n5. packages/coding-agent/src/cli/args.ts + src/main.ts:832 + src/cli/startup-ui.ts:33-34 — help/usage/banner/official-package strings become qi.\n6. Endpoint severing (D4) — version-check.ts pi.dev/api/latest-version, interactive-mode.ts:1360 report-install, package-manager-cli.ts:50 installer releases, changelog pi.dev/changelog (interactive-mode.ts:4643), session share viewer pi.dev/session. Remove calls or stub behind a compile-safe no-op with TODO(deferred-porting); never leave a live earendil host.\n7. Publish tooling — scripts/fork-publish-rename.mjs (rewrites to @bramburn/qi-*; update its test), .github/workflows/publish.yml, scripts/sync-versions.js and README.md:12-16 fork-tracking policy (mark upstream sync DISABLED per ADR-0002; do not delete the files unless trivial — disabling note is acceptable and preferred).\n8. session-share.ts:29 event type pi.share becomes qi.share.\n9. README.md install commands + website/src/pages/index.tsx:116 CTA + website/docusaurus.config.ts:93 title.\n\nThen emit one final block '=== FILE: specs/batch/rebrand-sweep-checklist.md ===' containing: a grep-based inventory strategy for the remaining ~7.5k occurrences (grouped by area: packages other than coding-agent src, website, docs, scripts, .github, research/lab/checkpoint-evidence — the last three are EXCLUDES, do not rename them), the exclusion list (dist/, node_modules/, .worktrees/, .claude/, checkpoint-evidence/, scratch/, research/, lab/, package-lock.json, bun.lock), and a final guard script diff (scripts/check-no-earendil.mjs) that fails CI on new earendil/pi brand hits outside the exclusion list.\n\nDo not touch: the uncommitted summariser-model changes, specs/subagent/**, core/subagent/** (renaming there is covered by the sweep checklist).",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/package.json",
+					"packages/ai/package.json",
+					"packages/coding-agent/src/config.ts",
+					"packages/coding-agent/src/cli/args.ts",
+					"packages/coding-agent/src/main.ts",
+					"packages/coding-agent/src/cli/startup-ui.ts",
+					"packages/coding-agent/src/core/settings-manager.ts",
+					"packages/coding-agent/src/core/session-manager.ts",
+					"packages/coding-agent/src/core/session-share.ts",
+					"packages/coding-agent/src/utils/version-check.ts",
+					"packages/coding-agent/src/package-manager-cli.ts",
+					"scripts/fork-publish-rename.mjs",
+					"scripts/sync-versions.js",
+					".github/workflows/publish.yml",
+					"packages/coding-agent/docs/environment-variables.md",
+					"README.md"
+				],
+				"max_input_tokens": 190000
+			}
+		}
+	]
+}

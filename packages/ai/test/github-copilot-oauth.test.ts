@@ -2,12 +2,25 @@
 import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 import { githubCopilotOAuth } from "../src/auth/oauth/github-copilot.ts";
 import { createModels } from "../src/models.ts";
+import { GITHUB_COPILOT_MODELS } from "../src/providers/github-copilot.models.ts";
 import { githubCopilotProvider } from "../src/providers/github-copilot.ts";
 
 const neverAbortedSignal = new AbortController().signal;
 
 const testCopilotAccessToken = "tid=test;exp=9999999999;proxy-ep=proxy.individual.githubcopilot.com;";
 const testCopilotModelsUrl = "https://api.individual.githubcopilot.com/models";
+
+// Fixture ids that are expected to survive filtering must name models the built-in
+// catalog knows: parseGitHubCopilotModelCatalog() gates policy updates on
+// Object.hasOwn(GITHUB_COPILOT_MODELS, id), and the provider's filterModels()
+// intersects the picker list with that same catalog. The catalog is regenerated
+// from the live upstream source by `bun run build`
+// (packages/ai/src/providers/data/ is gitignored), so ids are read from it instead
+// of being hardcoded - see https://github.com/bramburn/qi/issues/1.
+// "remote-only-model" stays a literal below: that case asserts an id the catalog
+// does not know is skipped.
+const copilotCatalogIds = Object.keys(GITHUB_COPILOT_MODELS);
+const [copilotId1, copilotId2, copilotId3, copilotId4] = copilotCatalogIds;
 
 function jsonResponse(body: unknown, status: number = 200, headers?: Record<string, string>): Response {
 	return new Response(JSON.stringify(body), {
@@ -134,76 +147,82 @@ describe("GitHub Copilot OAuth device flow", () => {
 		vi.useRealTimers();
 	});
 
+	// Without four catalog ids the fixtures below silently become `undefined` ids
+	// that filter to an empty list, and the assertions would still pass.
+	it("has enough built-in Copilot models to drive the fixtures", () => {
+		expect(copilotCatalogIds.length).toBeGreaterThanOrEqual(4);
+	});
+
 	it("filters models to the authenticated account picker catalog", async () => {
 		const credentials = await refreshGitHubCopilotModelsForTest([
 			{
-				id: "gpt-5-mini",
+				id: copilotId1,
 				model_picker_enabled: true,
 				capabilities: { supports: { tool_calls: true } },
 			},
 			{
-				id: "claude-opus-4.7",
+				id: copilotId2,
 				model_picker_enabled: true,
 				policy: { state: "disabled" },
 				capabilities: { supports: { tool_calls: true } },
 			},
 			{
-				id: "gpt-5.4-nano",
+				id: copilotId3,
 				model_picker_enabled: false,
 				policy: { state: "enabled" },
 				capabilities: { supports: { tool_calls: true } },
 			},
 		]);
-		expect(credentials.availableModelIds).toEqual(["gpt-5-mini"]);
+		expect(credentials.availableModelIds).toEqual([copilotId1]);
 
 		const store = new InMemoryCredentialStore();
 		await store.modify("github-copilot", async () => ({ ...credentials, type: "oauth" }));
 		const models = createModels({ credentials: store });
 		models.setProvider(githubCopilotProvider());
-		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-5-mini"]);
+		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual([copilotId1]);
 	});
 
 	it("falls back to explicitly enabled policy models when the picker catalog is empty", async () => {
 		const credentials = await refreshGitHubCopilotModelsForTest([
 			{
-				id: "gpt-5-mini",
+				id: copilotId1,
 				model_picker_enabled: false,
 				policy: { state: "enabled" },
 				capabilities: { supports: { tool_calls: true } },
 			},
 			{
-				id: "claude-opus-4.7",
+				id: copilotId2,
 				model_picker_enabled: false,
 				policy: { state: "disabled" },
 				capabilities: { supports: { tool_calls: true } },
 			},
 			{
-				id: "gpt-5.4-nano",
+				id: copilotId3,
 				model_picker_enabled: false,
 				capabilities: { supports: { tool_calls: true } },
 			},
 			{
-				id: "gpt-4o",
+				id: copilotId4,
 				model_picker_enabled: false,
 				policy: { state: "enabled" },
 				capabilities: { supports: { tool_calls: false } },
 			},
 		]);
 
-		expect(credentials.availableModelIds).toEqual(["gpt-5-mini"]);
+		expect(credentials.availableModelIds).toEqual([copilotId1]);
 
 		const store = new InMemoryCredentialStore();
 		await store.modify("github-copilot", async () => ({ ...credentials, type: "oauth" }));
 		const models = createModels({ credentials: store });
 		models.setProvider(githubCopilotProvider());
-		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual(["gpt-5-mini"]);
+		expect((await models.getAvailable("github-copilot")).map((model) => model.id)).toEqual([copilotId1]);
 	});
 
 	it("does not fall back to policy models for non-Individual accounts", async () => {
 		const credentials = await refreshGitHubCopilotModelsForTest(
 			[
 				{
-					id: "gpt-5-mini",
+					id: copilotId1,
 					model_picker_enabled: false,
 					policy: { state: "enabled" },
 					capabilities: { supports: { tool_calls: true } },
@@ -316,13 +335,13 @@ describe("GitHub Copilot OAuth device flow", () => {
 				return jsonResponse({
 					data: [
 						{
-							id: "gpt-5-mini",
+							id: copilotId1,
 							model_picker_enabled: true,
 							policy: { state: "enabled" },
 							capabilities: { supports: { tool_calls: true } },
 						},
 						{
-							id: "claude-sonnet-4.6",
+							id: copilotId2,
 							model_picker_enabled: true,
 							policy: { state: "unconfigured" },
 							capabilities: { supports: { tool_calls: true } },
@@ -334,7 +353,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 							capabilities: { supports: { tool_calls: true } },
 						},
 						{
-							id: "gpt-5.4",
+							id: copilotId3,
 							model_picker_enabled: true,
 							policy: { state: "unconfigured" },
 							capabilities: { supports: { tool_calls: false } },
@@ -356,7 +375,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 		await loginPromise;
 
 		expect(catalogRequestCount).toBe(1);
-		expect(policyModelIds).toEqual(["claude-sonnet-4.6"]);
+		expect(policyModelIds).toEqual([copilotId2]);
 	});
 
 	it("retries a throttled policy update after Retry-After", async () => {
@@ -366,7 +385,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 		stubGitHubCopilotLoginFetch({
 			models: () =>
 				jsonResponse({
-					data: [{ id: "claude-sonnet-4.6", model_picker_enabled: true, policy: { state: "unconfigured" } }],
+					data: [{ id: copilotId1, model_picker_enabled: true, policy: { state: "unconfigured" } }],
 				}),
 			policy: () => {
 				policyRequestCount += 1;
@@ -393,7 +412,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 	it("continues policy updates after a transport failure", async () => {
 		vi.useFakeTimers();
 
-		const modelIds = ["gpt-5-mini", "claude-sonnet-4.6"];
+		const modelIds = [copilotId1, copilotId2];
 		const policyModelIds: string[] = [];
 		stubGitHubCopilotLoginFetch({
 			models: () =>
@@ -425,8 +444,8 @@ describe("GitHub Copilot OAuth device flow", () => {
 			models: () =>
 				jsonResponse({
 					data: [
-						{ id: "gpt-5-mini", model_picker_enabled: true, policy: { state: "unconfigured" } },
-						{ id: "claude-sonnet-4.6", model_picker_enabled: true, policy: { state: "unconfigured" } },
+						{ id: copilotId1, model_picker_enabled: true, policy: { state: "unconfigured" } },
+						{ id: copilotId2, model_picker_enabled: true, policy: { state: "unconfigured" } },
 					],
 				}),
 			policy: (modelId) => {
@@ -447,7 +466,7 @@ describe("GitHub Copilot OAuth device flow", () => {
 		await vi.advanceTimersByTimeAsync(1000);
 		const credential = await loginPromise;
 		expect(credential).toMatchObject({ type: "oauth", access: testCopilotAccessToken });
-		expect(policyModelIds).toEqual(["gpt-5-mini"]);
+		expect(policyModelIds).toEqual([copilotId1]);
 		expect(await store.read("github-copilot")).toEqual(credential);
 	});
 

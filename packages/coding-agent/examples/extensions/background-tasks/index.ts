@@ -13,8 +13,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { CONFIG_DIR_NAME, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult } from "@bramburn/qi-agent-core";
+import { CONFIG_DIR_NAME, type ExtensionAPI } from "@bramburn/qi-coding-agent";
 import { Type } from "typebox";
 import {
 	addTask,

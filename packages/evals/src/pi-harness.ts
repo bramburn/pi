@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { contentText } from "@earendil-works/pi-ai";
+import { contentText } from "@bramburn/qi-ai";
 import {
 	type AgentSession,
 	type CreateAgentSessionOptions,
@@ -12,7 +12,7 @@ import {
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "@bramburn/qi-coding-agent";
 import {
 	createHarness,
 	type Harness,
@@ -45,12 +45,12 @@ type PiCodingAgentHarnessWithOutput<TOutput extends JsonValue> = PiCodingAgentHa
 
 export function resolveModelSelection(
 	explicitModel: PiCodingAgentModelSelection | undefined,
-	environment: { PI_PROVIDER?: string; PI_MODEL?: string } = process.env,
+	environment: { QI_PROVIDER?: string; QI_MODEL?: string } = process.env,
 ): PiCodingAgentModelSelection {
-	const provider = (explicitModel?.provider ?? environment.PI_PROVIDER)?.trim();
-	const id = (explicitModel?.id ?? environment.PI_MODEL)?.trim();
+	const provider = (explicitModel?.provider ?? environment.QI_PROVIDER)?.trim();
+	const id = (explicitModel?.id ?? environment.QI_MODEL)?.trim();
 	if (!provider || !id) {
-		throw new Error("Select a harness model explicitly or set both PI_PROVIDER and PI_MODEL as defaults.");
+		throw new Error("Select a harness model explicitly or set both QI_PROVIDER and QI_MODEL as defaults.");
 	}
 	return { provider, id };
 }

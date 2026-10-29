@@ -88,10 +88,13 @@ describe("getSupportedThinkingLevels", () => {
 		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "low", "high", "max"]);
 	});
 
-	it("includes low/high/max plus off for DeepSeek V4 Flash on opencode-go", () => {
-		const model = getModel("opencode-go", "deepseek-v4-flash");
+	it("includes off/high/max for DeepSeek V4.1 Flash on opencode-go", () => {
+		// deepseek-v4-flash was delisted from opencode-go by models.dev (2026-10-20);
+		// its successor gets the base V4 map (low pinned to null) instead of the
+		// flash-specific low:"low" override.
+		const model = getModel("opencode-go", "deepseek-v4.1-flash");
 		expect(model).toBeDefined();
-		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "low", "high", "max"]);
+		expect(getSupportedThinkingLevels(model!)).toEqual(["off", "high", "max"]);
 	});
 
 	it("includes only max for OpenCode Go Kimi K3", () => {

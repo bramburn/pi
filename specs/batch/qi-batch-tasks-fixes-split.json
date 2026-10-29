@@ -1,0 +1,189 @@
+{
+	"system_prompt": "You are a Principal Staff Engineer and specification author working on 'qi' — our hardened fork of the pi coding agent (TypeScript/Bun monorepo at the repo root). The fork is cutting all ties with upstream earendil/pi: rebranding to qi as a FULL HARD CUT (no legacy aliases), publishing as @bramburn/qi-*, pinning extensions to 0.85-compatible versions, closing every open defect in our native subagent subsystem, and fixing compaction errors that surface as repeated red errors in the TUI. Your inputs are three shared documents: specs/batch/batch-context.md (binding human decisions D1-D6, verified evidence tables with path:line citations, and MANDATORY output conventions), specs/manifest.json (the spec index — destination paths and IDs are fixed there), and specs/GUIDE.md (the Universal Spec Guidance — follow its writing rules, sizing limits, marker protocol, and quality gates). Rules: follow output conventions in batch-context.md section 4 exactly. Cite path:line evidence for every claim; trust symbol names if line numbers drift. Never invent behaviour the specs leave open — emit an [UNRESOLVED] marker instead. Requirements statements must not name technologies (rationale blocks may). Do not comment on or propose reverting the uncommitted summariser-model changes in the tree — they are intentional. Do not pad; machine-importable output only.",
+	"shared_context": {
+		"include_files": [
+			"specs/batch/batch-context.md",
+			"specs/manifest.json",
+			"specs/GUIDE.md"
+		]
+	},
+	"default_context": {
+		"mode": "selected"
+	},
+	"tasks": [
+		{
+			"custom_id": "fix-10-compaction-typed-skip-core",
+			"title": "Fix: compaction typed-skip result + core consumers + threshold latch",
+			"prompt": "Scope: ONLY packages/coding-agent/src/core/compaction/compaction.ts and packages/coding-agent/src/core/agent-session.ts. Produce unified diffs (=== DIFF: <file> === blocks, rationale + verifying test per diff). Keep total output tight — unified diffs only, no full-file rewrites, no prose padding.\n\n1. compaction.ts prepareCompaction (~:907): return a typed discriminated result distinguishing the three undefined cases — last-entry-is-compaction (~:910), no firstKeptEntry (~:941), empty summarise set (~:962-964) — e.g. {skip:'already-compacted'|'nothing-to-summarize'|'no-cut-point'} vs a real preparation. Keep a boolean convenience wrapper if internal callers need it.\n2. agent-session.ts blocking compact() (~:2245) and _runBackgroundCompaction (~:2480): map skip reasons to a compaction_end event with skipped:true + reason instead of throwing 'Nothing to compact (session too small)'. Genuine failures keep throwing.\n3. Threshold triggers pre-prompt (~:769-777) and post-run (~:2809-2812): pre-check feasibility before starting background compaction; latch a skip decision that clears when the branch grows (today _backgroundCompaction is cleared in finally ~:2581, so the error re-fires every prompt). Generalise the silent-skip pattern already present in _runAutoCompaction (~:2845).\n4. Reason text: replace the mislabelled 'session too small' with reason-specific text.\n5. New test file packages/coding-agent/test/suite/compaction-skip-typed.test.ts (follow the harness conventions in the existing suite): assert skip result types, no error event on skip, latch prevents re-fire, genuine failure still errors.\n\nThe imported spec specs/00-requirements/features/compaction-requirements.md and specs/adr/0005-compaction-skip-not-error.md are normative — match their names.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/core/agent-session.ts",
+					"packages/coding-agent/src/core/compaction/compaction.ts"
+				],
+				"max_input_tokens": 130000
+			}
+		},
+		{
+			"custom_id": "fix-11-compaction-ui-and-extension",
+			"title": "Fix: compaction skip rendering in interactive-mode + hot-swap extension background fix",
+			"prompt": "Scope: ONLY packages/coding-agent/src/modes/interactive/interactive-mode.ts plus the out-of-repo extension. Unified diffs only; keep output tight.\n\n1. interactive-mode.ts (~:3624-3636 manual/threshold compaction result handling, ~:2800 showExtensionNotify, ~:4628 showError): render skipped compaction (compaction_end with skipped:true / skip reasons) via the status/warning channel, NOT showError; do not call reportProviderError for skips; check event.background before rendering. Genuine provider failures keep the red error + telemetry path unchanged.\n2. Extension fix — diffs target c:/dev/ai-compact-hot-swap/index.ts (standalone extension, outside the repo). Its runCompaction (~lines 417-467) calls ctx.compact({customInstructions, onComplete, onError}) WITHOUT background:true (supported since commit 6ef071008, agent-session.ts:3236), forcing the abort-first blocking path, and onError notifies 'Hot-swap compaction failed: <message>' at severity 'error' — the user's repeated red errors. Diff must: (a) add background:true to the compact options; (b) downgrade skip-class outcomes (message matching /Nothing to compact|Already compacted|nothing to summarize/i, and the new skipped:true compaction_end events) to 'warning'; clear compacting/pending state; (c) keep true provider failures at 'error'.\n3. Test note: one new suite test asserting interactive-mode renders skip events without showError (or, if the rendering path is untestable in suite, state the manual verification step in the rationale).\n\nNormative: specs/00-requirements/features/compaction-requirements.md, specs/adr/0005-compaction-skip-not-error.md.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/modes/interactive/interactive-mode.ts"
+				],
+				"max_input_tokens": 130000
+			}
+		},
+		{
+			"custom_id": "fix-12-subagent-lease-and-concurrency",
+			"title": "Fix: REQ-L02 lease writer wiring + REQ-C02/C03 shared concurrency budget",
+			"prompt": "Scope: session-lease.ts, subagent-tool.ts. Unified diffs + tests; output tight. specs/subagent/features/{durability,concurrency}/spec.md are normative; respect rejected.md.\n\n1. REQ-L02 (durability 2): session-lease.ts updateWriter declared :107, implemented :455, ZERO call sites; defaultGetProcessStartIdentity returns undefined on win32 (:284-296). Wire updateWriter at every site persisting a lease + child row together (dispatch, settle, pid-record). Test: writerState != 'none' after dispatch.\n2. REQ-C02 (concurrency 2.4): background budget (subagent-tool.ts ~:693,:717), inline pool mapWithConcurrencyLimit (~:1665-1667), chain (~:1603), single (~:1715) are independent. Replace with ONE per-process shared counter across all modes (reuse the totalSpawnCount closure pattern ~:770 / runner.listRunning()).\n3. REQ-C03 (concurrency 2.5): inline pool per-invocation (:565-583); add session-scoped semaphore mirroring that closure, released on settle/abort.\nTests: new subagent-shared-concurrency.test.ts + additions to a lease test file, following existing subagent test conventions.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/session-lease.ts",
+					"packages/agent/src/types.ts"
+				],
+				"max_input_tokens": 150000
+			}
+		},
+		{
+			"custom_id": "fix-13-subagent-worktree-locking",
+			"title": "Fix: REQ-I04 composite worktree mutation defects (3 sub-defects)",
+			"prompt": "Scope: experiment-tools.ts, worktree.ts, worktree-lock.ts. Unified diffs + tests; output tight. specs/subagent/features/isolation/spec.md section 2.6 is normative; respect rejected.md.\n\n1. experiment-tools.ts:297-301 bare catch{} followed by :302 writing status:'merged' — never mark merged on failure; surface a typed error carrying reason + location.\n2. worktree.ts:216-219 deletes exp/<slug> before the keep_branch check (experiment-tools.ts:613 vs :623) — pass keepBranch into removeWorktreeLocked so the experiment dir survives when requested.\n3. worktree-lock.ts:112-115 lockPath:'' — repo-scoped lock path; hold the repo lock across the WHOLE check-and-mutate composite in experiment-tools, not just leaf operations.\nTests: additions to subagent-experiment-tools.test.ts / worktree tests covering: failure never marks merged, keep_branch preserves exp/<slug>, lock held across composite.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/experiment-tools.ts",
+					"packages/coding-agent/src/core/subagent/worktree.ts",
+					"packages/coding-agent/src/core/subagent/worktree-lock.ts",
+					"packages/coding-agent/src/core/subagent/experiment-registry.ts"
+				],
+				"max_input_tokens": 150000
+			}
+		},
+		{
+			"custom_id": "fix-14-subagent-isolation-admission",
+			"title": "Fix: REQ-I01 isolation field + REQ-I02 concurrentSafe + REQ-P02 background admission",
+			"prompt": "Scope: subagent-tool.ts, types.ts, defaults.ts, packages/agent/src/types.ts. Unified diffs + tests; output tight. specs/subagent/features/{isolation,permissions}/spec.md normative; respect rejected.md.\n\n1. REQ-I02 first (consumed by others): add concurrentSafe?: boolean to ToolDef in packages/agent/src/types.ts; default false for mutating tools in the tool registry (see file-mutation-queue.ts:4 consumers).\n2. REQ-I01 (isolation 2): add isolation: 'none'|'worktree' to the subagent schema (subagent-tool.ts:92-210, types.ts:66-84), plumb through to spawn, reuse createWorktree (currently gated by enableExperiments — experiment-tools.ts:347, src/core/defaults.ts:29); worktree creation failure fails loudly, never silent downgrade.\n3. REQ-P02 (permissions 3): admission check before background:true — require an explicit opt-in field or a narrowed tool set (one field, one check) with a typed refusal message.\nTests: schema validation test, isolation plumbing test, admission refusal test — new subagent-*.test.ts files per conventions.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/types.ts",
+					"packages/coding-agent/src/core/subagent/schema-validate.ts",
+					"packages/coding-agent/src/core/subagent/runtime.ts",
+					"packages/coding-agent/src/core/defaults.ts",
+					"packages/agent/src/types.ts"
+				],
+				"max_input_tokens": 150000
+			}
+		},
+		{
+			"custom_id": "fix-15-subagent-o03-c04-d03-d04",
+			"title": "Fix: REQ-O03 re-audit + REQ-C04 doc replacements + REQ-D03 maxTurns + REQ-D04 saved-spec description",
+			"prompt": "Scope: background.ts, session-lease.ts, saved-specs.ts, docs/settings.md, docs/subagents.md. Unified diffs + tests; output tight. specs/subagent/features normative.\n\n1. REQ-O03 — RE-AUDIT FIRST: emit verdict block '=== O03 RE-AUDIT: IMPLEMENTED | STILL-GAP ===' with evidence (register claims GAP; direct reading shows claimRecord/writeRecordFile used at background.ts:1212-1307, called agent-session.ts:569,590, test/subagent-bg-replay.test.ts passes). If IMPLEMENTED: no code diff, provide the register-flip note (row update for specs/subagent/requirements.md + refreshed citation in traceability.md — emit as proposed edits to those spec files). If STILL-GAP: wire the remaining path or delete stale docs at background.ts:9-26.\n2. REQ-C04: replace outdated wording in packages/coding-agent/docs/settings.md (~:255 'per session') and docs/subagents.md (~:62 DAG 'at most maxConcurrent') with the exact corrected text from specs/subagent/features/concurrency/spec.md sections 2.6.1/2.6.2 — quote the spec text verbatim.\n3. REQ-L01 (durability): session-lease.ts:36-46 — add minimal timestamp-based lease expiry consistent with the durability/cancellation specs; if the spec forbids the design space, emit [UNRESOLVED] with options instead.\n4. REQ-D03 (delegation): enforce maxTurns via the existing free liveUsage.turns counter (subagent-tool.ts:~513), graceful wrap-up (stdin 'ignore', budgets V25), per-call toolTimeoutMs semantics (src/core/defaults.ts, bun-process-runner.ts:235-267).\n5. REQ-D04: add description to SavedSpecFile (saved-specs.ts:38-44), persist on save, render saved agents into the subagent tool description.\nTests per fix; doc-only changes get a grep assertion noted in rationale.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/background.ts",
+					"packages/coding-agent/src/core/subagent/session-lease.ts",
+					"packages/coding-agent/src/core/subagent/saved-specs.ts",
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/bun-process-runner.ts",
+					"packages/coding-agent/src/core/defaults.ts",
+					"packages/coding-agent/docs/subagents.md",
+					"packages/coding-agent/docs/settings.md"
+				],
+				"max_input_tokens": 160000
+			}
+		},
+		{
+			"custom_id": "fix-16-subagent-tool-text-and-observability",
+			"title": "Fix: REQ-D05/CXT01 tool description + REQ-O01 status injection + REQ-O02 dashboard + REQ-C01 admission gate",
+			"prompt": "Scope: subagent-tool.ts, status-injector.ts, interactive-mode.ts, packages/agent types (only if needed for concurrentSafe from the companion task — emit [DEPENDS-ON: fix-14] annotated diff if the field is absent). Unified diffs; output tight.\n\n1. REQ-D05 + REQ-CXT01 (delegation 4 / context 4): extend the subagent tool description with when-NOT-to-delegate guidance and the output contract (the parent model receives ONLY the child's final summary). Terse. Note D05's spec asks for an A/B check before merging — mark the diff as proposal.\n2. REQ-O01 (observability): buildStatusInjection (status-injector.ts:43) has zero call sites. Check the 'do not poll' constraint in specs/subagent/features/observability/spec.md FIRST; then either wire it once per parent turn (agent-session/subagent-tool loop) or delete it + its exports — state which and why in the rationale.\n3. REQ-O02 (observability): dashboard is background-only (interactive-mode.ts:3214,4475-4494); inline runs invisible. Reuse the existing background log layout/renderer to include inline runIds.\n4. REQ-C01 (concurrency): gate parallel/DAG admission on every participating tool's concurrentSafe (consumes REQ-I02 — if the field is not visible in your context, annotate [DEPENDS-ON: fix-14-subagent-isolation-admission]).\nTests per fix where code changes; O01 deletion-only needs no test but needs the rationale statement.",
+			"context": {
+				"mode": "selected",
+				"include_dirs": ["specs/subagent"],
+				"include_files": [
+					"packages/coding-agent/src/core/subagent/subagent-tool.ts",
+					"packages/coding-agent/src/core/subagent/status-injector.ts",
+					"packages/coding-agent/src/core/subagent/orchestration.ts",
+					"packages/coding-agent/src/core/subagent/agents.ts",
+					"packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+					"packages/agent/src/types.ts"
+				],
+				"max_input_tokens": 190000
+			}
+		},
+		{
+			"custom_id": "fix-17-qi-package-config-env-rename",
+			"title": "Fix: qi rename part 1 — package identity, config.ts, env-var surface, env docs",
+			"prompt": "Scope: package.json files, config.ts, literal PI_* env vars in code, docs/environment-variables.md. Decisions D1 (hard cut, NO aliases) and D2 (@bramburn/qi-*) binding. Unified diffs; output tight; keep diffs minimal (targeted hunks, not whole-file rewrites).\n\n1. Root package.json: name pi-monorepo -> qi-monorepo. All 12 packages/*/package.json (+ packages/session-backends/sqlite-node/package.json): name -> @bramburn/qi-*, repository.url -> git+https://github.com/bramburn/pi.git (fork remote), internal workspace deps @earendil-works/pi-* -> @bramburn/qi-*. List changed files in a summary block.\n2. packages/coding-agent/package.json piConfig: name 'qi', configDir '.qi', title qi (if a title decision is needed emit [UNRESOLVED: APP_TITLE choice — suggested: 'qi']).\n3. packages/coding-agent/src/config.ts: APP_NAME/APP_TITLE/CONFIG_DIR_NAME defaults 'pi'/'π'/'.pi' -> 'qi'/'qi'/'.qi'; env derivations produce QI_* names; share-viewer pi.dev default removed (offline/no-op default + TODO(deferred-porting)).\n4. Rename every literal PI_* env var to QI_* across packages/*/src (inventory in batch-context.md section 3.1 + docs/environment-variables.md: PI_MODEL, PI_PROVIDER, PI_REASONING_LEVEL, PI_CODING_AGENT_DIR, PI_SESSION_FILE, PI_SESSION_ID, PI_TELEMETRY, PI_OFFLINE, PI_SKIP_VERSION_CHECK, PI_CACHE_RETENTION, PI_HARDWARE_CURSOR, PI_HYPERLINKS, PI_IMAGE_PROTOCOL, PI_PACKAGE_DIR, PI_SHARE_VIEWER_URL, PI_TRUE_COLOR, PI_TUI_ESC_TIMEOUT, PI_AI_DEBUG, PI_SUBAGENT_* (enumerate), PI_BUNDLED_NODE, PI_CLEAR_ON_SHRINK, PI_INSTALLER_API_BASE, PI_STARTUP_BENCHMARK, PI_TIMING, PI_ENVIRONMENT). NO fallback reads of PI_* — hard cut. Update docs/environment-variables.md in full (every entry QI_*).\n5. Verify command per diff: bun run check passes / grep QI_ counts.\nNote: subagent-tool.ts's PI_SUBAGENT_* usage is in scope here for the ENV RENAME ONLY (do not alter behaviour).",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"package.json",
+					"packages/coding-agent/package.json",
+					"packages/ai/package.json",
+					"packages/agent/package.json",
+					"packages/client/package.json",
+					"packages/protocol/package.json",
+					"packages/server/package.json",
+					"packages/telemetry/package.json",
+					"packages/tui/package.json",
+					"packages/evals/package.json",
+					"packages/clipboard-rs/package.json",
+					"packages/session-backends/sqlite-node/package.json",
+					"packages/coding-agent/src/config.ts",
+					"packages/coding-agent/docs/environment-variables.md"
+				],
+				"max_input_tokens": 120000
+			}
+		},
+		{
+			"custom_id": "fix-18-qi-cli-endpoints-publish-rename",
+			"title": "Fix: qi rename part 2 — CLI/banner strings, endpoint severing, publish tooling, share type, website CTAs",
+			"prompt": "Scope: the files listed in context. Decisions D1/D2/D4 binding. Unified diffs; minimal hunks; output tight.\n\n1. cli/args.ts help/usage: 'pi' command strings -> 'qi' (keep flag semantics). main.ts:832 banner `pi ${VERSION} [bramburn]` -> `qi ${VERSION} [bramburn]`. cli/startup-ui.ts:33-34 OFFICIAL_PACKAGE_NAME/OFFICIAL_APP_NAME -> @bramburn/qi-coding-agent / qi.\n2. Endpoint severing (D4): utils/version-check.ts (pi.dev/api/latest-version), package-manager-cli.ts:50 (pi.dev/api/installer/releases), interactive-mode.ts:1360 (pi.dev/api/report-install), interactive-mode.ts:4643 (pi.dev/changelog). Remove the calls or stub behind compile-safe no-ops with TODO(deferred-porting); never leave a live earendil host. Settings/docs references to these features should degrade gracefully (feature disabled, not crash).\n3. scripts/fork-publish-rename.mjs: rewrite targets -> @bramburn/qi-* (+ update its test file fork-publish-rename.test.mjs if present). .github/workflows/publish.yml: package names -> @bramburn/qi-*. scripts/sync-versions.js + README.md:12-16 fork-tracking: mark upstream sync DISABLED per ADR-0002 (comment/banner note; do not delete files).\n4. core/session-share.ts:29 event type 'pi.share' -> 'qi.share'.\n5. README.md install/badge strings and website/src/pages/index.tsx:116 CTA + website/docusaurus.config.ts:93 title -> qi branding (install command @bramburn/qi-coding-agent).\nVerify command per diff (grep for the removed host, bun run check).",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"packages/coding-agent/src/cli/args.ts",
+					"packages/coding-agent/src/main.ts",
+					"packages/coding-agent/src/cli/startup-ui.ts",
+					"packages/coding-agent/src/utils/version-check.ts",
+					"packages/coding-agent/src/package-manager-cli.ts",
+					"packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+					"packages/coding-agent/src/core/session-share.ts",
+					"scripts/fork-publish-rename.mjs",
+					"scripts/sync-versions.js",
+					".github/workflows/publish.yml",
+					"README.md",
+					"website/src/pages/index.tsx",
+					"website/docusaurus.config.ts"
+				],
+				"max_input_tokens": 190000
+			}
+		},
+		{
+			"custom_id": "fix-19-qi-sweep-checklist-guard",
+			"title": "Fix: qi rename sweep checklist + CI guard script",
+			"prompt": "Deliverables (no code archaeology needed — this task is strategy + one script):\n\n1. '=== FILE: specs/batch/rebrand-sweep-checklist.md ===' — a grep-based inventory + execution strategy for the remaining ~7.5k pi/earendil occurrences AFTER the critical-path rename (companion task fix-17/fix-18 covers package identity, config.ts, env vars, CLI strings, endpoints, publish tooling). Group by area with exact grep commands and suggested batches: (a) packages/*/src remaining literals, (b) packages/coding-agent/docs/**, (c) website/** (docusaurus sidebars/pages), (d) scripts/**, (e) .github/**, (f) types/ + lab/ EXCLUDED, (g) checkpoint-evidence/, scratch/, research/, lab/ EXCLUDE-FOREVER, (h) dist/, node_modules/, .worktrees/, .claude/, package-lock.json, bun.lock NEVER TOUCH. Each batch: risk level, verification command, whether tests must be re-run.\n2. '=== DIFF: scripts/check-no-earendil.mjs ===' — a CI guard script (plain node .mjs, no deps beyond node:fs/path, mirrors the style of scripts/check-pinned-deps.mjs if you recall it, else keep it standalone): walks the repo, applies the exclusion list, fails (exit 1) on earendil-works / word-boundary pi-brand hits in code/docs/config surfaces, with --list and --json modes and a baseline-file escape hatch (scripts/qi-brand-allowlist.json, initially empty). Also emit '=== DIFF: package.json ===' adding a check:qi-brand script entry calling it.\n3. Note in the checklist: manual migration steps for existing users (~/.pi/agent -> ~/.qi/agent, PI_* -> QI_* env, .pi/ -> .qi/) as documentation deliverable for D1 hard cut — no code migration.\nKeep total output under ~10k tokens; the checklist is a table-heavy markdown, the script should be ~100-150 lines.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"scripts/check-pinned-deps.mjs",
+					"package.json"
+				],
+				"max_input_tokens": 60000
+			}
+		}
+	]
+}

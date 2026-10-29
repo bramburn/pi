@@ -1,10 +1,10 @@
 {
-	"name": "@earendil-works/pi-coding-agent-install",
+	"name": "@bramburn/qi-coding-agent-install",
 	"version": "0.85.0-b1",
 	"private": true,
 	"description": "Lockfile root used by the Pi installer and updater.",
 	"dependencies": {
-		"@earendil-works/pi-coding-agent": "0.85.0-b1"
+		"@bramburn/qi-coding-agent": "0.85.0-b1"
 	},
 	"overrides": {
 		"protobufjs": "7.6.5",

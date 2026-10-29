@@ -6,15 +6,12 @@ import { createInMemoryModelRegistry, createModelRegistry, getModelRuntime } fro
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
-import { Agent } from "@earendil-works/pi-agent-core";
-import type {
-	FauxModelDefinition,
-	FauxProviderRegistration,
-	FauxResponseStep,
-	Model,
-} from "@earendil-works/pi-ai/compat";
-import { registerFauxProvider, streamSimple } from "@earendil-works/pi-ai/compat";
+import type { AgentMessage, AgentTool } from "@bramburn/qi-agent-core";
+import { Agent } from "@bramburn/qi-agent-core";
+import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, Model } from "@bramburn/qi-ai/compat";
+import { registerFauxProvider, streamSimple } from "@bramburn/qi-ai/compat";
+import { beforeEach } from "vitest";
+import { ENV_AGENT_DIR } from "../../src/config.ts";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
@@ -28,6 +25,30 @@ import {
 	createTestExtensionsResult,
 	createTestResourceLoader,
 } from "../utilities.ts";
+
+// Ambient `PI_*` variables leak in from whatever shell runs the suite — often a pi
+// session itself, which exports `QI_MODEL` and `QI_PROVIDER`. They change model
+// routing, so `test/suite/` could reach a real API (and spend money) instead of
+// the faux provider its canned-response assertions expect. Scrub the whole
+// family before each test so a run behaves the same on every machine and only
+// sees the env a test sets itself.
+//
+// `QI_OFFLINE` is the one keeper: the vitest config sets it (test.env) to keep
+// tests off the network, so dropping it would be a safety regression.
+const SCRUBBED_PI_ENV_KEPT = new Set(["QI_OFFLINE"]);
+
+export function scrubAmbientPiEnv(): void {
+	for (const name of Object.keys(process.env)) {
+		if (name.startsWith("PI_") && !SCRUBBED_PI_ENV_KEPT.has(name)) {
+			delete process.env[name];
+		}
+	}
+}
+
+// Registered at import time, which puts it ahead of the hooks each test file
+// declares for itself (vitest runs `beforeEach` hooks in registration order), so
+// a test's own env setup wins over the scrub.
+beforeEach(scrubAmbientPiEnv);
 
 type MessageTextPart = { type: "text"; text: string };
 
@@ -100,6 +121,13 @@ function createTempDir(): string {
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 	const tempDir = createTempDir();
+	// AgentSession's constructor runs background-registry hygiene
+	// (markAllRunningAsCrashed + prune) against getAgentDir(); without this seam
+	// every harness run mutates the developer's real agent dir (prune deletes
+	// terminal rows in <agentDir>/subagent-bg). The registry resolves
+	// getAgentDir() per operation, so the override takes effect immediately.
+	const previousAgentDir = process.env[ENV_AGENT_DIR];
+	process.env[ENV_AGENT_DIR] = join(tempDir, "agent");
 	const fauxProvider: FauxProviderRegistration = registerFauxProvider({
 		models: options.models,
 	});
@@ -217,6 +245,11 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		cleanup() {
 			session.dispose();
 			fauxProvider.unregister();
+			if (previousAgentDir === undefined) {
+				delete process.env[ENV_AGENT_DIR];
+			} else {
+				process.env[ENV_AGENT_DIR] = previousAgentDir;
+			}
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true });
 			}

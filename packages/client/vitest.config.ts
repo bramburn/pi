@@ -9,7 +9,8 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			"@earendil-works/pi-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+			"@bramburn/qi-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+			"@bramburn/qi-protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
 		},
 	},
 });

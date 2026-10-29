@@ -1,0 +1,60 @@
+--- a/packages/coding-agent/src/core/subagent/saved-specs.ts
++++ b/packages/coding-agent/src/core/subagent/saved-specs.ts
+@@ -31,6 +31,8 @@
+ export interface SavedSpec {
+ 	/** Filename without the `.json` extension. */
+ 	name: string;
++	/** One-line description of the saved specialist (REQ-D04.1). */
++	description?: string;
+ 	/** The persisted spec fields (notably: no `savedAt`, no `sessionFile`). */
+ 	spec: SubagentSpec;
+ 	/** ISO timestamp recorded when the spec was saved. */
+@@ -40,6 +42,7 @@
+ /** On-disk shape: the persisted spec fields plus the save timestamp. */
+ interface SavedSpecFile {
+ 	role: string;
++	description?: string;
+ 	instructions: string;
+ 	model?: string;
+ 	tools?: string[];
+@@ -66,6 +69,12 @@
+ /** Project the parsed file back onto the optional-field `SubagentSpec` shape. */
+ function toSpec(file: SavedSpecFile): SubagentSpec {
+ 	const spec: SubagentSpec = { role: file.role, instructions: file.instructions };
++	if (typeof file.description === "string" && file.description.trim() !== "") {
++		spec.description = file.description.replace(/\s+/g, " ").trim();
++	}
+ 	if (typeof file.model === "string") spec.model = file.model;
+ 	if (Array.isArray(file.tools)) {
+ 		spec.tools = file.tools.filter((tool): tool is string => typeof tool === "string");
+@@ -116,7 +125,13 @@
+ 		const name = entry.slice(0, -SPEC_FILE_EXT.length);
+ 		try {
+ 			const parsed = JSON.parse(readFileSync(join(dir, entry), "utf8")) as SavedSpecFile;
+-			specs.push({ name, spec: toSpec(parsed), savedAt: parsed.savedAt });
++			const spec = toSpec(parsed);
++			specs.push({
++				name,
++				...(spec.description === undefined ? {} : { description: spec.description }),
++				spec,
++				savedAt: parsed.savedAt,
++			});
+ 		} catch (error) {
+ 			const message = error instanceof Error ? error.message : String(error);
+ 			console.warn(`subagent-saved-specs: skipping unreadable spec "${name}": ${message}`);
+@@ -138,10 +153,15 @@
+ 
+ /** Save (create or overwrite) a spec template. */
+ export function saveSpec(name: string, spec: SubagentSpec): void {
++	const description = (spec.description ?? "").replace(/\s+/g, " ").trim();
++	if (description === "") {
++		throw new Error('invalid spec: missing required field "description" (provide a one-line specialist summary)');
++	}
+ 	const path = specPath(name);
+ 	mkdirSync(specsDir(), { recursive: true });
+ 	const file: SavedSpecFile = {
+ 		role: spec.role,
++		description,
+ 		instructions: spec.instructions,
+ 		savedAt: new Date().toISOString(),
+ 	};

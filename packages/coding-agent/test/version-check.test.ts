@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PACKAGE_NAME } from "../src/config.ts";
 import {
-	checkForNewPiVersion,
+	checkForNewQiVersion,
 	comparePackageVersions,
 	formatVersionCheckError,
-	getLatestPiRelease,
-	getLatestPiVersion,
+	getLatestQiRelease,
+	getLatestQiVersion,
+	getNpmRegistryUrl,
 	isNewerPackageVersion,
 } from "../src/utils/version-check.ts";
 import { allowNetwork } from "./test-network-env.ts";
 
-const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
+const originalSkipVersionCheck = process.env.QI_SKIP_VERSION_CHECK;
+
+/** npm registry metadata for a package (the payload `https://registry.npmjs.org/<name>` returns). */
+function npmRegistryMetadata(options: { name?: string; latest: string; versions?: string[] }): unknown {
+	return {
+		...(options.name ? { name: options.name } : {}),
+		"dist-tags": { latest: options.latest },
+		versions: Object.fromEntries((options.versions ?? [options.latest]).map((version) => [version, {}])),
+	};
+}
 
 beforeEach(() => {
 	allowNetwork();
@@ -18,9 +29,9 @@ beforeEach(() => {
 afterEach(() => {
 	vi.unstubAllGlobals();
 	if (originalSkipVersionCheck === undefined) {
-		delete process.env.PI_SKIP_VERSION_CHECK;
+		delete process.env.QI_SKIP_VERSION_CHECK;
 	} else {
-		process.env.PI_SKIP_VERSION_CHECK = originalSkipVersionCheck;
+		process.env.QI_SKIP_VERSION_CHECK = originalSkipVersionCheck;
 	}
 });
 
@@ -34,47 +45,111 @@ describe("version checks", () => {
 		expect(isNewerPackageVersion("0.70.6", "0.70.5")).toBe(true);
 	});
 
-	it("returns only newer versions", async () => {
-		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.3" }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(checkForNewPiVersion("1.2.3")).resolves.toBeUndefined();
-		await expect(checkForNewPiVersion("1.2.2")).resolves.toEqual({ version: "1.2.3" });
-	});
-
-	it("uses the pi.dev version check api with a pi user agent", async () => {
-		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
-		expect(fetchMock).toHaveBeenCalledWith(
-			"https://pi.dev/api/latest-version",
-			expect.objectContaining({
-				headers: expect.objectContaining({
-					"User-Agent": expect.stringMatching(/^pi\/1\.2\.3 /),
-					accept: "application/json",
-				}),
-			}),
+	it("resolves the latest version from the npm registry for the current package", async () => {
+		const fetchMock = vi.fn(async (_url: string | URL | Request) =>
+			Response.json(npmRegistryMetadata({ name: PACKAGE_NAME, latest: "1.2.4" })),
 		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestQiRelease("1.2.3")).resolves.toEqual({
+			version: "1.2.4",
+			packageName: PACKAGE_NAME,
+		});
+		await expect(getLatestQiVersion("1.2.3")).resolves.toBe("1.2.4");
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		// Resolution happens against the npm registry for the current package only.
+		const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? "");
+		expect(requestedUrl).toBe(getNpmRegistryUrl());
+		expect(requestedUrl.startsWith("https://registry.npmjs.org/")).toBe(true);
 	});
 
-	it("retries a transient version request when explicitly requested", async () => {
+	it("falls back to the highest published version when dist-tags is missing", async () => {
+		const fetchMock = vi.fn(async () =>
+			Response.json({ name: PACKAGE_NAME, versions: { "1.2.3": {}, "1.10.0": {}, "1.9.9": {} } }),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestQiRelease("1.2.3")).resolves.toEqual({
+			version: "1.10.0",
+			packageName: PACKAGE_NAME,
+		});
+	});
+
+	it("reports a newer registry release and skips current or older ones", async () => {
+		const fetchMock = vi.fn(async () => Response.json(npmRegistryMetadata({ name: PACKAGE_NAME, latest: "1.2.4" })));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const newer = await checkForNewQiVersion("1.2.3");
+		expect(newer).toEqual({ version: "1.2.4", packageName: PACKAGE_NAME });
+
+		await expect(checkForNewQiVersion("1.2.4")).resolves.toBeUndefined();
+		await expect(checkForNewQiVersion("1.2.5")).resolves.toBeUndefined();
+	});
+
+	it("skips the network entirely when offline", async () => {
+		vi.stubEnv("QI_OFFLINE", "1");
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestQiRelease("1.2.3")).resolves.toBeUndefined();
+		await expect(getLatestQiVersion("1.2.3")).resolves.toBeUndefined();
+		await expect(checkForNewQiVersion("1.2.3")).resolves.toBeUndefined();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("skips automatic api calls when version checks are disabled", async () => {
+		process.env.QI_SKIP_VERSION_CHECK = "1";
+		const fetchMock = vi.fn(async () => Response.json(npmRegistryMetadata({ latest: "1.2.4" })));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(checkForNewQiVersion("1.2.3")).resolves.toBeUndefined();
+		expect(fetchMock).not.toHaveBeenCalled();
+
+		// Explicit checks (e.g. `qi update --self`) are not gated by the skip flag.
+		await expect(getLatestQiRelease("1.2.3")).resolves.toEqual({
+			version: "1.2.4",
+			packageName: PACKAGE_NAME,
+		});
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("retries transient registry failures when a retry is requested", async () => {
 		const fetchMock = vi
 			.fn()
 			.mockRejectedValueOnce(new Error("fetch failed"))
 			.mockRejectedValueOnce(new Error("fetch failed"))
-			.mockResolvedValueOnce(Response.json({ version: "1.2.4" }));
+			.mockResolvedValueOnce(Response.json(npmRegistryMetadata({ latest: "1.2.4" })));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestPiRelease("1.2.3", { retry: true })).resolves.toEqual({ version: "1.2.4" });
+		await expect(getLatestQiRelease("1.2.3", { retry: true })).resolves.toEqual({
+			version: "1.2.4",
+			packageName: PACKAGE_NAME,
+		});
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
-	it("keeps automatic version checks to one request", async () => {
+	it("does not retry by default and surfaces the last failure", async () => {
 		const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(checkForNewPiVersion("1.2.3")).resolves.toBeUndefined();
+		await expect(getLatestQiRelease("1.2.3")).rejects.toThrow("fetch failed");
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("surfaces registry HTTP failures", async () => {
+		const fetchMock = vi.fn(async () => new Response("Not Found", { status: 404 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestQiRelease("1.2.3")).rejects.toThrow(`npm registry returned HTTP 404 for ${PACKAGE_NAME}`);
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("keeps automatic checks silent on registry errors", async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(checkForNewQiVersion("1.2.3")).resolves.toBeUndefined();
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
@@ -87,45 +162,5 @@ describe("version checks", () => {
 		});
 
 		expect(formatVersionCheckError(error)).toBe("fetch failed (ETIMEDOUT, ENETUNREACH)");
-	});
-
-	it("returns the active package metadata from the version check api", async () => {
-		const fetchMock = vi.fn(async () =>
-			Response.json({
-				packageName: "@new-scope/pi",
-				version: "1.2.4",
-			}),
-		);
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({
-			packageName: "@new-scope/pi",
-			version: "1.2.4",
-		});
-	});
-
-	it("returns update notes from the version check api", async () => {
-		const fetchMock = vi.fn(async () => Response.json({ note: " **Read this** ", version: "1.2.4" }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(getLatestPiRelease("1.2.3")).resolves.toEqual({ note: "**Read this**", version: "1.2.4" });
-	});
-
-	it("skips automatic api calls when version checks are disabled", async () => {
-		process.env.PI_SKIP_VERSION_CHECK = "1";
-		const fetchMock = vi.fn();
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(checkForNewPiVersion("1.2.3")).resolves.toBeUndefined();
-		expect(fetchMock).not.toHaveBeenCalled();
-	});
-
-	it("allows direct api calls when automatic version checks are disabled", async () => {
-		process.env.PI_SKIP_VERSION_CHECK = "1";
-		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(getLatestPiVersion("1.2.3")).resolves.toBe("1.2.4");
-		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 });

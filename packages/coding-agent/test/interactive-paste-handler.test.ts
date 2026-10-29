@@ -1,5 +1,5 @@
-import type { ImageContent } from "@earendil-works/pi-ai/compat";
-import type { Editor, PasteAttachment } from "@earendil-works/pi-tui";
+import type { ImageContent } from "@bramburn/qi-ai/compat";
+import type { Editor, PasteAttachment } from "@bramburn/qi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -9,6 +9,15 @@ const clipboardMocks = vi.hoisted(() => ({
 	processImage: vi.fn(),
 	extensionForImageMimeType: vi.fn(),
 }));
+
+const fsMocks = vi.hoisted(() => ({ appendFileSync: vi.fn() }));
+
+// Capture reportClipboardError's debug-log write instead of touching the
+// real log file.
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	return { ...actual, appendFileSync: fsMocks.appendFileSync };
+});
 
 vi.mock("../src/utils/clipboard-image.ts", () => ({
 	readClipboardImage: clipboardMocks.readClipboardImage,
@@ -47,6 +56,7 @@ type SubmitHandlerContext = {
 type InteractiveModePrivate = {
 	handleClipboardPasteText(this: PasteHandlerContext): Promise<void>;
 	setupEditorSubmitHandler(this: SubmitHandlerContext): void;
+	reportClipboardError(this: { showStatus: (message: string) => void }, context: string, error: unknown): void;
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
@@ -60,6 +70,7 @@ beforeEach(() => {
 	clipboardMocks.readClipboardText.mockReset();
 	clipboardMocks.processImage.mockReset();
 	clipboardMocks.extensionForImageMimeType.mockReset();
+	fsMocks.appendFileSync.mockReset();
 });
 
 describe("InteractiveMode paste handlers", () => {
@@ -93,16 +104,30 @@ describe("InteractiveMode paste handlers", () => {
 		expect(requestRender).not.toHaveBeenCalled();
 	});
 
-	it("handleClipboardPasteText swallows clipboard errors", async () => {
+	it("handleClipboardPasteText routes clipboard errors to the reporter", async () => {
 		clipboardMocks.readClipboardText.mockRejectedValue(new Error("permission denied"));
 		const pasteText = vi.fn();
-		const context: PasteHandlerContext = {
+		const reportClipboardError = vi.fn();
+		const context: PasteHandlerContext & { reportClipboardError: typeof reportClipboardError } = {
 			editor: { pasteText, pasteImage: vi.fn() },
 			ui: { requestRender: vi.fn() },
+			reportClipboardError,
 		};
 
 		await expect(interactiveModePrototype.handleClipboardPasteText.call(context)).resolves.toBeUndefined();
 		expect(pasteText).not.toHaveBeenCalled();
+		expect(reportClipboardError).toHaveBeenCalledWith("marker text paste", expect.any(Error));
+	});
+
+	it("reportClipboardError logs the detail and surfaces a status line", () => {
+		const showStatus = vi.fn();
+		interactiveModePrototype.reportClipboardError.call({ showStatus }, "image/text paste", new Error("boom"));
+
+		expect(fsMocks.appendFileSync).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.stringContaining("clipboard image/text paste failed: boom"),
+		);
+		expect(showStatus).toHaveBeenCalledWith("Clipboard paste failed: boom");
 	});
 });
 

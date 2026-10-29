@@ -6,8 +6,8 @@ import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Agent } from "@earendil-works/pi-agent-core";
-import { getModel, streamSimple } from "@earendil-works/pi-ai/compat";
+import { Agent } from "@bramburn/qi-agent-core";
+import { getModel, streamSimple } from "@bramburn/qi-ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
@@ -195,7 +195,8 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		const result = await session.compact();
 
-		expect(result.summary).toBe(customSummary);
+		expect(result, "manual compaction must not skip for a seeded session").toBeDefined();
+		expect(result!.summary).toBe(customSummary);
 
 		const compactEvents = capturedEvents.filter((e) => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
@@ -267,8 +268,9 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		const result = await session.compact();
 
-		expect(result.summary).toBeDefined();
-		expect(result.summary.length).toBeGreaterThan(0);
+		expect(result, "manual compaction must not skip for a seeded session").toBeDefined();
+		expect(result!.summary).toBeDefined();
+		expect(result!.summary.length).toBeGreaterThan(0);
 
 		const compactEvents = capturedEvents.filter((e): e is SessionCompactEvent => e.type === "session_compact");
 		expect(compactEvents.length).toBe(1);
@@ -410,7 +412,8 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 
 		const result = await session.compact();
 
-		expect(result.summary).toBe(customSummary);
-		expect(result.tokensBefore).toBe(999);
+		expect(result, "manual compaction must not skip for a seeded session").toBeDefined();
+		expect(result!.summary).toBe(customSummary);
+		expect(result!.tokensBefore).toBe(999);
 	}, 120000);
 });

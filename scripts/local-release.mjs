@@ -6,15 +6,15 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const packages = [
-	{ directory: "packages/telemetry", name: "@earendil-works/pi-telemetry" },
-	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
-	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },
-	{ directory: "packages/agent", name: "@earendil-works/pi-agent-core" },
-	{ directory: "packages/protocol", name: "@earendil-works/pi-protocol" },
-	{ directory: "packages/client", name: "@earendil-works/pi-client" },
-	{ directory: "packages/session-backends/sqlite-node", name: "@earendil-works/pi-session-backend-sqlite-node" },
-	{ directory: "packages/server", name: "@earendil-works/pi-server" },
-	{ directory: "packages/coding-agent", name: "@earendil-works/pi-coding-agent" },
+	{ directory: "packages/telemetry", name: "@bramburn/qi-telemetry" },
+	{ directory: "packages/ai", name: "@bramburn/qi-ai" },
+	{ directory: "packages/tui", name: "@bramburn/qi-tui" },
+	{ directory: "packages/agent", name: "@bramburn/qi-agent-core" },
+	{ directory: "packages/protocol", name: "@bramburn/qi-protocol" },
+	{ directory: "packages/client", name: "@bramburn/qi-client" },
+	{ directory: "packages/session-backends/sqlite-node", name: "@bramburn/qi-session-backend-sqlite-node" },
+	{ directory: "packages/server", name: "@bramburn/qi-server" },
+	{ directory: "packages/coding-agent", name: "@bramburn/qi-coding-agent" },
 ];
 
 function printUsage() {
@@ -170,19 +170,19 @@ function buildBunBinaryRelease(targetDirectory, archiveDirectory) {
 	return platform;
 }
 
-function createPiShim(installDirectory) {
+function createQiShim(installDirectory) {
 	const binDirectory = join(installDirectory, "node_modules", ".bin");
 	if (process.platform === "win32") {
-		if (existsSync(join(binDirectory, "pi.cmd"))) {
-			writeFileSync(join(installDirectory, "pi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\pi.cmd" %*\r\n');
-			writeFileSync(join(installDirectory, "pi.ps1"), '& "$PSScriptRoot/node_modules/.bin/pi.ps1" @args\n');
+		if (existsSync(join(binDirectory, "qi.cmd"))) {
+			writeFileSync(join(installDirectory, "qi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\qi.cmd" %*\r\n');
+			writeFileSync(join(installDirectory, "qi.ps1"), '& "$PSScriptRoot/node_modules/.bin/qi.ps1" @args\n');
 			return;
 		}
-		writeFileSync(join(installDirectory, "pi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\pi.exe" %*\r\n');
-		writeFileSync(join(installDirectory, "pi.ps1"), '& "$PSScriptRoot/node_modules/.bin/pi.exe" @args\n');
+		writeFileSync(join(installDirectory, "qi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\qi.exe" %*\r\n');
+		writeFileSync(join(installDirectory, "qi.ps1"), '& "$PSScriptRoot/node_modules/.bin/qi.exe" @args\n');
 		return;
 	}
-	symlinkSync(join("node_modules", ".bin", "pi"), join(installDirectory, "pi"));
+	symlinkSync(join("node_modules", ".bin", "qi"), join(installDirectory, "qi"));
 }
 
 function packPackage(pkg, tarballDirectory) {
@@ -205,7 +205,7 @@ const options = parseArgs();
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 
-if (rootPackageJson.name !== "pi-monorepo") {
+if (rootPackageJson.name !== "qi-monorepo") {
 	throw new Error("Run this script from the repository root");
 }
 
@@ -251,7 +251,7 @@ if (!options.skipInstall) {
 	writeFileSync(join(nodeInstallDirectory, "package.json"), installPackageJson);
 
 	run("npm", ["install", "--omit=dev", "--ignore-scripts"], { cwd: nodeInstallDirectory });
-	createPiShim(nodeInstallDirectory);
+	createQiShim(nodeInstallDirectory);
 
 	if (!options.skipBunInstall) {
 		if (!commandExists("bun")) {
@@ -263,7 +263,7 @@ if (!options.skipInstall) {
 		);
 		writeFileSync(join(bunInstallDirectory, "package.json"), `${JSON.stringify({ private: true, dependencies: bunDependencies, overrides: bunDependencies }, undefined, "\t")}\n`);
 		run("bun", ["install", "--production", "--ignore-scripts"], { cwd: bunInstallDirectory });
-		createPiShim(bunInstallDirectory);
+		createQiShim(bunInstallDirectory);
 	}
 }
 
@@ -284,12 +284,12 @@ if (!options.skipInstall) {
 	console.log("\nIsolated npm install:");
 	console.log(`  ${nodeInstallDirectory}`);
 	console.log("\nRun the locally packed npm CLI from outside the repository:");
-	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "pi.cmd" : "pi")} --help`);
+	console.log(`  ${join(nodeInstallDirectory, process.platform === "win32" ? "qi.cmd" : "qi")} --help`);
 
 	if (!options.skipBunInstall) {
 		console.log("\nIsolated Bun package install:");
 		console.log(`  ${bunInstallDirectory}`);
 		console.log("\nRun the locally packed Bun package CLI from outside the repository:");
-		console.log(`  ${join(bunInstallDirectory, process.platform === "win32" ? "pi.cmd" : "pi")} --help`);
+		console.log(`  ${join(bunInstallDirectory, process.platform === "win32" ? "qi.cmd" : "qi")} --help`);
 	}
 }

@@ -1,0 +1,70 @@
+--- /dev/null
++++ b/packages/coding-agent/test/subagent-d04-discovery.test.ts
+@@ -0,0 +1,68 @@
++import { mkdtempSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { saveSpec } from "../src/core/subagent/saved-specs.ts";
++import {
++	createSubagentToolDefinition,
++	MAX_RENDERED_SAVED_SPECS,
++} from "../src/core/subagent/subagent-tool.ts";
++
++describe("REQ-D04 saved spec description & tool description discovery", () => {
++	let tempDir: string;
++	let prevAgentDir: string | undefined;
++
++	beforeEach(() => {
++		tempDir = mkdtempSync(join(tmpdir(), "pi-d04-specs-"));
++		prevAgentDir = process.env.PI_CODING_AGENT_DIR;
++		process.env.PI_CODING_AGENT_DIR = tempDir;
++	});
++
++	afterEach(() => {
++		if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
++		else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
++		rmSync(tempDir, { recursive: true, force: true });
++	});
++
++	it("rejects saving a spec without a description", async () => {
++		const tool = createSubagentToolDefinition(tempDir);
++		await expect(
++			tool.execute(
++				"call-save-missing",
++				{ action: "save-spec", name: "db-auditor", role: "auditor", instructions: "Check migrations." },
++				undefined,
++				undefined,
++				{} as never,
++			),
++		).rejects.toThrow(/description/);
++	});
++
++	it("renders saved specs and their descriptions into the subagent tool description with cap disclosure", async () => {
++		const tool = createSubagentToolDefinition(tempDir);
++		await tool.execute(
++			"call-save-ok",
++			{
++				action: "save-spec",
++				name: "db-auditor",
++				role: "auditor",
++				description: "Audit SQL migrations and schema drift",
++				instructions: "Inspect sql/ and report issues.",
++			},
++			undefined,
++			undefined,
++			{} as never,
++		);
++
++		expect(tool.description).toContain('"db-auditor" (Audit SQL migrations and schema drift)');
++
++		for (let i = 0; i < MAX_RENDERED_SAVED_SPECS + 2; i++) {
++			saveSpec(`spec-${String(i).padStart(2, "0")}`, {
++				role: "worker",
++				description: `Specialist number ${i}`,
++				instructions: "Do work.",
++			});
++		}
++		expect(tool.description).toContain(`showing ${MAX_RENDERED_SAVED_SPECS} of ${MAX_RENDERED_SAVED_SPECS + 3}`);
++	});
++});

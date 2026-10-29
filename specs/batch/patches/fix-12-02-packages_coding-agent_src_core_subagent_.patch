@@ -1,0 +1,13 @@
+--- a/packages/coding-agent/src/core/subagent/background.ts
++++ b/packages/coding-agent/src/core/subagent/background.ts
+@@ -1088,8 +1088,8 @@
+ const dispatchQueues = new WeakMap<BackgroundRegistry, DispatchQueueState>();
+ 
+ function normalizeDispatchCap(maxConcurrent: number | undefined): number {
+-	if (maxConcurrent === undefined || !Number.isFinite(maxConcurrent)) return 1;
+-	return Math.max(1, Math.floor(maxConcurrent));
++	if (maxConcurrent === undefined || !Number.isFinite(maxConcurrent)) return 1;
++	return Math.max(0, Math.floor(maxConcurrent));
+ }
+ 
+ function queueFor(registry: BackgroundRegistry): DispatchQueueState {

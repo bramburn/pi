@@ -1,0 +1,141 @@
+--- a/packages/coding-agent/test/subagent-resume-lease.test.ts
++++ b/packages/coding-agent/test/subagent-resume-lease.test.ts
+@@ -1,3 +1,6 @@
++// Verification tests for REQ-L02 lease writer state wiring:
++// node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/subagent-resume-lease.test.ts
++
++import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { describe, expect, it, vi } from "vitest";
++import { createBackgroundRegistry } from "../src/core/subagent/background.ts";
++import {
++	acquireSessionLease,
++	inspectSessionLease,
++	SessionLeaseConflictError,
++} from "../src/core/subagent/session-lease.ts";
++import { createSubagentToolDefinition } from "../src/core/subagent/subagent-tool.ts";
++import { createEmptyUsage, type SubagentRunner } from "../src/core/subagent/types.ts";
++
++describe("REQ-L02: redirect lease writer state wiring", () => {
++	it("records writerState 'spawning' at dispatch and 'running' + writerPid on spawned event", async () => {
++		const dir = join(tmpdir(), `lease-l02-${Date.now()}-${Math.random().toString(36).slice(2)}`);
++		mkdirSync(dir, { recursive: true });
++		const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
++		process.env.PI_CODING_AGENT_DIR = dir;
++		try {
++			const sessionFile = join(dir, "child-session.jsonl");
++			writeFileSync(sessionFile, "{}\n", "utf8");
++			const registry = createBackgroundRegistry({ rootDir: join(dir, "bg") });
++			const taskId = registry.add({
++				role: "worker",
++				task: "initial",
++				cwd: dir,
++			});
++			registry.update(taskId, {
++				status: "completed",
++				sessionFile,
++				finishedAt: new Date().toISOString(),
++			});
++
++			let inspectedDuringSpawn: ReturnType<typeof inspectSessionLease> | undefined;
++			let inspectedDuringRun: ReturnType<typeof inspectSessionLease> | undefined;
++
++			const runner: SubagentRunner = {
++				run: async (_req, _sig, onEvent) => {
++					inspectedDuringSpawn = inspectSessionLease(sessionFile);
++					onEvent?.({ type: "spawned", pid: 42424 });
++					inspectedDuringRun = inspectSessionLease(sessionFile);
++					return {
++						role: "worker",
++						task: "resumed",
++						exitCode: 0,
++						aborted: false,
++						finalOutput: "done",
++						stderr: "",
++						usage: createEmptyUsage(),
++						messages: [],
++					};
++				},
++			};
++
++			const tool = createSubagentToolDefinition(dir, { runner, registry });
++			await tool.execute("call-1", { action: "resume", id: taskId }, undefined, undefined, {} as never);
++
++			expect(inspectedDuringSpawn?.state).toBe("owned");
++			if (inspectedDuringSpawn?.state === "owned") {
++				expect(inspectedDuringSpawn.owner.writerState).toBe("spawning");
++				expect(inspectedDuringSpawn.owner.writerPid).toBeUndefined();
++			}
++			expect(inspectedDuringRun?.state).toBe("owned");
++			if (inspectedDuringRun?.state === "owned") {
++				expect(inspectedDuringRun.owner.writerState).toBe("running");
++				expect(inspectedDuringRun.owner.writerPid).toBe(42424);
++			}
++			expect(inspectSessionLease(sessionFile).state).toBe("free");
++		} finally {
++			if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
++			else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
++			rmSync(dir, { recursive: true, force: true });
++		}
++	});
++
++	it("keeps writerState 'spawning' when spawned event carries no pid, and warns without throwing if lease was already released", async () => {
++		const dir = join(tmpdir(), `lease-l02-edge-${Date.now()}-${Math.random().toString(36).slice(2)}`);
++		mkdirSync(dir, { recursive: true });
++		const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
++		process.env.PI_CODING_AGENT_DIR = dir;
++		try {
++			const sessionFile = join(dir, "child-session-2.jsonl");
++			writeFileSync(sessionFile, "{}\n", "utf8");
++			const registry = createBackgroundRegistry({ rootDir: join(dir, "bg") });
++			const taskId = registry.add({ role: "worker", task: "initial", cwd: dir });
++			registry.update(taskId, {
++				status: "completed",
++				sessionFile,
++				finishedAt: new Date().toISOString(),
++			});
++
++			let inspectedAfterPidlessSpawn: ReturnType<typeof inspectSessionLease> | undefined;
++			let lateEventCallback: ((ev: { type: "spawned"; pid?: number }) => void) | undefined;
++
++			const runner: SubagentRunner = {
++				run: async (_req, _sig, onEvent) => {
++					onEvent?.({ type: "spawned", pid: undefined });
++					inspectedAfterPidlessSpawn = inspectSessionLease(sessionFile);
++					lateEventCallback = onEvent as typeof lateEventCallback;
++					return {
++						role: "worker",
++						task: "resumed",
++						exitCode: 0,
++						aborted: false,
++						finalOutput: "ok",
++						stderr: "",
++						usage: createEmptyUsage(),
++						messages: [],
++					};
++				},
++			};
++
++			const tool = createSubagentToolDefinition(dir, { runner, registry });
++			await tool.execute("call-2", { action: "resume", id: taskId }, undefined, undefined, {} as never);
++
++			expect(inspectedAfterPidlessSpawn?.state).toBe("owned");
++			if (inspectedAfterPidlessSpawn?.state === "owned") {
++				expect(inspectedAfterPidlessSpawn.owner.writerState).toBe("spawning");
++			}
++
++			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++			try {
++				expect(() => lateEventCallback?.({ type: "spawned", pid: 99999 })).not.toThrow();
++				expect(warnSpy).toHaveBeenCalled();
++			} finally {
++				warnSpy.mockRestore();
++			}
++		} finally {
++			if (prevAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
++			else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
++			rmSync(dir, { recursive: true, force: true });
++		}
++	});
++});

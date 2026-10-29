@@ -19,7 +19,7 @@
  *   0  all enabled builds succeeded
  *   1  one or more enabled builds failed
  *   2  invalid arguments
- *   3  script is not located inside a pi-monorepo checkout
+ *   3  script is not located inside a qi-monorepo checkout
  */
 
 import { spawnSync } from "node:child_process";
@@ -32,8 +32,8 @@ const repoRoot = resolve(scriptDir, "..");
 const codingAgentDir = join(repoRoot, "packages", "coding-agent");
 const nodeArtifact = join(codingAgentDir, "dist", "cli.js");
 const bunBinary = process.platform === "win32"
-	? join(codingAgentDir, "dist", "pi.exe")
-	: join(codingAgentDir, "dist", "pi");
+	? join(codingAgentDir, "dist", "qi.exe")
+	: join(codingAgentDir, "dist", "qi");
 const isWindows = process.platform === "win32";
 
 verifyRepoRoot();
@@ -113,7 +113,7 @@ failure.
 Targets:
   Node  bun --bun run build                   -> dist/ in every workspace package
                                                 -> packages/coding-agent/dist/cli.js
-  Bun   bun run --cwd packages/coding-agent   -> packages/coding-agent/dist/pi(.exe)
+  Bun   bun run --cwd packages/coding-agent   -> packages/coding-agent/dist/qi(.exe)
        build:binary
 
 Options:
@@ -132,7 +132,7 @@ Exit codes:
   0  all enabled builds succeeded
   1  one or more enabled builds failed
   2  invalid arguments
-  3  script is not inside a pi-monorepo checkout
+  3  script is not inside a qi-monorepo checkout
 
 Examples:
   node scripts/build-both.mjs                build both, skip whichever runtime is missing
@@ -201,12 +201,12 @@ function runCommand(label, command, args) {
 function verifyRepoRoot() {
 	const pkgPath = join(repoRoot, "package.json");
 	if (!existsSync(pkgPath)) {
-		console.error(`build-both: cannot find ${pkgPath}; the script must live inside a pi-monorepo checkout.`);
+		console.error(`build-both: cannot find ${pkgPath}; the script must live inside a qi-monorepo checkout.`);
 		process.exit(3);
 	}
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-	if (pkg.name !== "pi-monorepo") {
-		console.error(`build-both: ${pkgPath} is not a pi-monorepo (name: ${pkg.name}).`);
+	if (pkg.name !== "qi-monorepo") {
+		console.error(`build-both: ${pkgPath} is not a qi-monorepo (name: ${pkg.name}).`);
 		process.exit(3);
 	}
 }

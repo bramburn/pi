@@ -1,0 +1,15 @@
+--- a/packages/coding-agent/src/cli/startup-ui.ts
++++ b/packages/coding-agent/src/cli/startup-ui.ts
+@@ -29,9 +29,9 @@
+ 	type Theme,
+ } from "../modes/interactive/theme/theme.ts";
+ 
+-const OFFICIAL_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
+-const OFFICIAL_APP_NAME = "pi";
+-const OFFICIAL_CONFIG_DIR_NAME = ".pi";
++const OFFICIAL_PACKAGE_NAME = "@bramburn/qi-coding-agent";
++const OFFICIAL_APP_NAME = "qi";
++const OFFICIAL_CONFIG_DIR_NAME = ".qi";
+ 
+ interface DistributionMetadata {
+ 	packageName: string;

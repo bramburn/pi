@@ -1,0 +1,90 @@
+{
+	"system_prompt": "You are a Principal Staff Engineer and specification author working on 'qi' — our hardened fork of the pi coding agent (TypeScript/Bun monorepo at the repo root). The fork is cutting all ties with upstream earendil/pi: rebranding to qi as a FULL HARD CUT (no legacy aliases), publishing as @bramburn/qi-*, pinning extensions to 0.85-compatible versions, closing every open defect in our native subagent subsystem, and fixing compaction errors that surface as repeated red errors in the TUI. Your inputs are three shared documents: specs/batch/batch-context.md (binding human decisions D1-D6, verified evidence tables with path:line citations, and MANDATORY output conventions), specs/manifest.json (the spec index — destination paths and IDs are fixed there), and specs/GUIDE.md (the Universal Spec Guidance — follow its writing rules, sizing limits, marker protocol, and quality gates). Rules: follow output conventions in batch-context.md section 4 exactly. Cite path:line evidence for every claim; trust symbol names if line numbers drift. Never invent behaviour the specs leave open — emit an [UNRESOLVED] marker instead. Requirements statements must not name technologies (rationale blocks may). Do not comment on or propose reverting the uncommitted summariser-model changes in the tree — they are intentional. Do not pad; machine-importable output only.",
+	"shared_context": {
+		"include_files": [
+			"specs/batch/batch-context.md",
+			"specs/manifest.json",
+			"specs/GUIDE.md",
+			"specs/batch/resolution.md"
+		]
+	},
+	"default_context": {
+		"mode": "selected"
+	},
+	"tasks": [
+		{
+			"custom_id": "fin-01-rebrand-requirements-adrs",
+			"title": "Finalise: rebrand requirements + ADR-0001/0002 + new ADR-0006",
+			"prompt": "PHASE E ANSWERS (binding, human 2026-10-20): the human accepted EVERY recommendation in specs/batch/resolution.md (entries R1-R39; no rejections, no deferrals — all specs end status 'accepted', none 'accepted_with_gaps'). Four decisions to encode explicitly: (1) R6/R21 — the extension loader resolves @bramburn/qi-* primary PLUS a strictly-scoped temporary @earendil-works/pi-* -> qi module-resolution shim inside core/extensions/loader.ts ONLY, recorded as a temporary shim clause in ADR-0003; all other surfaces stay hard-cut. (2) R11/R25 — a manifest-LISTED package with zero registry versions matching compatibleRange fails hard with typed E_EXT_NO_COMPATIBLE_VERSION unless --force; D3 warn+latest governs UNKNOWN packages only. (3) R28 — blocking AgentSession.compact() rejects with a typed CompactionSkippedError after emitting compaction_end skipped:true/errorMessage undefined; compactInBackground() resolves undefined; genuine failures unchanged. (4) R2/R20 — scripts/fork-publish-rename.mjs and its test are deleted as redundant (ADR-0001 Neutral note stands).\n\nYour job: emit the FINAL (post-Phase-D) versions of these four spec files, markers stripped and resolutions applied as plain prose, via === FILE: specs/... === ... === END FILE === blocks:\n1. specs/00-requirements/features/rebrand-requirements.md — every [ASSUMPTION] replaced by the stated fact, every [UNRESOLVED] by its recommendation text (check resolution.md entries for this file — R-numbered entries whose file column matches). Keep IDs R-REBRAND-*, section structure, Traceability (now referencing accepted ADRs).\n2. specs/adr/0001-qi-hard-cut-rebrand.md — markers resolved; add/confirm the Neutral consequence that fork-publish-rename.mjs is deleted (R2/R20). Status accepted, Date kept, compliance checklist unchanged unless markers required edits.\n3. specs/adr/0002-sever-upstream-endpoints.md — markers resolved to facts. Status accepted.\n4. specs/adr/0006-npm-registry-self-update.md — NEW file per GUIDE 5.2 (<=100 lines): Status accepted, Date 2026-10-20, Domain rebrand. Context: both pi.dev endpoints severed by ADR-0002 left 'qi update --self' non-functional. Decision: qi self-update resolves the latest @bramburn/qi-coding-agent version from the npm registry packument (https://registry.npmjs.org/<name>, dist-tags.latest with semver fallback, 10s timeout, retry x3 for update --self); QI_OFFLINE degrades to a silent no-network skip; managed installer update stays disabled by default behind the QI_INSTALLER_API_BASE operator escape hatch. Alternatives rejected: keep pi.dev endpoints (severed), GitHub-releases version feed (no packument shape for the staged managed flow; manual fallback already points at github.com/bramburn/pi/releases), npm view subprocess (version-check is a settings-free fetch-based util; getLatestNpmVersion is bound to a package-manager instance that does not exist at these call sites). Compliance checklist (testable): test/version-check.test.ts asserts registry URL + dist-tags fallback + offline-no-fetch + retry x3; test/package-command-paths.test.ts asserts the disabled-managed contract; grep asserts no 'pi.dev' in utils/version-check.ts or package-manager-cli.ts.\nOutput ONLY the four FILE blocks. Full file contents, no commentary.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"specs/00-requirements/features/rebrand-requirements.md",
+					"specs/adr/0001-qi-hard-cut-rebrand.md",
+					"specs/adr/0002-sever-upstream-endpoints.md"
+				],
+				"max_input_tokens": 90000
+			}
+		},
+		{
+			"custom_id": "fin-02-extensions-spec-set",
+			"title": "Finalise: extensions requirements, ADR-0003 (shim + fail-hard), contract, feature, impl",
+			"prompt": "PHASE E ANSWERS (binding, human 2026-10-20): the human accepted EVERY recommendation in specs/batch/resolution.md (R1-R39; no rejections/deferrals — all specs end 'accepted'). Four decisions to encode: (1) R6/R21 — extension loader keeps a strictly-scoped temporary @earendil-works/pi-* -> qi resolution shim (loader.ts ONLY) recorded as a temporary shim clause in ADR-0003. (2) R11/R25 — manifest-LISTED package with zero versions matching compatibleRange fails hard with typed E_EXT_NO_COMPATIBLE_VERSION unless --force; D3 warn+latest governs UNKNOWN packages only. (3) R28 typed-skip contract (not your file set — just don't contradict it). (4) R2/R20 fork-publish-rename.mjs deleted (not your file set).\n\nEmit FINAL versions (markers stripped, resolutions applied as prose) via === FILE: ... === ... === END FILE === blocks for:\n1. specs/00-requirements/features/extensions-requirements.md (4 markers — see resolution.md entries for this file)\n2. specs/adr/0003-extension-compat-manifest.md — resolve its 2 markers AND add the two decided clauses: the loader-shim carve-out (temporary, loader-scoped, tied to D3/D6 porting) and the listed-package fail-hard/E_EXT_NO_COMPATIBLE_VERSION/--force rule as part of the manifest semantics. Status accepted.\n3. specs/contracts/json-schema/extension-compat-manifest.schema.json — resolve its markers (schema stays fully typed, $schema header, versioned v1). The marker sat in a $comment — replace with the decided fact.\n4. specs/contracts/json-schema/extension-compat-manifest.examples.md — resolve its 2 markers; examples remain mandatory and valid against the schema.\n5. specs/features/extensions/install-pinning.feature — resolve its 2 markers; Gherkin tags intact, add/adjust scenarios so the fail-hard listed-package path and the unknown-package warn+latest path are both covered (@happy-path and @error-path), keep the file <=200 lines.\n6. specs/impl/extensions-phase.md — resolve its 2 markers; DAG rows keep Realises REQ-EXT-*; Out of scope mandatory.\nOutput ONLY the six FILE blocks. Full file contents, no commentary.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"specs/00-requirements/features/extensions-requirements.md",
+					"specs/adr/0003-extension-compat-manifest.md",
+					"specs/contracts/json-schema/extension-compat-manifest.schema.json",
+					"specs/contracts/json-schema/extension-compat-manifest.examples.md",
+					"specs/features/extensions/install-pinning.feature",
+					"specs/impl/extensions-phase.md"
+				],
+				"max_input_tokens": 110000
+			}
+		},
+		{
+			"custom_id": "fin-03-subagents-spec-set",
+			"title": "Finalise: subagents requirements + ADR-0004 + impl phase",
+			"prompt": "PHASE E ANSWERS (binding, human 2026-10-20): every recommendation in specs/batch/resolution.md (R1-R39) was accepted; no rejections, no deferrals; all specs end 'accepted'. Decisions relevant to your file set: R6/R21 loader shim lives in ADR-0003 (do not duplicate); R2/R20 fork-publish-rename.mjs deleted (ADR-0001 Neutral note); R28 typed-skip contract applies to compaction files (don't contradict). Your files carry 10 markers (7 requirements + ADR-0004 x1 + impl x2) — resolve each per its recommendation in resolution.md.\n\nEmit FINAL versions via === FILE: ... === ... === END FILE === blocks:\n1. specs/00-requirements/features/subagents-requirements.md — markers resolved to facts/decisions; REQ-SUBAG-* IDs and cross-references to the specs/subagent/ register (REQ-L02, C02, C03, I04, I01, I02, P02, O03, C04, L01, D03-D05, CXT01, O01, O02, C01) intact; Traceability updated (ADR-0004 accepted).\n2. specs/adr/0004-native-subagent-self-sufficiency.md — marker resolved; Status accepted.\n3. specs/impl/subagents-phase.md — markers resolved; DAG rows keep Realises values; Out of scope mandatory.\nOutput ONLY the three FILE blocks. Full file contents, no commentary.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"specs/00-requirements/features/subagents-requirements.md",
+					"specs/adr/0004-native-subagent-self-sufficiency.md",
+					"specs/impl/subagents-phase.md"
+				],
+				"max_input_tokens": 90000
+			}
+		},
+		{
+			"custom_id": "fin-04-compaction-specs-and-r28",
+			"title": "Finalise: compaction specs + implement R28 typed-skip rejection (diffs)",
+			"prompt": "PHASE E ANSWERS (binding, human 2026-10-20): every recommendation in specs/batch/resolution.md accepted; all specs end 'accepted'. Relevant decisions: R6/R21 loader shim in ADR-0003; R11/R25 fail-hard listed packages; R2/R20 fork-publish-rename deleted; **R28 (yours): blocking AgentSession.compact() REJECTS with a typed CompactionSkippedError after emitting compaction_end {skipped:true, errorMessage:undefined}; compactInBackground() resolves undefined; genuine failures keep throwing; the error MESSAGE must contain a skip-reason phrase matching the hot-swap extension's existing downgrade regex /Nothing to compact|Already compacted|nothing to summarize|no valid cut point/i (e.g. 'Nothing to compact: <reason text>').** NOTE: current code appears to resolve undefined on BOTH paths (see agent-session.ts ~:2254 and test/suite/compaction-skip-typed.test.ts expectations) — R28 changes that contract.\n\nPart A — spec files, emit FINAL versions via === FILE: ... === ... === END FILE ===:\n1. specs/00-requirements/features/compaction-requirements.md (1 marker — its wording must now state the R28 split contract: blocking rejects typed, background resolves undefined)\n2. specs/adr/0005-compaction-skip-not-error.md (2 markers; Status accepted; compliance checklist must include the typed-rejection assertion)\n3. specs/impl/compaction-phase.md (1 marker; DAG + Out of scope intact)\n\nPart B — R28 implementation as unified diffs (```diff fences, --- a/ +++ b/ headers; rationale + verifying test under each):\n- packages/coding-agent/src/core/agent-session.ts: blocking compact() path (~:2254 prepareCompactionResult / skipped branch ~:2266) — after emitting compaction_end skipped:true, THROW a new typed CompactionSkippedError (export it from core/compaction/compaction.ts or the package index — pick the import site with fewest churn) instead of resolving. compactInBackground() (~:2517 branch) keeps resolving undefined. Genuinely unchanged: real failures throw their original errors.\n- packages/coding-agent/src/core/compaction/compaction.ts (or wherever the error class lives): class CompactionSkippedError extends Error { readonly skipReason: CompactionSkipReason; readonly reason: string } with message 'Nothing to compact: <formatted reason>'.\n- Call sites that consume blocking compact(): interactive-mode.ts manual/threshold compaction result handling (~:3622 region already renders event.skipped) — add a catch for CompactionSkippedError that renders the existing skip notice (NO showError, NO reportProviderError) so the UX contract from ADR-0005 holds. Grep for other direct compact() callers (sdk/rpc bridge if any) and add the catch ONLY where skipping must stay non-fatal; list any caller you intentionally left rejecting.\n- Tests: update test/suite/compaction-skip-typed.test.ts — the case 'emits skipped compaction_end without ... throwing on manual compact()' must now ASSERT the typed rejection (CompactionSkippedError, skipReason field, event still emitted with skipped:true/errorMessage undefined) while compactInBackground() still resolves undefined; genuine-failure case unchanged. Check test/compaction-extensions.test.ts and test/suite/agent-session-compaction.test.ts for skip-path assertions that must flip; the 11 known environmental 401 failures are irrelevant to your diffs — ignore them.\nDo not touch the summariser-model files. Output: Part A FILE blocks first, then Part B DIFF blocks.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"specs/00-requirements/features/compaction-requirements.md",
+					"specs/adr/0005-compaction-skip-not-error.md",
+					"specs/impl/compaction-phase.md",
+					"packages/coding-agent/src/core/agent-session.ts",
+					"packages/coding-agent/src/core/compaction/compaction.ts",
+					"packages/coding-agent/test/suite/compaction-skip-typed.test.ts"
+				],
+				"max_input_tokens": 190000
+			}
+		},
+		{
+			"custom_id": "fin-05-manifest-and-index",
+			"title": "Finalise: promoted manifest.json + new specs/README.md index + moved subagent index",
+			"prompt": "PHASE E ANSWERS (binding): every recommendation in specs/batch/resolution.md (R1-R39) accepted; every spec ends status 'accepted'; none 'accepted_with_gaps'. Emit THREE files via === FILE: ... === ... === END FILE ===:\n\n1. specs/manifest.json — the FULL FINAL manifest (valid JSON, tabs or 2-space indent, same schema as current): (a) every existing entry's status -> 'accepted'; (b) add entry ADR-0006 {type adr, domain rebrand, path adr/0006-npm-registry-self-update.md, title 'qi self-update via the npm registry', status accepted, depends_on ['ADR-0002'], governs ['packages/coding-agent/src/utils/version-check.ts','packages/coding-agent/src/package-manager-cli.ts'], verifies []}; (c) add entry CONTRACT-EXT-COMPAT-MANIFEST-EXAMPLES {type contract, domain extensions, path contracts/json-schema/extension-compat-manifest.examples.md, status accepted, depends_on ['CONTRACT-EXT-COMPAT-MANIFEST'], governs same as its schema sibling, verifies []}; (d) keep version, mode hybrid, domains, not_applicable blocks, ids, paths, depends_on, governs, verifies otherwise byte-identical to the current manifest (it is in your shared context). Sanity: every depends_on target exists as an entry and is accepted; no cycles.\n\n2. specs/README.md — NEW Spec Index per GUIDE 4 Phase E step 5: domain list (rebrand, extensions, subagents, compaction); spec count per type (requirements, adr, contract, behavior, impl) computed from the manifest; '5 most recently accepted ADRs' section summarising ADR-0002..0006 (one line each — severance, hard-cut rename, compat manifest, native subagents, npm self-update); 'How to use this in batch' section explaining specs_for(P) via governs and specs_for(D) via domain per GUIDE section 7, pointing at specs/manifest.json as the single source of truth; a note that the pre-existing native-subagent spec subsystem keeps its own conventions and lives under specs/subagent/ with its index at specs/subagent/README.md; a 'Spec set at a glance' table (id/type/domain/status/path) derived from the manifest.\n\n3. specs/subagent/README.md — the CURRENT specs/README.md content (it is in your context — it is the subagent subsystem index) with ALL relative links repaired for the new location one directory deeper: '../docs/...' -> '../../docs/...', '../README.md' style references -> '../README.md' stays correct ONLY if it pointed at repo-root relative from specs/ — read each link and reason: from specs/subagent/README.md, links to docs/* become ../../docs/*, links like 'subagent/vendor-policy.md' become 'vendor-policy.md', links to 'specs/...' become '../...' as appropriate. Keep all tables and conventions text intact.\nOutput ONLY the three FILE blocks. Full file contents, no commentary.",
+			"context": {
+				"mode": "selected",
+				"include_files": [
+					"specs/README.md"
+				],
+				"max_input_tokens": 100000
+			}
+		}
+	]
+}

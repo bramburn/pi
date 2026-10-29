@@ -24,14 +24,8 @@ import type {
 	AgentTool,
 	PrepareNextTurnContext,
 	ThinkingLevel,
-} from "@earendil-works/pi-agent-core";
-import {
-	contentText,
-	createProvider,
-	resolveSummariserModel,
-	SUMMARISER_OVERRIDE_PROVIDER_ID,
-} from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+} from "@bramburn/qi-agent-core";
+import { contentText } from "@bramburn/qi-ai";
 import type {
 	AssistantMessage,
 	AuthResult,
@@ -40,7 +34,7 @@ import type {
 	ProviderHeaders,
 	TextContent,
 	Usage,
-} from "@earendil-works/pi-ai/compat";
+} from "@bramburn/qi-ai/compat";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -52,7 +46,7 @@ import {
 	type RetryCallbacks,
 	resetApiProviders,
 	streamSimple,
-} from "@earendil-works/pi-ai/compat";
+} from "@bramburn/qi-ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -61,7 +55,10 @@ import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
+	type CompactionPreparationOutcome,
 	type CompactionResult,
+	CompactionSkippedError,
+	type CompactionSkipReason,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
 	compact,
@@ -70,6 +67,7 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	prepareCompactionResult,
 	pruneSession,
 	shouldCompact,
 } from "./compaction/index.ts";
@@ -105,6 +103,7 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
+import { findExactModelReferenceMatch } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
@@ -113,6 +112,26 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import {
+	BG_CUSTOM_MESSAGE_TYPE,
+	backgroundTaskDir,
+	claimReplayDeliveries,
+	completeReplayDelivery,
+	getBackgroundRegistry,
+} from "./subagent/background.ts";
+import {
+	CONTACT_SUPERVISOR_TOOL_NAME,
+	createContactSupervisorToolDefinition,
+} from "./subagent/contact-supervisor-tool.ts";
+import { getActiveExperimentLogPath } from "./subagent/experiment-registry.ts";
+import { ResearchModeTracker } from "./subagent/research-mode.ts";
+import type { CompletionEscalation, CompletionRecord } from "./subagent/result-record.ts";
+import {
+	formatOpenSupervisorRequests,
+	listOpenSupervisorRequests,
+	supervisorDirFor,
+} from "./subagent/supervisor-channel.ts";
+import { isFailedSubagentResult } from "./subagent/types.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -166,6 +185,8 @@ export type AgentSessionEvent =
 			attempt?: number;
 			maxAttempts?: number;
 			willRetry?: boolean;
+			/** True when summarization runs in the background without blocking the session. */
+			background?: boolean;
 	  }
 	| { type: "entry_appended"; entry: SessionEntry }
 	| { type: "session_info_changed"; name: string | undefined }
@@ -177,6 +198,11 @@ export type AgentSessionEvent =
 			aborted: boolean;
 			willRetry: boolean;
 			errorMessage?: string;
+			skipped?: boolean;
+			skipReason?: CompactionSkipReason;
+			skipMessage?: string;
+			/** True when the compaction ran in the background (hot-swap apply). */
+			background?: boolean;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
@@ -195,7 +221,14 @@ export type AgentSessionEvent =
 	  }
 	| { type: "summarization_retry_finished" }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
-	| { type: "bash_execution_update"; id?: string; delta: string };
+	| { type: "bash_execution_update"; id?: string; delta: string }
+	| {
+			type: "background_task_settled";
+			/** Registry task id (or a chain step id whose dispatch failed). */
+			taskId: string;
+			role: string;
+			failed: boolean;
+	  };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -240,6 +273,11 @@ export interface AgentSessionConfig {
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
+	/**
+	 * Delegation depth of this session: 0 for a top-level session, 1+ for a
+	 * subagent child. Feeds `subagent.maxDepth` enforcement on the parent side.
+	 */
+	subagentDepth?: number;
 }
 
 export interface ExtensionBindings {
@@ -314,6 +352,48 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
 // ============================================================================
+// Background settle formatting
+// ============================================================================
+
+/**
+ * Advisory warning appended to a settle notification when a role has just
+ * failed the same way `threshold` times in a row (#1051).
+ *
+ * An identical error signature repeated across tasks is evidence against the
+ * last step the model took and for the task definition itself, so the note asks
+ * the model to reconsider the task rather than retry it unchanged. It is not a
+ * hard stop: the caller decides what to do next.
+ */
+function escalationNote(escalation: CompletionEscalation | undefined, role: string): string {
+	if (escalation === undefined) return "";
+	return `\n\nWarning: this is failure ${escalation.consecutiveFailures} in a row for the "${role}" subagent role with the same error signature (${escalation.signature}). Retrying the same task unchanged is unlikely to help — reconsider the task definition (or the role's prompt) before retrying.`;
+}
+
+/**
+ * Batched body for a startup replay pass. Several tasks can have settled while
+ * pi was not listening, and each separate custom message costs a model turn, so
+ * they are reported as sections of one message.
+ */
+function replaySettleText(records: CompletionRecord[]): string {
+	const header =
+		records.length === 1
+			? "A background subagent task settled before this session was listening. Replaying its result:"
+			: `${records.length} background subagent tasks settled before this session was listening. Replaying their results:`;
+	const sections = records.map((record) => {
+		const head =
+			record.status === "crashed"
+				? `Background task ${record.taskId} (${record.role}) crashed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
+				: record.status === "failed"
+					? `Background task ${record.taskId} (${record.role}) failed${record.errorMessage ? `: ${record.errorMessage}` : ` with exit code ${record.exitCode}`}.`
+					: record.status === "cancelled"
+						? `Background task ${record.taskId} (${record.role}) was cancelled.`
+						: `Background task ${record.taskId} (${record.role}) completed.`;
+		return `${head}\n\n${record.output || "(no output)"}${escalationNote(record.escalation, record.role)}`;
+	});
+	return `${header}\n\n${sections.join("\n\n")}`;
+}
+
+// ============================================================================
 // AgentSession Class
 // ============================================================================
 
@@ -344,6 +424,39 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempts = 0;
+	/**
+	 * Set once we've warned that the configured compaction model preference
+	 * no longer resolves in the runtime catalog. Warn-once per session so
+	 * auto-compaction doesn't spam the console on every threshold fire.
+	 */
+	private _warnedAboutMissingCompactionModel = false;
+
+	// Background compaction state. Summarization runs concurrently with the
+	// session; the finished summary is held in `_pendingBackgroundCompaction`
+	// until the next safe boundary (idle, turn boundary, or pre-prompt) where
+	// `_tryApplyPendingBackgroundCompaction` hot-swaps it in. Deliberately NOT
+	// part of `isCompacting` so neither the prompt() gate nor the TUI input
+	// queue treat it as blocking.
+	private _backgroundCompaction: { abortController: AbortController; reason: "manual" | "threshold" } | undefined =
+		undefined;
+	/**
+	 * Leaf entry id (or `"__empty__"`) at which a threshold compaction check
+	 * determined there was nothing to compact. Prevents threshold background
+	 * compaction from re-firing on every prompt until the branch grows.
+	 */
+	private _thresholdCompactionSkippedAtLeafId: string | null | undefined = undefined;
+	private _pendingBackgroundCompaction:
+		| {
+				reason: "manual" | "threshold";
+				result: CompactionResult;
+				fromExtension: boolean;
+				firstKeptEntryId: string;
+				/** Latest compaction entry id at snapshot time; used to detect a superseding compaction. */
+				previousCompactionId: string | null;
+				/** Settles the compactInBackground() promise: the applied result, or undefined when discarded. */
+				settle: (result: CompactionResult | undefined) => void;
+		  }
+		| undefined = undefined;
 
 	// DeepSeek Harness bundle state. The master toggle is the user's
 	// `deepseekHarness.enabled` setting; `_deepseekHarnessEnabled` is
@@ -380,6 +493,9 @@ export class AgentSession {
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
+	private _subagentToolCollisionWarned = false;
+	private _researchMode?: ResearchModeTracker;
+	private _subagentDepth: number;
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -417,6 +533,9 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		// Delegation depth of this process, handed over on a child's argv as
+		// `--subagent-depth`. Read once here: it cannot change mid-session.
+		this._subagentDepth = Math.max(0, Math.floor(config.subagentDepth ?? 0));
 
 		// Seed the in-memory mirror of the DeepSeek Harness toggle from
 		// the user's settings.json. The setter is the public surface;
@@ -433,6 +552,55 @@ export class AgentSession {
 			activeToolNames: this._initialActiveToolNames,
 			includeAllExtensionTools: true,
 		});
+
+		// Startup hygiene for the background registry: crash-mark rows orphaned
+		// by a dead session (pid-liveness based, so safe from any session) and
+		// prune old terminal rows. Fire-and-forget with a catch so startup never
+		// blocks or throws.
+		const backgroundRegistry = getBackgroundRegistry();
+		void backgroundRegistry.markAllRunningAsCrashed().catch(console.warn);
+		void backgroundRegistry.prune().catch(console.warn);
+
+		// Same hygiene pass, one step further: report the tasks that settled
+		// while a previous session was not listening. Fire-and-forget and guarded
+		// so a stuck registry lock can never block or break startup.
+		void this._replayUndeliveredSettles().catch(console.warn);
+	}
+
+	/**
+	 * Replay settle notifications a previous process wrote but never delivered
+	 * (#1050): the write-before-notify record survived, so the model still finds
+	 * out that its detached task finished instead of waiting forever.
+	 *
+	 * Called once from the constructor and never awaited. The claimed records are
+	 * batched into one custom message, and each is cleared only after that batch
+	 * reached the message queue — a throw before that leaves them claimed on
+	 * disk, where a later pass reclaims them (once the claim is stale) within the
+	 * replay attempt bound.
+	 */
+	private async _replayUndeliveredSettles(): Promise<void> {
+		const receipt = claimReplayDeliveries();
+		if (receipt.delivered.length === 0) return;
+		const records = receipt.delivered.map((delivery) => delivery.record);
+		const text = replaySettleText(records);
+		const single = records.length === 1 ? records[0] : undefined;
+		await this.sendCustomMessage(
+			{
+				customType: BG_CUSTOM_MESSAGE_TYPE,
+				content: [{ type: "text", text }],
+				display: true,
+				details: {
+					taskId: single?.taskId,
+					status: "replayed",
+					role: single?.role,
+					exitCode: single?.exitCode,
+					finalOutput: text,
+					replayedTasks: records.length,
+				},
+			},
+			{ triggerTurn: true, deliverAs: "nextTurn" },
+		);
+		for (const delivery of receipt.delivered) completeReplayDelivery(delivery);
 	}
 
 	get modelRuntime(): ModelRuntime {
@@ -483,68 +651,38 @@ export class AgentSession {
 		env?: Record<string, string>;
 	}> {
 		// =====================================================================
-		// PI_SUMMARIZER_* env override — route summarisation through a separate
-		// OpenAI-compatible model when configured. See packages/ai/src/summariser-
-		// env.ts + summariser-model.ts for the env-var contract.
+		// Compaction model preference (configured via /settings → Compaction
+		// model): when the user picked a specific catalog model, route
+		// summarisation through it. The configured model belongs to a real
+		// registered provider, so the auth resolution below works unchanged —
+		// no one-off provider registration needed.
 		//
-		// The strategy: rather than adding new branching throughout the rest of
-		// this method, we register a one-off `Provider` on the ModelRuntime that
-		// carries the override model + its env-supplied apiKey. The downstream
-		// `getAuth(effectiveModel)` call then resolves to that provider via
-		// `model.provider` → `MutableModels.getProvider(id)` — no special-case
-		// branches needed after this block.
-		//
-		// `effectiveModel` starts as the caller-supplied main model. If the
-		// env-var override is configured AND `registerTransientProvider` accepts
-		// the provider (no built-in-id collision), we swap to the override model.
-		// Otherwise `effectiveModel` stays as the main model — every code path
-		// below this block runs against `effectiveModel` rather than `model`.
+		// `effectiveModel` starts as the caller-supplied main model. If a
+		// preference is set AND the model is still available in the runtime
+		// catalog, we swap to it. Otherwise `effectiveModel` stays as the main
+		// model — the "current model" default. Every code path below this
+		// block runs against `effectiveModel` rather than `model`.
 		// =====================================================================
-		const override = resolveSummariserModel();
 		let effectiveModel = model;
-		if (override) {
-			const overrideProvider = createProvider({
-				// Stable internal id — must match `model.provider` below, otherwise
-				// `ModelRuntime.getAuth()` looks up the wrong provider.
-				id: SUMMARISER_OVERRIDE_PROVIDER_ID,
-				name: "PI Summariser Override",
-				baseUrl: override.model.baseUrl,
-				auth: {
-					// The apiKey is captured by closure here, at call time. If the
-					// user changes `PI_SUMMARIZER_API_KEY` mid-session, a new
-					// summarisation call picks up the new value (next resolveSummariserModel
-					// call reads fresh env). Within a single summarisation call the
-					// captured value is stable.
-					apiKey: {
-						name: "PI_SUMMARIZER_API_KEY",
-						resolve: async () => ({
-							auth: { apiKey: override.apiKey },
-							source: "PI_SUMMARIZER_API_KEY",
-						}),
-					},
-				},
-				// Single-model provider — the override exists for one purpose only.
-				models: [override.model],
-				// openAICompletionsApi() is the universal OpenAI-compatible chat-completions
-				// stream. Same reason summariser-model.ts picks openai-completions:
-				// it's the only API whose request shape is universally emulated.
-				api: openAICompletionsApi(),
-			});
-			// Guarded swap: if a built-in provider already owns this id
-			// (theoretically possible — hardcoded id is uniquely ours, but a
-			// future built-in could conflict), `registerTransientProvider` warns
-			// and returns false. In that case we keep `effectiveModel = model`
-			// and the call falls back to the main agent model.
-			if (this._modelRuntime.registerTransientProvider(overrideProvider)) {
-				// The override is a `Model<"openai-completions">`; the downstream
-				// signatures want `Model<any>`. The cast is sound — generic
-				// parameters are erased at runtime, and `openai-completions`
-				// satisfies the upper-bound any constraint.
-				effectiveModel = override.model as unknown as Model<any>;
+		const compactionModelRef = this.settingsManager.getCompactionModel();
+		if (compactionModelRef) {
+			const configured = this._modelRuntime.getModel(compactionModelRef.provider, compactionModelRef.modelId);
+			if (configured) {
+				effectiveModel = configured;
+			} else if (!this._warnedAboutMissingCompactionModel) {
+				// Warn once per session: the configured model is no longer in
+				// the catalog (provider removed, model renamed, ...). Falling
+				// back to the main model keeps compaction working; the warning
+				// tells the user to re-pick in /settings.
+				this._warnedAboutMissingCompactionModel = true;
+				console.warn(
+					`[pi] Compaction model ${compactionModelRef.provider}/${compactionModelRef.modelId} is not available. ` +
+						"Falling back to the current model for context summarisation.",
+				);
 			}
 		}
 		if (this.agent.streamFunction === streamSimple) {
-			return this._getRequiredRequestAuth(effectiveModel);
+			return await this._getRequiredRequestAuth(effectiveModel);
 		}
 
 		try {
@@ -629,8 +767,21 @@ export class AgentSession {
 	}
 
 	private async _compactBeforeNextAssistantResponse(context: AgentContext): Promise<AgentContext> {
+		// A background compaction that finished during the last turn is hot-swapped
+		// in here, at the turn boundary, so the next request carries it.
+		if (await this._tryApplyPendingBackgroundCompaction()) {
+			context = { ...context, messages: this.agent.state.messages.slice() };
+		}
+
 		const model = this.model;
-		const settings = this.settingsManager.getCompactionSettings();
+		// Use the effective settings: legacy `reserveTokens`/`keepRecentTokens`
+		// folded with the DeepSeek Harness ratio policy. Otherwise a session
+		// configured via `deepseekHarness.thresholdRatio` would fail this gate
+		// (legacy trigger still uses `contextWindow - reserveTokens`) while
+		// `_startThresholdBackgroundCompaction` below would independently judge
+		// the same session to be over threshold — a gate/launcher disagreement
+		// that silently suppresses every turn-boundary compaction.
+		const settings = this._getEffectiveCompactionSettings();
 
 		if (
 			!model ||
@@ -640,11 +791,11 @@ export class AgentSession {
 			return context;
 		}
 
-		await this._runAutoCompaction("threshold", false);
-		return {
-			...context,
-			messages: this.agent.state.messages.slice(),
-		};
+		// Threshold compaction runs in the background: this request proceeds with
+		// the current context and the summary is swapped in once ready. Overflow
+		// recovery (_checkCompaction) remains the blocking safety net.
+		this._startThresholdBackgroundCompaction();
+		return context;
 	}
 
 	private _installAgentNextTurnRefresh(): void {
@@ -712,6 +863,9 @@ export class AgentSession {
 	private async _emitAgentSettled(): Promise<void> {
 		this._isAgentRunActive = false;
 		try {
+			// The run ended before a turn boundary gave a completed background
+			// compaction a chance to apply; hot-swap it now while idle.
+			await this._tryApplyPendingBackgroundCompaction();
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 		} finally {
@@ -1356,6 +1510,9 @@ export class AgentSession {
 				}
 				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 			}
+
+			// Hot-swap a completed background compaction so this request carries it.
+			await this._tryApplyPendingBackgroundCompaction();
 
 			// Check if we need to compact before sending (catches aborted responses).
 			// The user's new prompt is sent below, so do not call agent.continue() here.
@@ -2061,12 +2218,37 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
+	private _getEffectiveCompactionSettings() {
+		const settings = { ...this.settingsManager.getCompactionSettings() };
+		// When the DeepSeek Harness bundle is enabled, layer the
+		// ratio-based policy on top of the legacy absolute-token
+		// settings. The harness module's `shouldCompact` and
+		// `findCutPoint` use whichever values are present.
+		const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+		if (dh.enabled) {
+			settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+			settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+			if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+				settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+			}
+		}
+		return settings;
+	}
+
 	/**
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
+	 *
+	 * Interactive mode uses {@link compactInBackground} instead; this blocking
+	 * path remains for RPC and extension callers that await the result.
 	 * @param customInstructions Optional instructions for the compaction summary
+	 * @throws {CompactionSkippedError} When preparation finds nothing eligible to
+	 * summarise, after emitting `compaction_end` with `skipped: true` and
+	 * `errorMessage: undefined` (ADR-0005 / R28). Genuine failures reject with
+	 * the underlying error as before.
 	 */
-	async compact(customInstructions?: string): Promise<CompactionResult> {
+	async compact(customInstructions?: string): Promise<CompactionResult | undefined> {
+		this._abortBackgroundCompaction();
 		await this.abort();
 		this._compactionAbortController = new AbortController();
 		this._emit({ type: "compaction_start", reason: "manual" });
@@ -2079,30 +2261,30 @@ export class AgentSession {
 			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
-			const settings = this.settingsManager.getCompactionSettings();
+			const settings = this._getEffectiveCompactionSettings();
 
-			// When the DeepSeek Harness bundle is enabled, layer the
-			// ratio-based policy on top of the legacy absolute-token
-			// settings. The harness module's `shouldCompact` and
-			// `findCutPoint` use whichever values are present.
-			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
-			if (dh.enabled) {
-				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
-				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
-				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
-					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
-				}
+			const prepOutcome: CompactionPreparationOutcome = prepareCompactionResult(pathEntries, settings);
+			if (prepOutcome.skipped) {
+				const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
+				this._thresholdCompactionSkippedAtLeafId = leafKey;
+				this._compactionAbortController = undefined;
+				this._emit({
+					type: "compaction_end",
+					reason: "manual",
+					result: undefined,
+					aborted: false,
+					willRetry: false,
+					skipped: true,
+					skipReason: prepOutcome.skipReason,
+					skipMessage: prepOutcome.reason,
+				});
+				// ADR-0005 / R28: the blocking path rejects with a typed skip so
+				// direct RPC/SDK callers get a distinguishable outcome. The skip
+				// event emitted above is the single terminal notification
+				// (skipped: true, errorMessage undefined).
+				throw new CompactionSkippedError(prepOutcome.skipReason, prepOutcome.reason);
 			}
-
-			const preparation = prepareCompaction(pathEntries, settings);
-			if (!preparation) {
-				// Check why we can't compact
-				const lastEntry = pathEntries[pathEntries.length - 1];
-				if (lastEntry?.type === "compaction") {
-					throw new Error("Already compacted");
-				}
-				throw new Error("Nothing to compact (session too small)");
-			}
+			const preparation = prepOutcome.preparation;
 
 			let extensionCompaction: CompactionResult | undefined;
 			let fromExtension = false;
@@ -2142,7 +2324,12 @@ export class AgentSession {
 				usage = extensionCompaction.usage;
 				details = extensionCompaction.details;
 			} else {
-				// Generate compaction result
+				// Generate compaction result. The summariser's thinking level is
+				// opt-in via the compaction settings, defaulting to "off" so
+				// reasoning tokens are not billed and discarded. summaryMaxTokens
+				// caps the summariser's output budget (default 16384).
+				const summaryThinking = this.settingsManager.getCompactionSummaryThinking();
+				const summaryMaxTokens = this.settingsManager.getCompactionSummaryMaxTokens();
 				const result = await compact(
 					preparation,
 					requestModel,
@@ -2150,11 +2337,13 @@ export class AgentSession {
 					headers,
 					customInstructions,
 					this._compactionAbortController.signal,
-					this.thinkingLevel,
+					summaryThinking,
 					this.agent.streamFunction,
 					env,
 					this.settingsManager.getRetrySettings(),
 					this._summarizationRetryCallbacks({ source: "compaction", reason: "manual" }),
+					false,
+					summaryMaxTokens,
 				);
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
@@ -2168,6 +2357,7 @@ export class AgentSession {
 			}
 
 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this._thresholdCompactionSkippedAtLeafId = undefined;
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
@@ -2207,6 +2397,12 @@ export class AgentSession {
 			});
 			return compactionResult;
 		} catch (error) {
+			if (error instanceof CompactionSkippedError) {
+				// ADR-0005 / R28: the typed skip already emitted its own
+				// compaction_end (skipped: true, errorMessage undefined); never
+				// emit a second, failure-flavoured event for a benign no-op.
+				throw error;
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
 			this._compactionAbortController = undefined;
@@ -2225,11 +2421,354 @@ export class AgentSession {
 	}
 
 	/**
-	 * Cancel in-progress compaction (manual or auto).
+	 * Compact the session context in the background.
+	 *
+	 * Unlike {@link compact}, this never aborts or blocks the session: it
+	 * snapshots the current branch, summarizes it concurrently, and hot-swaps
+	 * the result in at the next safe boundary (turn boundary, run end, or the
+	 * next prompt) via `_tryApplyPendingBackgroundCompaction`. Messages that
+	 * arrive after the snapshot sit after the compaction entry on the branch
+	 * and are kept verbatim.
+	 *
+	 * Resolves with the applied result, `undefined` when the run was aborted,
+	 * its result discarded as stale, or preparation was a benign skip
+	 * (matching `Promise<CompactionResult | undefined>`), and rejects on error
+	 * (also emitted as a `compaction_end` event). Unlike {@link compact}, a
+	 * skip never rejects here (ADR-0005 / R28).
+	 */
+	compactInBackground(customInstructions?: string): Promise<CompactionResult | undefined> {
+		if (this._compactionAbortController !== undefined || this._autoCompactionAbortController !== undefined) {
+			return Promise.reject(
+				new Error("Cannot start background compaction while a blocking compaction is in progress."),
+			);
+		}
+		// A fresh manual request replaces any in-flight background compaction.
+		this._abortBackgroundCompaction();
+		return this._launchBackgroundCompaction("manual", customInstructions);
+	}
+
+	/** Whether a background compaction is currently summarizing. */
+	get isBackgroundCompacting(): boolean {
+		return this._backgroundCompaction !== undefined;
+	}
+
+	/**
+	 * Whether a completed background compaction is waiting for a safe boundary
+	 * (turn boundary, idle, or prompt preflight) to be hot-swapped in.
+	 *
+	 * Distinct from {@link isBackgroundCompacting}: summarisation has finished
+	 * — the `compactInBackground()` promise has not resolved yet — but the
+	 * result has not been applied because the agent is mid-run. The TUI can use
+	 * this to render "waiting to apply" instead of "summarizing", and external
+	 * code that wants to know whether *any* background work is outstanding
+	 * should test `isBackgroundCompacting || hasPendingBackgroundCompaction`.
+	 */
+	get hasPendingBackgroundCompaction(): boolean {
+		return this._pendingBackgroundCompaction !== undefined;
+	}
+
+	/**
+	 * Start a threshold-triggered background compaction, unless one is already
+	 * running, a completed result is waiting for its hot-swap, or a blocking
+	 * compaction is active. Never throws.
+	 */
+	private _startThresholdBackgroundCompaction(): void {
+		if (
+			this._backgroundCompaction !== undefined ||
+			// A completed-but-not-yet-applied result is still in flight. Launching
+			// another compaction here would overwrite `_pendingBackgroundCompaction`
+			// and orphan the first `compactInBackground()` promise (its `settle` is
+			// never invoked, so the extension's onComplete never fires and the
+			// first summary is silently dropped).
+			this._pendingBackgroundCompaction !== undefined ||
+			this._compactionAbortController !== undefined ||
+			this._autoCompactionAbortController !== undefined
+		) {
+			return;
+		}
+		const pathEntries = this.sessionManager.getBranch();
+		const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
+		if (
+			this._thresholdCompactionSkippedAtLeafId !== undefined &&
+			this._thresholdCompactionSkippedAtLeafId === leafKey
+		) {
+			return;
+		}
+		const settings = this._getEffectiveCompactionSettings();
+		const prepOutcome = prepareCompactionResult(pathEntries, settings);
+		if (prepOutcome.skipped) {
+			this._thresholdCompactionSkippedAtLeafId = leafKey;
+			return;
+		}
+		this._thresholdCompactionSkippedAtLeafId = undefined;
+		void this._launchBackgroundCompaction("threshold", undefined).catch(() => {
+			// Errors are surfaced via the compaction_end event.
+		});
+	}
+
+	private _launchBackgroundCompaction(
+		reason: "manual" | "threshold",
+		customInstructions: string | undefined,
+	): Promise<CompactionResult | undefined> {
+		const abortController = new AbortController();
+		this._backgroundCompaction = { abortController, reason };
+		// Snapshot the branch synchronously at launch: messages appended while
+		// summarizing are not part of the summary and survive the swap (they sit
+		// after the compaction entry on the branch). Capturing here (rather than
+		// after the auth await) keeps the cut point fixed at invocation time.
+		const pathEntries = this.sessionManager.getBranch();
+		const previousCompactionId = getLatestCompactionEntry(pathEntries)?.id ?? null;
+		this._emit({ type: "compaction_start", reason, background: true });
+		return this._runBackgroundCompaction(reason, customInstructions, abortController, {
+			pathEntries,
+			previousCompactionId,
+		});
+	}
+
+	private async _runBackgroundCompaction(
+		reason: "manual" | "threshold",
+		customInstructions: string | undefined,
+		abortController: AbortController,
+		snapshot: { pathEntries: SessionEntry[]; previousCompactionId: string | null },
+	): Promise<CompactionResult | undefined> {
+		try {
+			if (!this.model) {
+				throw new Error(formatNoModelSelectedMessage());
+			}
+			if (abortController.signal.aborted) {
+				throw new Error("Compaction cancelled");
+			}
+
+			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+			if (abortController.signal.aborted) {
+				throw new Error("Compaction cancelled");
+			}
+
+			const pathEntries = snapshot.pathEntries;
+			const previousCompactionId = snapshot.previousCompactionId;
+			const settings = this._getEffectiveCompactionSettings();
+
+			const prepOutcome = prepareCompactionResult(pathEntries, settings);
+			if (prepOutcome.skipped) {
+				const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
+				this._thresholdCompactionSkippedAtLeafId = leafKey;
+				this._emit({
+					type: "compaction_end",
+					reason,
+					result: undefined,
+					aborted: false,
+					willRetry: false,
+					skipped: true,
+					skipReason: prepOutcome.skipReason,
+					skipMessage: prepOutcome.reason,
+					background: true,
+				});
+				return undefined;
+			}
+			const preparation = prepOutcome.preparation;
+
+			let extensionCompaction: CompactionResult | undefined;
+			let fromExtension = false;
+
+			if (this._extensionRunner.hasHandlers("session_before_compact")) {
+				// Never hand handlers a signal that is already aborted: listeners
+				// registered after abort() would never fire and the handler would
+				// block forever.
+				if (abortController.signal.aborted) {
+					throw new Error("Compaction cancelled");
+				}
+				const extensionResult = (await this._extensionRunner.emit({
+					type: "session_before_compact",
+					preparation,
+					branchEntries: pathEntries,
+					customInstructions,
+					reason,
+					willRetry: false,
+					signal: abortController.signal,
+				})) as SessionBeforeCompactResult | undefined;
+
+				if (extensionResult?.cancel) {
+					throw new Error("Compaction cancelled");
+				}
+
+				if (extensionResult?.compaction) {
+					extensionCompaction = extensionResult.compaction;
+					fromExtension = true;
+				}
+			}
+
+			let result: CompactionResult;
+			if (extensionCompaction) {
+				result = extensionCompaction;
+			} else {
+				const summaryThinking = this.settingsManager.getCompactionSummaryThinking();
+				const summaryMaxTokens = this.settingsManager.getCompactionSummaryMaxTokens();
+				result = await compact(
+					preparation,
+					requestModel,
+					apiKey,
+					headers,
+					customInstructions,
+					abortController.signal,
+					summaryThinking,
+					this.agent.streamFunction,
+					env,
+					this.settingsManager.getRetrySettings(),
+					this._summarizationRetryCallbacks({ source: "compaction", reason }),
+					false,
+					summaryMaxTokens,
+				);
+			}
+
+			if (abortController.signal.aborted) {
+				throw new Error("Compaction cancelled");
+			}
+
+			// Resolution is held until the hot-swap applies (or the result is
+			// discarded as stale), so callers observe the applied state.
+			let settle!: (result: CompactionResult | undefined) => void;
+			const settled = new Promise<CompactionResult | undefined>((resolve) => {
+				settle = resolve;
+			});
+			this._pendingBackgroundCompaction = {
+				reason,
+				result,
+				fromExtension,
+				firstKeptEntryId: result.firstKeptEntryId,
+				previousCompactionId,
+				settle,
+			};
+			this._backgroundCompaction = undefined;
+
+			// Apply immediately when idle; while streaming the swap waits for the
+			// next turn boundary (_compactBeforeNextAssistantResponse) or run end
+			// (_emitAgentSettled).
+			if (!this.isStreaming) {
+				await this._tryApplyPendingBackgroundCompaction();
+			}
+			return await settled;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
+			this._emit({
+				type: "compaction_end",
+				reason,
+				result: undefined,
+				aborted,
+				willRetry: false,
+				errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
+				background: true,
+			});
+			if (aborted) {
+				return undefined;
+			}
+			throw error;
+		} finally {
+			if (this._backgroundCompaction?.abortController === abortController) {
+				this._backgroundCompaction = undefined;
+			}
+		}
+	}
+
+	/**
+	 * Apply a completed background compaction, if one is pending and still
+	 * valid. Only call from points where swapping `agent.state.messages` is
+	 * safe: idle, turn boundaries, or prompt preflight.
+	 *
+	 * The result is discarded rather than applied when the branch changed
+	 * underneath the snapshot (tree navigation, /new, or a blocking compaction
+	 * that landed meanwhile).
+	 */
+	private async _tryApplyPendingBackgroundCompaction(): Promise<CompactionResult | undefined> {
+		const pending = this._pendingBackgroundCompaction;
+		if (!pending) {
+			return undefined;
+		}
+		// A blocking compaction in progress supersedes the pending result.
+		if (this._compactionAbortController !== undefined || this._autoCompactionAbortController !== undefined) {
+			this._pendingBackgroundCompaction = undefined;
+			pending.settle(undefined);
+			return undefined;
+		}
+
+		const branch = this.sessionManager.getBranch();
+		const latestCompactionId = getLatestCompactionEntry(branch)?.id ?? null;
+		const snapshotStillOnBranch = branch.some((entry) => entry.id === pending.firstKeptEntryId);
+		if (latestCompactionId !== pending.previousCompactionId || !snapshotStillOnBranch) {
+			this._pendingBackgroundCompaction = undefined;
+			this._emit({
+				type: "compaction_end",
+				reason: pending.reason,
+				result: undefined,
+				aborted: true,
+				willRetry: false,
+				background: true,
+			});
+			pending.settle(undefined);
+			return undefined;
+		}
+
+		this._pendingBackgroundCompaction = undefined;
+		this.sessionManager.appendCompaction(
+			pending.result.summary,
+			pending.firstKeptEntryId,
+			pending.result.tokensBefore,
+			pending.result.details,
+			pending.fromExtension,
+			pending.result.usage,
+		);
+		this._thresholdCompactionSkippedAtLeafId = undefined;
+		const newEntries = this.sessionManager.getEntries();
+		const sessionContext = this.sessionManager.buildSessionContext();
+		this.agent.state.messages = sessionContext.messages;
+
+		const result: CompactionResult = {
+			...pending.result,
+			estimatedTokensAfter: estimateMessagesTokens(sessionContext.messages),
+		};
+
+		const savedCompactionEntry = newEntries.find(
+			(e) => e.type === "compaction" && e.summary === pending.result.summary,
+		) as CompactionEntry | undefined;
+
+		if (this._extensionRunner && savedCompactionEntry) {
+			await this._extensionRunner.emit({
+				type: "session_compact",
+				compactionEntry: savedCompactionEntry,
+				fromExtension: pending.fromExtension,
+				reason: pending.reason,
+				willRetry: false,
+			});
+		}
+
+		this._emit({
+			type: "compaction_end",
+			reason: pending.reason,
+			result,
+			aborted: false,
+			willRetry: false,
+			background: true,
+		});
+		pending.settle(result);
+		return result;
+	}
+
+	private _abortBackgroundCompaction(): void {
+		this._backgroundCompaction?.abortController.abort();
+		// A completed-but-unapplied result is superseded by whatever triggered
+		// the abort (a blocking compaction or a newer background request).
+		const pending = this._pendingBackgroundCompaction;
+		this._pendingBackgroundCompaction = undefined;
+		pending?.settle(undefined);
+	}
+
+	/**
+	 * Cancel in-progress compaction (manual, auto, or background).
 	 */
 	abortCompaction(): void {
 		this._compactionAbortController?.abort();
 		this._autoCompactionAbortController?.abort();
+		this._abortBackgroundCompaction();
 	}
 
 	/**
@@ -2252,7 +2791,12 @@ export class AgentSession {
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		// Effective settings (legacy + DeepSeek Harness ratio policy). Reading the
+		// legacy settings here would ignore `thresholdRatio`, so a session
+		// configured with a ratio would never pass the `shouldCompact` check at
+		// the end of this method even when the harness launcher agrees with the
+		// cut-point/summariser that it should.
+		const settings = this._getEffectiveCompactionSettings();
 		if (!settings.enabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
@@ -2356,7 +2900,9 @@ export class AgentSession {
 			contextTokens = directContextTokens;
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
-			return await this._runAutoCompaction("threshold", false);
+			// Threshold compaction runs in the background and hot-swaps in once the
+			// summary is ready; the session is never blocked for it.
+			this._startThresholdBackgroundCompaction();
 		}
 		return false;
 	}
@@ -2365,11 +2911,18 @@ export class AgentSession {
 	 * Internal: Run auto-compaction with events.
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		// Effective settings: overflow recovery's cut point should respect
+		// `retainRatio` exactly like the threshold and manual paths do. Using
+		// legacy settings here keeps a different amount of tail than the
+		// threshold path would for the same session when the harness ratio
+		// policy is active.
+		const settings = this._getEffectiveCompactionSettings();
 		let started = false;
 		let fromExtension = false;
 
 		try {
+			// A blocking compaction supersedes any background compaction in flight.
+			this._abortBackgroundCompaction();
 			if (!this.model) {
 				return false;
 			}
@@ -2435,8 +2988,12 @@ export class AgentSession {
 				// (decision matrix item 12) sends the live conversation
 				// as the request prefix when the DeepSeek Harness bundle
 				// is enabled, reusing the provider's prompt cache for
-				// the conversation bytes.
+				// the conversation bytes. The summariser's thinking level is
+				// opt-in via the compaction settings (default "off") and its
+				// output budget is capped by summaryMaxTokens (default 16384).
 				const dhForReplay = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+				const summaryThinking = this.settingsManager.getCompactionSummaryThinking();
+				const summaryMaxTokens = this.settingsManager.getCompactionSummaryMaxTokens();
 				const compactResult = await compact(
 					preparation,
 					requestModel,
@@ -2444,12 +3001,13 @@ export class AgentSession {
 					headers,
 					undefined,
 					this._autoCompactionAbortController.signal,
-					this.thinkingLevel,
+					summaryThinking,
 					this.agent.streamFunction,
 					env,
 					this.settingsManager.getRetrySettings(),
 					this._summarizationRetryCallbacks({ source: "compaction", reason }),
 					dhForReplay.enabled && dhForReplay.replayPrefixSummarisation,
+					summaryMaxTokens,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2773,8 +3331,14 @@ export class AgentSession {
 				compact: (options) => {
 					void (async () => {
 						try {
-							const result = await this.compact(options?.customInstructions);
-							options?.onComplete?.(result);
+							const result = options?.background
+								? await this.compactInBackground(options?.customInstructions)
+								: await this.compact(options?.customInstructions);
+							// Background compaction resolves undefined when aborted or
+							// discarded as stale; there is no result to report then.
+							if (result) {
+								options?.onComplete?.(result);
+							}
 						} catch (error) {
 							const err = error instanceof Error ? error : new Error(String(error));
 							options?.onError?.(err);
@@ -2811,6 +3375,20 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+
+		// Coexistence guard (plan 5.3): a user-symlinked `subagent` extension
+		// silently shadows the native tool (extension tools win in the merged
+		// registry). Warn once per session and change nothing else.
+		if (!this._subagentToolCollisionWarned && this._baseToolDefinitions.has("subagent")) {
+			const collides = registeredTools.some((tool) => tool.definition.name === "subagent");
+			if (collides) {
+				this._subagentToolCollisionWarned = true;
+				console.warn(
+					'A user extension registers a tool named "subagent" while the native subagent tool is enabled. Remove the symlinked extension (e.g. ~/.pi/agent/extensions/subagent/) to use the native one.',
+				);
+			}
+		}
+
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
@@ -2868,6 +3446,14 @@ export class AgentSession {
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
 			toolRegistry.set(tool.name, tool);
 		}
+		// Research Mode watcher (plan 4.3): observe every tool outcome so a
+		// repeated identical error can trigger the suggestion. Telemetry-like —
+		// never alters the result or the throw.
+		if (this._researchMode) {
+			for (const tool of [...toolRegistry.values()]) {
+				toolRegistry.set(tool.name, this._wrapWithResearchModeWatcher(tool));
+			}
+		}
 		this._toolRegistry = toolRegistry;
 
 		const nextActiveToolNames = (
@@ -2895,6 +3481,43 @@ export class AgentSession {
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
+	/**
+	 * Research Mode watcher (plan 4.3): feed tool outcomes to the tracker so
+	 * `subagent.researchModeTriggerCount` consecutive identical errors trigger
+	 * the suggestion. Telemetry-like: never alters the result or the throw.
+	 */
+	private _wrapWithResearchModeWatcher(tool: AgentTool): AgentTool {
+		const tracker = this._researchMode;
+		if (!tracker) return tool;
+		return {
+			...tool,
+			execute: async (...args: Parameters<AgentTool["execute"]>) => {
+				try {
+					const result = await tool.execute(...args);
+					this._feedResearchMode(tool.name, false, undefined, tracker);
+					return result;
+				} catch (error) {
+					this._feedResearchMode(tool.name, true, error instanceof Error ? error.message : String(error), tracker);
+					throw error;
+				}
+			},
+		};
+	}
+
+	private _feedResearchMode(
+		toolName: string,
+		isError: boolean,
+		errorText: string | undefined,
+		tracker: ResearchModeTracker,
+	): void {
+		try {
+			const experimentLogPath = getActiveExperimentLogPath(this._cwd);
+			tracker.recordToolResult(this.sessionManager.getSessionId(), toolName, isError, errorText, experimentLogPath);
+		} catch {
+			// Watcher failures must never affect tool execution.
+		}
+	}
+
 	private _buildRuntime(options: {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
@@ -2913,11 +3536,126 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix, shellPath },
+					subagent: {
+						settings: {
+							get: (key: string) => {
+								switch (key) {
+									case "subagent.enabled":
+										return this.settingsManager.getSubagentEnabled();
+									case "subagent.enableExperiments":
+										return this.settingsManager.getSubagentEnableExperiments();
+									default:
+										return undefined;
+								}
+							},
+						},
+						// Live getters: subagent settings must be read at dispatch time so
+						// mid-session changes apply without a runtime rebuild.
+						subagentSettings: () => ({
+							enabled: this.settingsManager.getSubagentEnabled(),
+							maxConcurrent: this.settingsManager.getSubagentMaxConcurrent(),
+							maxParallelTasks: this.settingsManager.getSubagentMaxParallelTasks(),
+							worktreeBase: this.settingsManager.getSubagentWorktreeBase(),
+							enableExperiments: this.settingsManager.getSubagentEnableExperiments(),
+							researchModeTriggerCount: this.settingsManager.getSubagentResearchModeTriggerCount(),
+							maxTotalSpawns: this.settingsManager.getSubagentMaxTotalSpawns(),
+							toolTimeoutMs: this.settingsManager.getSubagentToolTimeoutMs(),
+							maxTurns: this.settingsManager.getSubagentMaxTurns(),
+							maxDepth: this.settingsManager.getSubagentMaxDepth(),
+						}),
+						// Parent-side depth guard. The child-side half — dropping
+						// `subagent` from the active tool set — happens in createAgentSession.
+						depth: this._subagentDepth,
+						getParentContext: () => ({
+							model: this.model ? `${this.model.provider}/${this.model.id}` : undefined,
+							thinkingLevel: this.thinkingLevel,
+						}),
+						getParentSessionFile: () => this.sessionManager.getSessionFile(),
+						resolveModel: (modelId) => {
+							const match = findExactModelReferenceMatch(modelId, [...this._modelRuntime.getModels()]);
+							return match ? `${match.provider}/${match.id}` : undefined;
+						},
+						onBackgroundSettled: (taskId, result) => {
+							const failed = isFailedSubagentResult(result);
+							// Settle-time seam for UI consumers: the custom message below is
+							// only delivered at the next turn, and a detached task settles with
+							// no tool execution in flight — so the tool_execution_end pill
+							// refresh never fires for it. Interactive mode refreshes its
+							// status pills on this event instead.
+							this._emit({
+								type: "background_task_settled",
+								taskId,
+								role: result.role,
+								failed,
+							});
+							const output = result.finalOutput || result.errorMessage || "(no output)";
+							const text = failed
+								? `Background task ${taskId} (${result.role}) failed${
+										result.errorMessage ? `: ${result.errorMessage}` : ` with exit code ${result.exitCode}`
+									}.\n\n${output}`
+								: `Background task ${taskId} (${result.role}) completed.\n\n${output}`;
+							// #1051: a role that keeps failing the same way is reported as an
+							// escalation once, on the settle that crosses the threshold.
+							const warning = escalationNote(result.escalation, result.role);
+							// Issue #1048: a child that asked its supervisor and never got an answer
+							// blocked on that question and finished anyway. Raising the open questions
+							// with the completion notification is the only path that reaches the parent —
+							// otherwise the question dies in a directory nobody reads.
+							const supervisorDir = supervisorDirFor(backgroundTaskDir(taskId));
+							const openQuestions = listOpenSupervisorRequests(supervisorDir);
+							const questions =
+								openQuestions.length === 0
+									? ""
+									: `\n\nThe child asked and was never answered:\n${formatOpenSupervisorRequests(supervisorDir)}`;
+							const body = `${text}${warning}${questions}`;
+							void this.sendCustomMessage(
+								{
+									customType: BG_CUSTOM_MESSAGE_TYPE,
+									content: [{ type: "text", text: body }],
+									display: true,
+									details: {
+										taskId,
+										status: failed ? "failed" : "completed",
+										role: result.role,
+										exitCode: result.exitCode,
+										finalOutput: output,
+										...(result.escalation === undefined ? {} : { escalation: result.escalation }),
+									},
+								},
+								{ triggerTurn: true, deliverAs: "nextTurn" },
+							).catch((err: unknown) => {
+								this._extensionRunner.emitError({
+									extensionPath: "<subagent>",
+									event: "background_result",
+									error: err instanceof Error ? err.message : String(err),
+								});
+							});
+						},
+					},
 				});
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+
+		// Supervisor channel (issue #1048): `contact_supervisor` exists only in a
+		// process the runner gave a supervisor dir to write into, so an ordinary
+		// session never sees a tool that could only ever time out. Registered here
+		// rather than in tools/index.ts to keep the built-in ToolName union closed.
+		const contactSupervisorDefinition = createContactSupervisorToolDefinition();
+		if (contactSupervisorDefinition) {
+			this._baseToolDefinitions.set(CONTACT_SUPERVISOR_TOOL_NAME, contactSupervisorDefinition as ToolDefinition);
+		}
+
+		// Research Mode watcher (plan 4.3): built before the tool registry so
+		// `_refreshToolRegistry` can decorate tool results with it. Gated on the
+		// experiments flag like the rest of the surface.
+		this._researchMode = this.settingsManager.getSubagentEnableExperiments()
+			? new ResearchModeTracker({
+					threshold: () => this.settingsManager.getSubagentResearchModeTriggerCount(),
+					notify: (message, type) => this._extensionUIContext?.notify(message, type),
+				})
+			: undefined;
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
@@ -2942,7 +3680,13 @@ export class AgentSession {
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
 			: ["read", "bash", "edit", "write"];
-		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		let baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
+		// A child that was given a supervisor dir gets the tool active straight away:
+		// it has no one else to ask, and requiring an explicit enable per session
+		// would defeat the point of the channel.
+		if (contactSupervisorDefinition && !baseActiveToolNames.includes(CONTACT_SUPERVISOR_TOOL_NAME)) {
+			baseActiveToolNames = [...baseActiveToolNames, CONTACT_SUPERVISOR_TOOL_NAME];
+		}
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
 			includeAllExtensionTools: options.includeAllExtensionTools,

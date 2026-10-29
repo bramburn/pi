@@ -1,0 +1,39 @@
+--- a/packages/coding-agent/test/suite/compaction-skip-typed.test.ts
++++ b/packages/coding-agent/test/suite/compaction-skip-typed.test.ts
+@@ -1,6 +1,7 @@
+-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
++import { fauxAssistantMessage } from "@bramburn/qi-ai";
+ import { afterEach, describe, expect, it } from "vitest";
+ import {
++	CompactionSkippedError,
+ 	DEFAULT_COMPACTION_SETTINGS,
+ 	prepareCompaction,
+ 	prepareCompactionResult,
+@@ -65,14 +66,24 @@ describe("compaction typed skip result and threshold latch", () => {
+ 		expect(prepareCompaction(smallSession, DEFAULT_COMPACTION_SETTINGS)).toBeUndefined();
+ 	});
+ 
+-	it("emits skipped compaction_end without errorMessage or throwing on manual compact() and compactInBackground()", async () => {
++	it("emits skipped compaction_end without errorMessage and rejects with CompactionSkippedError on manual compact() while compactInBackground() resolves undefined", async () => {
+ 		const harness = await createHarness();
+ 		harnesses.push(harness);
+ 		harness.setResponses([fauxAssistantMessage("hi there")]);
+ 		await harness.session.prompt("hello");
+ 
+-		const blockingResult = await harness.session.compact();
+-		expect(blockingResult).toBeUndefined();
++		let caughtError: unknown;
++		try {
++			await harness.session.compact();
++		} catch (err) {
++			caughtError = err;
++		}
++		expect(caughtError).toBeInstanceOf(CompactionSkippedError);
++		const skipErr = caughtError as CompactionSkippedError;
++		expect(skipErr.skipReason).toBe("nothing-to-summarize");
++		expect(skipErr.reason).toContain("Nothing to summarize");
++		expect(skipErr.message).toMatch(/^Nothing to compact: Nothing to summarize/);
++		expect(skipErr.message).toMatch(/Nothing to compact|Already compacted|nothing to summarize|no valid cut point/i);
+ 		const manualEnds = harness.eventsOfType("compaction_end");
+ 		expect(manualEnds).toHaveLength(1);
+ 		expect(manualEnds[0]).toMatchObject({

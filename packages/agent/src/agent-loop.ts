@@ -10,7 +10,7 @@ import {
 	type Message,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@earendil-works/pi-ai";
+} from "@bramburn/qi-ai";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -822,7 +822,7 @@ async function executePreparedToolCall(
 						partialResult,
 					}),
 				).catch((err) => {
-					if (process.env.PI_DEBUG_AGENT_LISTENER === "1") {
+					if (process.env.QI_DEBUG_AGENT_LISTENER === "1") {
 						console.warn(`[agent] tool_execution_update failed:`, err);
 					}
 				});

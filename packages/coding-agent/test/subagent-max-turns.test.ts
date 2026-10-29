@@ -1,0 +1,105 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_SUBAGENT_SETTINGS } from "../src/core/defaults.ts";
+import { _resetBackgroundRegistryForTests, getBackgroundRegistry } from "../src/core/subagent/background.ts";
+import { createSubagentToolDefinition, resolveResumeTarget } from "../src/core/subagent/subagent-tool.ts";
+import { createEmptyUsage, type SubagentRunner } from "../src/core/subagent/types.ts";
+
+describe("REQ-D03 subagent.maxTurns enforcement", () => {
+	let tempDir: string;
+	let prevAgentDir: string | undefined;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "pi-max-turns-"));
+		prevAgentDir = process.env.QI_CODING_AGENT_DIR;
+		process.env.QI_CODING_AGENT_DIR = tempDir;
+		_resetBackgroundRegistryForTests();
+	});
+
+	afterEach(() => {
+		if (prevAgentDir === undefined) delete process.env.QI_CODING_AGENT_DIR;
+		else process.env.QI_CODING_AGENT_DIR = prevAgentDir;
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("stops a child when liveUsage.turns reaches maxTurns and preserves partial output", async () => {
+		expect(DEFAULT_SUBAGENT_SETTINGS.maxTurns).toBe(30);
+		let observedSignalAborted = false;
+		const sessionFile = join(tempDir, "child-session.jsonl");
+		writeFileSync(sessionFile, "{}\n", "utf8");
+
+		const runner: SubagentRunner = {
+			async run(request, signal, onEvent) {
+				onEvent?.({ type: "session_start", sessionFile });
+				for (let turn = 1; turn <= 10; turn++) {
+					if (signal?.aborted) {
+						observedSignalAborted = true;
+						break;
+					}
+					onEvent?.({
+						type: "message_end",
+						message: {
+							role: "assistant",
+							content: [{ type: "text", text: `progress at turn ${turn}` }],
+							usage: {
+								input: 10,
+								output: 5,
+								cacheRead: 0,
+								cacheWrite: 0,
+								totalTokens: 15,
+								cost: { total: 0.01 },
+							},
+						} as never,
+					});
+				}
+				if (signal?.aborted) observedSignalAborted = true;
+				return {
+					role: request.spec.role,
+					task: request.task,
+					exitCode: 137,
+					aborted: observedSignalAborted,
+					finalOutput: "progress at turn 3",
+					stderr: "",
+					usage: { ...createEmptyUsage(), turns: 3 },
+					messages: [],
+					sessionFile,
+				};
+			},
+		};
+
+		const tool = createSubagentToolDefinition(tempDir, {
+			runner,
+			subagentSettings: () => ({ ...DEFAULT_SUBAGENT_SETTINGS, maxTurns: 3 }),
+		});
+
+		await expect(
+			tool.execute("call-1", { role: "worker", instructions: "loop edits" }, undefined, undefined, {} as never),
+		).rejects.toThrow(/stopped at turn cap \(3 turns\).*progress at turn 3/is);
+		expect(observedSignalAborted).toBe(true);
+
+		// REQ-D03.4: a turn-capped background task reports `aborted`, which lands
+		// the row as `cancelled` — unlike a real cancellation its child WAS
+		// signalled, so the session file is quiescent and resume must accept it.
+		const registry = getBackgroundRegistry();
+		registry.add({
+			id: "bg_turncap_1",
+			kind: "pi-subprocess",
+			mode: "single",
+			role: "worker",
+			label: "worker (background)",
+			task: "loop edits",
+			status: "cancelled",
+			startedAt: new Date().toISOString(),
+			lastEventAt: new Date().toISOString(),
+			lastOutput: "progress at turn 3",
+			cwd: tempDir,
+			sessionFile,
+			errorMessage: "Subagent stopped at turn cap (3 turns)",
+		});
+		const target = resolveResumeTarget(registry, "bg_turncap_1");
+		expect(target.kind).toBe("background");
+		expect(target.sessionFile).toBe(sessionFile);
+	});
+});

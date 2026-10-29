@@ -1,0 +1,9 @@
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,5 @@
+ {
+-	"name": "pi-monorepo",
++	"name": "qi-monorepo",
+ 	"private": true,
+ 	"type": "module",
+ 	"workspaces": [

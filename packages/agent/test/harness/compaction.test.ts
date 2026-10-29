@@ -9,7 +9,7 @@ import {
 	type Model,
 	type Models,
 	type Usage,
-} from "@earendil-works/pi-ai";
+} from "@bramburn/qi-ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type CompactionPreparation,
@@ -544,7 +544,7 @@ describe("harness compaction", () => {
 		expect(abortedResult).toMatchObject({ ok: false, error: { code: "aborted", message: "stopped" } });
 	});
 
-	it("clamps compaction summary maxTokens to the model output cap", async () => {
+	it("clamps compaction summary maxTokens to the absolute ceiling", async () => {
 		const messages: AgentMessage[] = [createUserMessage("Summarize this.")];
 		const seenOptions: Array<Record<string, unknown> | undefined> = [];
 		const { faux, model } = createFauxModel(false, 128000);
@@ -570,10 +570,58 @@ describe("harness compaction", () => {
 
 		getOrThrow(await compact(preparation, models, model));
 
-		expect(seenOptions.map((options) => options?.maxTokens)).toEqual([128000, 128000]);
+		// 0.8 * 500000 and 0.5 * 500000 both exceed the 16384 ceiling, which wins over the 128000 model cap.
+		expect(seenOptions.map((options) => options?.maxTokens)).toEqual([16384, 16384]);
 		expect(seenOptions.map((options) => options?.cacheRetention)).toEqual(["none", "none"]);
 		const sessionIds = seenOptions.map((options) => options?.sessionId);
 		expect(sessionIds[0]).not.toBe(sessionIds[1]);
+	});
+
+	it("keeps the model output cap when it is below the summariser ceiling", async () => {
+		const messages: AgentMessage[] = [createUserMessage("Summarize this.")];
+		const seenOptions: Array<Record<string, unknown> | undefined> = [];
+		const { faux, model } = createFauxModel(false, 8000);
+		faux.setResponses([
+			(_context, options) => {
+				seenOptions.push(options as Record<string, unknown> | undefined);
+				return fauxAssistantMessage("## Goal\nTest summary");
+			},
+		]);
+
+		getOrThrow(await generateSummary(messages, models, model, 500000));
+
+		expect(seenOptions[0]?.maxTokens).toBe(8000);
+	});
+
+	it("omits reasoning from summarisation unless a thinking level is passed explicitly", async () => {
+		const messages: AgentMessage[] = [createUserMessage("Summarize this.")];
+		const seenOptions: Array<Record<string, unknown> | undefined> = [];
+		const { faux, model } = createFauxModel(true);
+		faux.setResponses([
+			(_context, options) => {
+				seenOptions.push(options as Record<string, unknown> | undefined);
+				return fauxAssistantMessage("## Goal\nTest summary");
+			},
+			(_context, options) => {
+				seenOptions.push(options as Record<string, unknown> | undefined);
+				return fauxAssistantMessage("## Original Request\nTest summary");
+			},
+		]);
+
+		getOrThrow(await generateSummary(messages, models, model, 2000));
+		expect(seenOptions[0]).not.toHaveProperty("reasoning");
+
+		const preparation: CompactionPreparation = {
+			messagesToSummarize: [],
+			turnPrefixMessages: messages,
+			retainedTail: messages,
+			isSplitTurn: true,
+			tokensBefore: 100,
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 2000, keepRecentTokens: 20 },
+		};
+		getOrThrow(await compact(preparation, models, model));
+		expect(seenOptions[1]).not.toHaveProperty("reasoning");
 	});
 
 	it("returns compaction error results without throwing", async () => {

@@ -1,0 +1,252 @@
+--- a/packages/coding-agent/src/core/subagent/subagent-tool.ts
++++ b/packages/coding-agent/src/core/subagent/subagent-tool.ts
+@@ -91,6 +91,9 @@
+  */
+ export const PER_TASK_OUTPUT_CAP = 50 * 1024;
+ 
++/** Maximum number of saved specs rendered into the subagent tool description (REQ-D04.3). */
++export const MAX_RENDERED_SAVED_SPECS = 16;
++
+ const subagentSpecProperties = {
+ 	role: Type.String({
+ 		description:
+@@ -286,6 +289,12 @@
+ 			description:
+ 				"Spec name for action 'save-spec' and action 'delete-spec'. A bare filesystem-safe label: no path separators and no '..'. Saving over an existing name overwrites it in place.",
+ 		}),
++	),
++	description: Type.Optional(
++		Type.String({
++			description:
++				"Required one-line summary for action 'save-spec' describing when to use this saved specialist. Rendered into the subagent tool description so future turns can discover it.",
++		}),
+ 	),
+ });
+ 
+@@ -475,6 +484,26 @@
+ 	return `Invalid parameters. No agent is named "${name}". ${known} Define one at ${dirs}, store one with action "save-spec", or dispatch an ad-hoc subagent with \`role\` + \`instructions\`.`;
+ }
+ 
++/** Render saved specs into the tool description, capped at MAX_RENDERED_SAVED_SPECS with disclosure (REQ-D04.2, REQ-D04.3). */
++export function formatSavedSpecsForDescription(): string {
++	let specs: ReturnType<typeof listSpecs>;
++	try {
++		specs = listSpecs();
++	} catch {
++		return "";
++	}
++	if (specs.length === 0) return "";
++	const shown = specs.slice(0, MAX_RENDERED_SAVED_SPECS);
++	const entries = shown.map((entry) => {
++		const summary = entry.description ?? entry.spec.description ?? `role=${entry.spec.role}`;
++		return `"${entry.name}" (${summary})`;
++	});
++	const overflow =
++		specs.length > MAX_RENDERED_SAVED_SPECS
++			? ` (showing ${MAX_RENDERED_SAVED_SPECS} of ${specs.length}; run action="list-specs" for all)`
++			: "";
++	return `Saved specialists (dispatch with \`agent: "<name>"\`)${overflow}: ${entries.join("; ")}.`;
++}
++
+ /**
+  * Registration guard: the `subagent.enabled` master switch and the runtime.
+  *
+@@ -493,6 +522,8 @@
+ 	model?: string;
+ 	thinkingLevel?: ThinkingLevel;
+ 	depth?: number;
++	/** Per-child assistant turn limit (REQ-D03). */
++	maxTurns?: number;
+ }
+ 
+ /**
+@@ -668,6 +699,7 @@
+ 		...(parent.model === undefined ? {} : { parentModel: parent.model }),
+ 		...(parent.thinkingLevel === undefined ? {} : { parentThinkingLevel: parent.thinkingLevel }),
+ 		depth: (parent.depth ?? 0) + 1,
++		...(parent.maxTurns === undefined ? {} : { maxTurns: parent.maxTurns }),
+ 		...(parentSessionFile === undefined ? {} : { parentSessionFile }),
+ 		...(step === undefined ? {} : { step }),
+ 	};
+@@ -681,10 +713,13 @@
+ 		const contractProblem = checkContractSpec(spec);
+ 		if (contractProblem !== undefined) throw new Error(contractProblem);
+ 
++		const maxTurns = parent.maxTurns;
++		const turnController = new AbortController();
++		const onCallerAbort = () => turnController.abort();
++		if (signal?.aborted) turnController.abort();
++		else signal?.addEventListener("abort", onCallerAbort, { once: true });
+ 		let lastText = "";
++		let turnCapTripped = false;
+ 		const liveUsage = createEmptyUsage();
+ 		const seen: Message[] = [];
+-		const listener: SubagentEventListener | undefined = onPartial
+-			? (event) => {
++		const listener: SubagentEventListener = (event) => {
++			if (event.type === "message_end" || event.type === "tool_result_end") {
++				seen.push(event.message);
++			}
++			if (event.type !== "message_end" || event.message.role !== "assistant") return;
++			const message = event.message;
++			if (message.usage) {
++				liveUsage.input += message.usage.input ?? 0;
++				liveUsage.output += message.usage.output ?? 0;
++				liveUsage.cost += message.usage.cost?.total ?? 0;
++				liveUsage.turns += 1;
++			} else {
++				liveUsage.turns += 1;
++			}
++			for (const part of message.content) {
++				if (part.type === "text") lastText = part.text;
++			}
++			onPartial?.({
++				role: spec.role,
++				task: spec.instructions,
++				exitCode: -1,
++				aborted: false,
++				finalOutput: lastText,
++				stderr: "",
++				usage: { ...liveUsage },
++				...(step === undefined ? {} : { step }),
++				messages: [...seen],
++			});
++			if (maxTurns !== undefined && maxTurns > 0 && liveUsage.turns >= maxTurns && !turnCapTripped) {
++				turnCapTripped = true;
++				turnController.abort();
++			}
++		};
+ 
+-		const result = await runner.run(request, signal, listener);
++		let result: SubagentResult;
++		try {
++			result = await runner.run(request, turnController.signal, listener);
++		} finally {
++			signal?.removeEventListener("abort", onCallerAbort);
++		}
++		if (turnCapTripped && !result.turnCapExceeded) {
++			const notice = `[Stopped at turn cap (${maxTurns} turns). Resume this subagent session to continue.]`;
++			const partial = result.finalOutput || lastText;
++			result = {
++				...result,
++				aborted: true,
++				turnCapExceeded: true,
++				finalOutput: partial ? `${partial}\n\n${notice}` : notice,
++				stopReason: "turn_cap",
++				errorMessage: `Subagent stopped at turn cap (${maxTurns} turns): ${partial ? `${partial}\n\n${notice}` : notice}`,
++			};
++		}
+ 		const settled = await applyOutputContract(spec, cwd, result, signal);
+ 		const failed = isFailedSubagentResult(settled);
+ 		endSubagentTask(spanId, !failed, failed ? (settled.errorMessage ?? `exit code ${settled.exitCode}`) : undefined);
+@@ -807,6 +865,7 @@
+ 			parentModel: args.parent.model,
+ 			parentThinkingLevel: args.parent.thinkingLevel,
+ 			depth: (args.parent.depth ?? 0) + 1,
++			...(args.parent.maxTurns === undefined ? {} : { maxTurns: args.parent.maxTurns }),
+ 			...(args.parentSessionFile === undefined ? {} : { parentSessionFile: args.parentSessionFile }),
+ 			...(args.taskId === undefined ? {} : { taskId: args.taskId }),
+ 			onSettled: (taskId, result) => {
+@@ -857,6 +916,7 @@
+ 			const liveSettings = options?.subagentSettings?.();
+ 			defaultRunner = createBunProcessRunner({
+ 				...(liveSettings?.toolTimeoutMs === undefined ? {} : { toolTimeoutMs: liveSettings.toolTimeoutMs }),
++				...(liveSettings?.maxTurns === undefined ? {} : { maxTurns: liveSettings.maxTurns }),
+ 			});
+ 		}
+ 		return options?.runner ?? defaultRunner;
+@@ -906,9 +966,11 @@
+ 	if (row.status === "cancelled") {
+-		throw new Error(
+-			`Background task ${id} was cancelled, so it cannot be resumed. A cancellation does not signal the detached child — it may still be writing that session file, and resuming would put two processes on one JSONL. Dispatch a fresh run instead.`,
+-		);
++		if (!row.errorMessage?.includes("turn cap")) {
++			throw new Error(
++				`Background task ${id} was cancelled, so it cannot be resumed. A cancellation does not signal the detached child — it may still be writing that session file, and resuming would put two processes on one JSONL. Dispatch a fresh run instead.`,
++			);
++		}
+ 	}
+@@ -1177,6 +1239,7 @@
+ 					[
+ 						` name=${entry.name}`,
+ 						`role=${entry.spec.role}`,
++						entry.description === undefined ? "" : `description=${clipForListing(entry.description, 80)}`,
+ 						entry.spec.model === undefined ? "model=<inherit>" : `model=${entry.spec.model}`,
+ 						entry.spec.tools === undefined ? "tools=<full set>" : `tools=${entry.spec.tools.join(",")}`,
+ 						entry.spec.cwd === undefined ? "" : `cwd=${entry.spec.cwd}`,
+@@ -1200,10 +1263,16 @@
+ 			const name = validateSpecName(rawParams.name, action);
+ 			const role = (rawParams.role ?? "").trim();
+ 			const instructions = (rawParams.instructions ?? "").trim();
++			const description = (rawParams.description ?? "").replace(/\s+/g, " ").trim();
+ 			if (role === "" || instructions === "") {
+ 				throw new Error(
+-					'Invalid parameters. action="save-spec" stores a dispatch, so it needs `name`, `role`, and `instructions` (plus optional model / tools / cwd).',
++					'Invalid parameters. action="save-spec" stores a dispatch, so it needs `name`, `role`, `description`, and `instructions` (plus optional model / tools / cwd).',
+ 				);
+ 			}
++			if (description === "") {
++				throw new Error(
++					'Invalid parameters. action="save-spec" requires `description` — provide a one-line summary of the specialist so it can be rendered into the subagent tool description.',
++				);
++			}
+ 			// Canonicalize through the same resolver a dispatch uses, so a typo
+ 			// fails at save time instead of on every later `agent` call.
+@@ -1219,6 +1288,7 @@
+ 				name,
+-				specFromInput({
++				{
++					...specFromInput({
+ 					role,
+ 					instructions,
+ 					...(model === undefined ? {} : { model }),
+ 					...(rawParams.tools === undefined ? {} : { tools: rawParams.tools }),
+ 					...(rawParams.cwd === undefined ? {} : { cwd: rawParams.cwd }),
+-				}),
++					}),
++					description,
++				},
+ 			);
+ 			return {
+@@ -1454,11 +1529,14 @@
+ 		name: "subagent",
+ 		label: "Subagent",
+-		description: [
+-			"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
+-			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
+-			"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
+-			"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs (with any filed control requests, their receipt state, and the questions a run has asked you), 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'supervisor' (`id` + `replyTo` + `message`) answers a question a run asked with `contact_supervisor`, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing. Controlling a run whose child has detached is not lost: steer/stop/interrupt file the request in the run's control inbox and the child picks it up itself.",
+-		].join(" "),
++		get description() {
++			const savedBlock = formatSavedSpecsForDescription();
++			return [
++				"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
++				"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
++				"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
++				"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs (with any filed control requests, their receipt state, and the questions a run has asked you), 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'supervisor' (`id` + `replyTo` + `message`) answers a question a run asked with `contact_supervisor`, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing. Controlling a run whose child has detached is not lost: steer/stop/interrupt file the request in the run's control inbox and the child picks it up itself.",
++				...(savedBlock ? [savedBlock] : []),
++			].join(" ");
++		},
+ 		promptSnippet: "Delegate work to a subagent with a fresh context (role + instructions per call)",
+ 		parameters: subagentSchema,
+@@ -1476,7 +1554,12 @@
+ 			// params, unknown model) and single/chain run failures THROW — the loop
+ 			// turns a thrown error into error content + isError:true. A parallel
+ 			// batch with per-task failures still resolves: the call itself worked.
+-			const parent = { ...(options?.getParentContext?.() ?? {}), depth: options?.depth ?? 0 };
++			const subagentSettings = options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS;
++			const parent: ParentContext = {
++				...(options?.getParentContext?.() ?? {}),
++				depth: options?.depth ?? 0,
++				maxTurns: subagentSettings.maxTurns,
++			};
+ 			// Resolved once per dispatch; threading the same value into every
+ 			// runOne call (single / chain steps / parallel tasks) keeps the
+ 			// child's `--session-parent` arg identical across steps and lets a
+@@ -1502,9 +1585,6 @@
+ 					onUpdate,
+ 				);
+ 			}
+-
+-			// Read live per dispatch — see SubagentToolOptions.subagentSettings.
+-			const subagentSettings = options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS;

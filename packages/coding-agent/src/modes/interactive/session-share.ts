@@ -3,8 +3,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DEFAULT_RADIUS_GATEWAY } from "@earendil-works/pi-ai/providers/radius-config";
-import { type Container, type EditorComponent, hyperlink, type TUI } from "@earendil-works/pi-tui";
+import { DEFAULT_RADIUS_GATEWAY } from "@bramburn/qi-ai/providers/radius-config";
+import { type Container, type EditorComponent, hyperlink, type TUI } from "@bramburn/qi-tui";
 import { getAuthCredential } from "../../cli/auth-command.ts";
 import { getShareViewerUrl } from "../../config.ts";
 import type { AgentSession } from "../../core/agent-session.ts";
@@ -26,7 +26,7 @@ export function exportSessionForShare(filePath: string, session: AgentSession): 
 	exportSessionToJsonl(session.sessionManager, filePath, (parentId, timestamp) => [
 		{
 			type: "custom",
-			customType: "pi.share",
+			customType: "qi.share",
 			id: crypto.randomUUID().slice(0, 8),
 			parentId,
 			timestamp,

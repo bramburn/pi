@@ -81,8 +81,8 @@ export function spawnBackgroundTask(opts: SpawnTaskOptions): SpawnedTask {
 		windowsHide: isWindows,
 		env: {
 			...process.env,
-			PI_BACKGROUND_TASK: "1",
-			PI_BACKGROUND_TASK_ROLE: opts.role,
+			QI_BACKGROUND_TASK: "1",
+			QI_BACKGROUND_TASK_ROLE: opts.role,
 		},
 	});
 

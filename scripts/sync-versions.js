@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
 /**
+ * NOTE (ADR-0002): upstream sync is DISABLED. This script no longer tracks
+ * or merges upstream branches; it is retained solely for the internal
+ * qi-monorepo workspace lockstep version sync.
  * Validates lockstep versions for published packages, then synchronizes
  * internal dependency versions in all workspace packages, including private ones.
  *
@@ -53,7 +56,7 @@ for (const pkg of workspacePackages) {
 		}
 
 		for (const [dependencyName, currentSpecifier] of Object.entries(dependencies)) {
-			// Registry aliases such as `npm:@earendil-works/pi-ai@0.1.2` are never workspace-linked,
+			// Registry aliases such as `npm:@bramburn/qi-ai@0.1.2` are never workspace-linked,
 			// so lockstep bumping them would point at a version that is not published yet.
 			const version = versionMap.get(dependencyName);
 			const newSpecifier = version ? `^${version}` : null;

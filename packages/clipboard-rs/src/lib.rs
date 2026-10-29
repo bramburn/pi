@@ -7,7 +7,7 @@
 //!   - `getText(): Promise<string | null>`
 //!   - `setText(text: string): Promise<void>`
 //!   - `hasImage(): boolean`
-//!   - `getImageBinary(): Promise<Array<number>>` (PNG-encoded RGBA bytes)
+//!   - `getImageBinary(): Promise<Buffer>` (PNG-encoded image bytes)
 //!
 //! All work runs on the napi-rs worker thread pool, so a slow X11
 //! roundtrip never blocks the Node event loop.
@@ -82,23 +82,25 @@ pub async fn has_image() -> Result<bool> {
     }
 }
 
-/// Bytes of the current clipboard image encoded as PNG, or `[]` if no
-/// image is present.
+/// Bytes of the current clipboard image encoded as PNG, or an empty
+/// buffer if no image is present.
 ///
 /// arboard hands back raw RGBA pixels. We wrap them with the `image`
 /// crate (PNG encoder only, no JPEG/GIF/WebP) and emit a PNG byte
-/// stream. The TS-side contract treats the result as `Array<number>` so
-/// we keep the napi-rs `number[]` shape (`Vec<u32>`).
+/// stream. Returned as a napi `Buffer` (a Uint8Array on the JS side):
+/// the previous `Vec<u32>` shape widened every byte to 4 bytes and
+/// pushed each one through napi's numeric coercion path -- a 4x memory
+/// and serialization cost for a multi-MB screenshot.
 #[napi]
-pub async fn get_image_binary() -> Result<Vec<u32>> {
+pub async fn get_image_binary() -> Result<Buffer> {
     let mut cb = Clipboard::new().map_err(to_napi)?;
     let img = match cb.get_image() {
         Ok(img) => img,
         // arboard returns ContentNotAvailable when the clipboard holds a
-        // non-image payload. We surface that as an empty PNG byte stream
-        // (`Ok(Vec::new())`) so the TS layer can treat it the same as a
+        // non-image payload. We surface that as an empty buffer
+        // (`Buffer::from(Vec::new())`) so the TS layer can treat it the same as a
         // miss rather than throwing.
-        Err(arboard::Error::ContentNotAvailable) => return Ok(Vec::new()),
+        Err(arboard::Error::ContentNotAvailable) => return Ok(Buffer::from(Vec::new())),
         Err(e) => return Err(to_napi(e)),
     };
 
@@ -121,7 +123,7 @@ pub async fn get_image_binary() -> Result<Vec<u32>> {
         )
     })?;
     if width == 0 || height == 0 {
-        return Ok(Vec::new());
+        return Ok(Buffer::from(Vec::new()));
     }
 
     // arboard's RGBA buffer length must be exactly width*height*4. If
@@ -154,10 +156,9 @@ pub async fn get_image_binary() -> Result<Vec<u32>> {
         .write_image(&img.bytes, width, height, ExtendedColorType::Rgba8)
         .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("PNG encode failed: {e}")))?;
 
-    // Convert the PNG byte stream to `Vec<u32>` so the napi-rs TS binding
-    // continues to expose `Array<number>` (one slot per byte). The TS
-    // loader converts it back to Uint8Array.
-    Ok(png.into_iter().map(u32::from).collect())
+    // Hand the PNG byte stream to napi as a `Buffer`: one byte per
+    // element on the wire, no per-element coercion on the JS side.
+    Ok(Buffer::from(png))
 }
 
 fn to_napi(e: arboard::Error) -> napi::Error {

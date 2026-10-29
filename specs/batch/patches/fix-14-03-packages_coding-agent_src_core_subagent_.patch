@@ -1,0 +1,447 @@
+--- a/packages/coding-agent/src/core/subagent/subagent-tool.ts
++++ b/packages/coding-agent/src/core/subagent/subagent-tool.ts
+@@ -100,11 +100,13 @@
+ 	type SubagentEventListener,
+ 	type SubagentGate,
+ 	type SubagentGateOutcome,
++	type SubagentIsolation,
+ 	type SubagentMode,
+ 	type SubagentResult,
+ 	type SubagentRunner,
+ 	type SubagentRunRequest,
+ 	type SubagentSpec,
+ } from "./types.ts";
++import { createWorktree, removeWorktree } from "./worktree.ts";
+ 
+ /**
+  * Model-facing output cap: parallel per-task summaries, single/chain result
+@@ -112,6 +114,34 @@
+  * details.
+  */
+ export const PER_TASK_OUTPUT_CAP = 50 * 1024;
++
++/**
++ * Built-in tool capability table (REQ-I02, REQ-P02).
++ * Only pure read-only tools are `concurrentSafe: true` and eligible for un-admitted
++ * detached execution; mutating/shell tools (`bash`, `powershell`, `edit`, `write`, `subagent`)
++ * are `false` (specs/subagent/features/isolation/spec.md §4.2, traceability V28).
++ */
++export const SUBAGENT_TOOL_CONCURRENT_SAFE: Readonly<Record<string, boolean>> = {
++	read: true,
++	grep: true,
++	find: true,
++	ls: true,
++	bash: false,
++	powershell: false,
++	edit: false,
++	write: false,
++	subagent: false,
++};
++
++/**
++ * True only when a spec declares an explicit non-empty `tools` allowlist and every
++ * tool in it is marked `concurrentSafe: true` in {@link SUBAGENT_TOOL_CONCURRENT_SAFE}.
++ * Omitting `tools` inherits the full coding set (which includes `bash`, `edit`, `write`),
++ * so an omitted or empty list is never concurrent-safe or shell-free.
++ */
++export function isConcurrentSafeToolSet(tools: readonly string[] | undefined): boolean {
++	if (tools === undefined || tools.length === 0) return false;
++	return tools.every((name) => SUBAGENT_TOOL_CONCURRENT_SAFE[name.trim()] === true);
++}
+ 
+ const subagentSpecProperties = {
+ 	role: Type.String({
+@@ -139,6 +169,24 @@
+ 			description: "Working directory for the subagent. Omit to inherit this session's working directory.",
+ 		}),
+ 	),
++	isolation: Type.Optional(
++		Type.Union([Type.Literal("none"), Type.Literal("worktree")], {
++			description:
++				"Filesystem isolation for the subagent ('none' | 'worktree', default 'none'). When 'worktree', an isolated git worktree is created before spawn and passed as the child's cwd, then cleaned up when the child settles. Fails loudly if the worktree cannot be created (never silently downgrades to 'none').",
++			default: "none",
++		}),
++	),
++	allowDetachedShell: Type.Optional(
++		Type.Boolean({
++			description:
++				"Explicit admission to run a detached (`background: true`) subagent with shell or file-mutating tools. Required when `background: true` unless `tools` is narrowed to read-only tools (`read`, `grep`, `find`, `ls`).",
++		}),
++	),
+ 	outputSchema: Type.Optional(
+ 		Type.Record(Type.String(), Type.Unknown(), {
+ 			description:
+@@ -208,6 +256,19 @@
+ 			description: "Working directory for the subagent. Omit to inherit this session's working directory.",
+ 		}),
+ 	),
++	isolation: Type.Optional(
++		Type.Union([Type.Literal("none"), Type.Literal("worktree")], {
++			description:
++				"Filesystem isolation for the subagent ('none' | 'worktree', default 'none'). When 'worktree', an isolated git worktree is created before spawn and passed as the child's cwd, then cleaned up when the child settles. Fails loudly if the worktree cannot be created (never silently downgrades to 'none').",
++			default: "none",
++		}),
++	),
++	allowDetachedShell: Type.Optional(
++		Type.Boolean({
++			description:
++				"Explicit admission to run a detached (`background: true`) subagent with shell or file-mutating tools. Required when `background: true` unless every dispatched spec narrows `tools` to read-only tools (`read`, `grep`, `find`, `ls`).",
++		}),
++	),
+ 	// The thinking levels are spelled out because TypeBox infers a literal union
+ 	// only from an explicit tuple — mapping `THINKING_LEVEL_OPTIONS` here yields an
+ 	// `undefined` static type. `test/subagent-tool.test.ts` asserts this list stays
+@@ -780,6 +841,49 @@
+ 	return { ...settled, gate, errorMessage: gateFailureMessage(spec.role, gate) };
+ }
+ 
++/** Mint a collision-resistant worktree slug for a subagent run (REQ-I01.2). */
++function makeSubagentWorktreeSlug(role: string): string {
++	const clean = role
++		.toLowerCase()
++		.replace(/[^a-z0-9-]+/g, "-")
++		.replace(/^-+|-+$/g, "")
++		.slice(0, 24);
++	const prefix = clean || "subagent";
++	const rand = Math.random().toString(36).slice(2, 8);
++	return `${prefix}-${Date.now().toString(36)}-${rand}`;
++}
++
++/** Append the worktree disclosure note required by REQ-I01.5. */
++function appendWorktreeNote(output: string, slug: string, worktreePath: string): string {
++	const note = `[Worktree: ${slug} at ${worktreePath}]`;
++	return output.trim() === "" ? note : `${output}\n\n${note}`;
++}
++
++/**
++ * Check REQ-P02 detached-child admission before any background task is spawned.
++ * Returns an E1-class error message naming the offending role and both remedies
++ * when `background: true` is requested without either `allowDetachedShell: true`
++ * or a `tools` allowlist restricted to `{read, grep, find, ls}`.
++ */
++export function checkDetachedAdmission(
++	specs: readonly SubagentSpec[],
++	topLevelAllowDetachedShell?: boolean,
++): string | undefined {
++	for (const spec of specs) {
++		const admitted =
++			topLevelAllowDetachedShell === true ||
++			spec.allowDetachedShell === true ||
++			isConcurrentSafeToolSet(spec.tools);
++		if (!admitted) {
++			const toolsDesc =
++				spec.tools === undefined || spec.tools.length === 0
++					? "the default tool set (includes bash, edit, write)"
++					: `tools=[${spec.tools.join(", ")}]`;
++			return `Detached subagent admission refused for "${spec.role}": background: true with ${toolsDesc} requires explicit admission. Either pass \`allowDetachedShell: true\` to grant background shell/write access,narrow \`tools\` to read-only tools (\`["read", "grep", "find", "ls"]\`), or omit \`background: true\` to run inline.`;
++		}
++	}
++	return undefined;
++}
++
+ /** Run one subagent and record exactly one analytics span for it. */
+ async function runOne(
+ 	runner: SubagentRunner,
+@@ -789,8 +893,43 @@
+ 	parentSessionFile: string | undefined,
+ 	step: number | undefined,
+ 	signal: AbortSignal | undefined,
+ 	onPartial?: (snapshot: SubagentResult) => void,
++	worktreeBase = DEFAULT_SUBAGENT_SETTINGS.worktreeBase,
+ ): Promise<SubagentResult> {
+-	const cwd = spec.cwd ? (isAbsolute(spec.cwd) ? spec.cwd : resolvePath(baseCwd, spec.cwd)) : baseCwd;
++	const repoCwd = spec.cwd ? (isAbsolute(spec.cwd) ? spec.cwd : resolvePath(baseCwd, spec.cwd)) : baseCwd;
++	let cwd = repoCwd;
++	let createdWorktree: { slug: string; path: string } | undefined;
++	if (spec.isolation === "worktree") {
++		const slug = makeSubagentWorktreeSlug(spec.role);
++		try {
++			const wt = createWorktree(repoCwd, slug, { worktreeBase });
++			createdWorktree = { slug: wt.slug, path: wt.path };
++			cwd = wt.path;
++		} catch (err) {
++			// REQ-I01.4: Worktree creation failure MUST surface as an E1-class error and
++			// never silently downgrade to isolation: "none" in the base working tree.
++			const reason = err instanceof Error ? err.message : String(err);
++			const errorMessage = `Worktree isolation failed for subagent "${spec.role}" in ${repoCwd}: ${reason}. No child process was spawned (isolation: "worktree" never silently downgrades to "none"). Fix the repository/worktree state or set isolation: "none" if shared-tree execution is intended.`;
++			return {
++				role: spec.role,
++				task: spec.instructions,
++				exitCode: -1,
++				aborted: false,
++				finalOutput: "",
++				stderr: errorMessage,
++				usage: createEmptyUsage(),
++				...(step === undefined ? {} : { step }),
++				...(spec.gate === undefined ? {} : { gate: skippedGate(spec.gate, repoCwd, "child-failed") }),
++				messages: [],
++				errorMessage,
++			};
++		}
++	}
+ 	// A schema-bound child gets the format contract in its system prompt; the
+ 	// authored `instructions` stay the run's task text everywhere they are
+ 	// reported (result, in-flight snapshot, span label), so nothing downstream
+@@ -799,7 +938,11 @@
+ 	const schemaBlock = spec.outputSchema === undefined ? undefined : buildSchemaInstruction(spec.outputSchema);
+ 	const childSpec: SubagentSpec =
+-		schemaBlock === undefined ? spec : { ...spec, instructions: `${spec.instructions}\n\n${schemaBlock}` };
++		schemaBlock === undefined
++			? { ...spec, cwd }
++			: { ...spec, cwd, instructions: `${spec.instructions}\n\n${schemaBlock}` };
+ 	const request: SubagentRunRequest = {
+ 		spec: childSpec,
+ 		task: spec.instructions,
+@@ -857,9 +1000,19 @@
+ 			: undefined;
+ 
+ 		const result = await runner.run(request, signal, listener);
+ 		const settled = await applyOutputContract(spec, cwd, result, signal);
++		const withWorktree: SubagentResult =
++			createdWorktree === undefined
++				? settled
++				: {
++						...settled,
++						worktreePath: createdWorktree.path,
++						finalOutput: appendWorktreeNote(settled.finalOutput, createdWorktree.slug, createdWorktree.path),
++					};
+ 		const failed = isFailedSubagentResult(settled);
+ 		endSubagentTask(spanId, !failed, failed ? (settled.errorMessage ?? `exit code ${settled.exitCode}`) : undefined);
+-		return settled;
++		return withWorktree;
+ 	} catch (err) {
+ 		// The run never started (spawn failure, runner rejection): report it as a
+ 		// failed result rather than propagating, so the orchestrator gets a
+@@ -879,7 +1032,18 @@
+ 			...(spec.gate === undefined ? {} : { gate: skippedGate(spec.gate, cwd, "child-failed") }),
++			...(createdWorktree === undefined ? {} : { worktreePath: createdWorktree.path }),
+ 			messages: [],
+ 			errorMessage,
+ 		};
++	} finally {
++		if (createdWorktree !== undefined) {
++			try {
++				removeWorktree(repoCwd, createdWorktree.path, { force: true });
++			} catch {
++				// Best-effort cleanup on settle; worktree path is still disclosed in result.
++			}
++		}
+ 	}
+ }
+ 
+@@ -932,6 +1096,8 @@
+ 	model?: string;
+ 	tools?: string[];
+ 	cwd?: string;
++	isolation?: SubagentIsolation;
++	allowDetachedShell?: boolean;
+ 	thinking?: ThinkingLevel;
+ 	outputSchema?: Record<string, unknown>;
+ 	gate?: SubagentGate;
+@@ -942,6 +1108,8 @@
+ 		...(input.model === undefined ? {} : { model: input.model }),
+ 		...(input.tools === undefined ? {} : { tools: input.tools }),
+ 		...(input.cwd === undefined ? {} : { cwd: input.cwd }),
++		...(input.isolation === undefined ? {} : { isolation: input.isolation }),
++		...(input.allowDetachedShell === undefined ? {} : { allowDetachedShell: input.allowDetachedShell }),
+ 		...(input.thinking === undefined ? {} : { thinking: input.thinking }),
+ 		...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
+ 		...(input.gate === undefined ? {} : { gate: input.gate }),
+@@ -1287,6 +1455,7 @@
+ 			"Delegate work to a subagent that runs with a fresh context and returns its final summary.",
+ 			"Define the subagent per call: `role` (short specialist label) and `instructions` (the complete task — the subagent never sees this conversation, so include all context it needs), optionally `model` (omit to inherit this session's model) and a `tools` allowlist.",
+ 			"Modes: single (`role` + `instructions`), parallel (`tasks`: independent investigations that can run at once), chain (`chain`: sequential steps where `{previous}` is replaced with the previous step's output).",
++			"Isolation & background admission: set `isolation: 'worktree'` to run a child in an isolated git worktree rather than the shared working tree; parallel tasks that include mutating/shell tools (`bash`, `edit`, `write`) are serialised automatically unless `tools` is narrowed to read-only tools (`read`, `grep`, `find`, `ls`); `background: true` requires either `allowDetachedShell: true` or `tools` narrowed to read-only tools.",
+ 			"Control: `action` manages runs instead of starting one — 'status' lists unfinished runs (with any filed control requests, their receipt state, and the questions a run has asked you), 'stop'/'interrupt' end one, 'steer' (`id` + `message`) redirects a run against its own child session, 'swap-model' (`id` + `model`) does the same on a new model, 'supervisor' (`id` + `replyTo` + `message`) answers a question a run asked with `contact_supervisor`, 'resume' (`id` + optional `message`) re-dispatches a run that has already settled against the child session it left behind, and 'save-spec'/'list-specs'/'delete-spec' manage stored dispatches. Target ids come from a 'status' listing. Controlling a run whose child has detached is not lost: steer/stop/interrupt file the request in the run's control inbox and the child picks it up itself.",
+ 		].join(" "),
+ 		promptSnippet: "Delegate work to a subagent with a fresh context (role + instructions per call)",
+@@ -1443,6 +1612,18 @@
+ 				);
+ 			}
+ 
++			// ----------------------------------------------------------------
++			// Detached-child admission (REQ-P02, permissions/spec.md §3).
++			// Checked before the spawn budget is committed so a refused background
++			// call does not consume spawn slots or start any task in a batch.
++			// ----------------------------------------------------------------
++			if (params.background === true) {
++				const admissionProblem = checkDetachedAdmission(dispatchedSpecs, params.allowDetachedShell);
++				if (admissionProblem !== undefined) {
++					throw new Error(admissionProblem);
++				}
++			}
++
+ 			// ----------------------------------------------------------------
+ 			// Session-wide spawn budget (subagent.maxTotalSpawns)
+ 			//
+@@ -1494,16 +1675,38 @@
+ 					spec: SubagentSpec,
+ 					taskId: string | undefined,
+ 					onSettled?: (taskId: string, result: SubagentResult) => void,
+-				): string =>
+-					dispatchDetached({
++				): string => {
++					const repoCwd = resolveTaskCwd(spec);
++					let taskCwd = repoCwd;
++					let createdWorktree: { slug: string; path: string } | undefined;
++					if (spec.isolation === "worktree") {
++						const slug = makeSubagentWorktreeSlug(spec.role);
++						try {
++							const wt = createWorktree(repoCwd, slug, { worktreeBase: subagentSettings.worktreeBase });
++							createdWorktree = { slug: wt.slug, path: wt.path };
++							taskCwd = wt.path;
++						} catch (err) {
++							const reason = err instanceof Error ? err.message : String(err);
++							throw new Error(
++								`Worktree isolation failed for subagent "${spec.role}" in ${repoCwd}: ${reason}. No child process was spawned (isolation: "worktree" never silently downgrades to "none"). Fix the repository/worktree state or set isolation: "none" if shared-tree execution is intended.`,
++							);
++						}
++					}
++					const settledHandler = onSettled ?? options?.onBackgroundSettled;
++					return dispatchDetached({
+ 						registry,
+ 						runner,
+-						spec,
++						spec: { ...spec, cwd: taskCwd },
+ 						task: spec.instructions,
+-						cwd: resolveTaskCwd(spec),
++						cwd: taskCwd,
+ 						parent,
+ 						parentSessionFile,
+ 						// Live getter rather than the `subagentSettings` snapshot above: the release
+ 						// half of this closure runs when the task settles, which can be long after this
+ 						// call returned. Reading the cap at settle time is what lets a mid-session
+ 						// change to subagent.maxConcurrent apply to the drain instead of promoting
+ 						// against a stale cap.
+ 						settings: () => options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS,
+-						onSettled: onSettled ?? options?.onBackgroundSettled,
++						onSettled: (settledTaskId, result) => {
++							const enriched: SubagentResult =
++								createdWorktree === undefined
++									? result
++									: {
++											...result,
++											worktreePath: createdWorktree.path,
++											finalOutput: appendWorktreeNote(
++												result.finalOutput,
++												createdWorktree.slug,
++												createdWorktree.path,
++											),
++										};
++							if (createdWorktree !== undefined) {
++								try {
++									removeWorktree(repoCwd, createdWorktree.path, { force: true });
++								} catch {
++									/* best-effort */
++								}
++							}
++							settledHandler?.(settledTaskId, enriched);
++						},
+ 						...(taskId === undefined ? {} : { taskId }),
+ 					}).taskId;
++				};
+ 
+ 				const taskIds: string[] = [];
+@@ -1657,6 +1860,7 @@
+ 						launch.level + 1,
+ 						launch.signal,
+ 						launch.onPartial,
++						subagentSettings.worktreeBase,
+ 					);
+ 				});
+ 				const results = run.getResults();
+@@ -1686,12 +1890,22 @@
+ 							truncateModelFacingOutput(previousOutput),
+ 						),
+ 					});
+-					const result = await runOne(runner, spec, cwd, parent, parentSessionFile, i + 1, signal, (snapshot) => {
+-						onUpdate?.({
+-							content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
+-							details: { mode: "chain", results: [...results, snapshot] },
+-						});
+-					});
++					const result = await runOne(
++						runner,
++						spec,
++						cwd,
++						parent,
++						parentSessionFile,
++						i + 1,
++						signal,
++						(snapshot) => {
++							onUpdate?.({
++								content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
++								details: { mode: "chain", results: [...results, snapshot] },
++							});
++						},
++						subagentSettings.worktreeBase,
++					);
+ 					results.push(result);
+ 					if (isFailedSubagentResult(result)) {
+ 						// A thrown error becomes tool-error content verbatim (agent-loop
+@@ -1748,9 +1962,21 @@
+ 					});
+ 				};
+ 
++				// REQ-I02 / REQ-C01: Parallel admission gates on per-tool `concurrentSafe`.
++				// A batch containing any task with mutating/shell tools (unless isolated in its
++				// own worktree) serialises (`concurrency = 1`) rather than running concurrently
++				// against the same working tree.
++				const batchIsConcurrentSafe = tasks.every(
++					(task) =>
++						(task.isolation ?? params.isolation) === "worktree" || isConcurrentSafeToolSet(task.tools),
++				);
++				const effectiveConcurrency = batchIsConcurrentSafe ? subagentSettings.maxConcurrent : 1;
++
+ 				const results = await mapWithConcurrencyLimit(
+ 					tasks,
+-					subagentSettings.maxConcurrent,
++					effectiveConcurrency,
+ 					async (task, index) => {
+ 						const result = await runOne(
+ 							runner,
+-							specFromInput(task),
++							specFromInput({
++								...task,
++								isolation: task.isolation ?? params.isolation,
++							}),
+ 							cwd,
+ 							parent,
+ 							parentSessionFile,
+@@ -1759,6 +1985,7 @@
+ 								allResults[index] = snapshot;
+ 								emitParallelUpdate();
+ 							},
++							subagentSettings.worktreeBase,
+ 						);
+ 						allResults[index] = result;
+ 						settled[index] = true;
+@@ -1793,12 +2020,22 @@
+ 			// Single
+ 			// ----------------------------------------------------------------
+ 			const spec = singleSpec as SubagentSpec;
+-			const result = await runOne(runner, spec, cwd, parent, parentSessionFile, undefined, signal, (snapshot) => {
+-				onUpdate?.({
+-					content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
+-					details: { mode: "single", results: [snapshot] },
+-				});
+-			});
++			const result = await runOne(
++				runner,
++				spec,
++				cwd,
++				parent,
++				parentSessionFile,
++				undefined,
++				signal,
++				(snapshot) => {
++					onUpdate?.({
++						content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
++						details: { mode: "single", results: [snapshot] },
++					});
++				},
++				subagentSettings.worktreeBase,
++			);
+ 			if (isFailedSubagentResult(result)) {
+ 				// Same cap as the chain throw above: thrown error.message becomes
+ 				// tool-error content verbatim and has no tool details attached.

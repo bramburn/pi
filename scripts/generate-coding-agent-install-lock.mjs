@@ -11,8 +11,8 @@ const outputDir = join(codingAgentDir, "install-lock");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
 const outputLockfilePath = join(outputDir, "package-lock.json");
-const internalPackagePrefix = "@earendil-works/pi-";
-const installPackageName = "@earendil-works/pi-coding-agent-install";
+const internalPackagePrefix = "@bramburn/qi-";
+const installPackageName = "@bramburn/qi-coding-agent-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
@@ -143,7 +143,7 @@ function isInternalPackageName(name) {
 
 function swapForkScope(name) {
 	// Map the upstream workspace scope to the fork scope (and back),
-	// preserving the `pi-` segment so `@earendil-works/pi-agent-core`
+	// preserving the `pi-` segment so `@bramburn/qi-agent-core`
 	// maps to `@bramburn/pi-agent-core` (not `@bramburn/agent-core`).
 	if (typeof name !== "string") return name;
 	if (name.startsWith(`${internalPackagePrefix}`)) {
@@ -169,11 +169,11 @@ function getInternalWorkspaces(lockPackages) {
 			continue;
 		}
 		// Accept the workspace if either the lockfile's recorded name or the
-		// on-disk package.json's name is under the internal prefix. After
-		// `fork-publish-rename.mjs` swaps the publishing package's name and
-		// workspace deps, the publishing package.json lists deps under
-		// `@bramburn/pi-*` while the lockfile and other workspace
-		// package.json files still use `@earendil-works/pi-*`. The install
+		// on-disk package.json's name is under the internal prefix. A
+		// publishing package.json may still list deps under the legacy fork
+		// scope `@bramburn/pi-*` (as produced by the removed publish-time
+		// rename script, ADR-0001) while the lockfile and other workspace
+		// package.json files use `@bramburn/qi-*`. The install
 		// lock must therefore resolve either spelling back to the same
 		// workspace directory.
 		const lockName = isInternalPackageName(entry.name) ? entry.name : undefined;
@@ -213,11 +213,11 @@ function resolveExternalDependency(lockPackages, packageName, fromLockPath, root
 	// For workspace packages in the install lock, check the root lockfile first for
 	// nested workspace entries. This handles cases where the root install lock has
 	// a different (usually older) version than what a workspace package needs.
-	// e.g. @earendil-works/pi-coding-agent -> packages/coding-agent/node_modules/cross-spawn
+	// e.g. @bramburn/qi-coding-agent -> packages/coding-agent/node_modules/cross-spawn
 	if (rootLockPackages && fromLockPath.startsWith("node_modules/")) {
 		const wsName = fromLockPath.slice("node_modules/".length).split("/node_modules/")[0];
-		// Map @earendil-works/pi-<name> -> <name>
-		const nameOnly = wsName.replace("@earendil-works/pi-", "");
+		// Map @bramburn/qi-<name> -> <name>
+		const nameOnly = wsName.replace("@bramburn/qi-", "");
 		const nestedLockPath = `packages/${nameOnly}/node_modules/${packageName}`;
 		const entry = rootLockPackages[nestedLockPath];
 		if (entry && !entry.link) {
@@ -451,8 +451,7 @@ function generateInstallLock() {
 		const workspace = internalWorkspaceIndex.get(item.name);
 		if (workspace) {
 			// Preserve the requested name (typically the fork-scope spelling
-			// after fork-publish-rename has rewritten the publishing
-			// package's deps) so the install-lock output's
+			// of the publishing package's deps) so the install-lock output's
 			// `node_modules/<name>` paths and resolved tarball URLs match
 			// the published tarball.
 			const outputName = item.name ?? workspace.pkgName;

@@ -74,15 +74,20 @@ describe("xAI Responses provider", () => {
 	});
 
 	it("exposes Grok 4.x on the Responses API with low/medium/high efforts", () => {
-		// All current Grok 4.x models target the Responses API; the legacy
-		// openai-completions endpoint is reserved for older Grok 3/4 releases
-		// that have been retired from the built-in catalog.
-		expect(XAI_MODELS["grok-4.5"].api).toBe("openai-responses");
-		expect(XAI_MODELS["grok-4.6"].api).toBe("openai-responses");
-		expect(XAI_MODELS["grok-4.3"].api).toBe("openai-responses");
-		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.5"])).toEqual(["low", "medium", "high"]);
-		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.6"])).toEqual(["low", "medium", "high", "xhigh"]);
-		expect(getSupportedThinkingLevels(XAI_MODELS["grok-4.3"])).toEqual(["off", "low", "medium", "high"]);
+		// Which Grok versions upstream lists, and how many effort levels each declares,
+		// both move between catalog builds (grok-4.5 gained xhigh). The invariant here
+		// is routing plus the three core effort levels, not a per-version snapshot -
+		// see https://github.com/bramburn/qi/issues/1. The legacy openai-completions
+		// endpoint is reserved for older Grok releases that are retired from the catalog.
+		const grok4 = Object.values(XAI_MODELS).filter((model) => model.id.startsWith("grok-4."));
+		// Without this, an empty list would make every loop below vacuously pass.
+		expect(grok4.length).toBeGreaterThan(0);
+		for (const model of grok4) {
+			expect(model.api, model.id).toBe("openai-responses");
+			expect(getSupportedThinkingLevels(model), model.id).toEqual(expect.arrayContaining(["low", "medium", "high"]));
+		}
+		// At least one current Grok can still switch thinking off.
+		expect(grok4.filter((model) => getSupportedThinkingLevels(model).includes("off")).length).toBeGreaterThan(0);
 	});
 
 	it("uses /responses with bearer auth and xAI-compatible request fields", async () => {

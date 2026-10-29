@@ -1,0 +1,18 @@
+--- a/packages/tui/package.json
++++ b/packages/tui/package.json
+@@ -1,5 +1,5 @@
+ {
+-	"name": "@earendil-works/pi-tui",
++	"name": "@bramburn/qi-tui",
+ 	"version": "0.85.0-b1",
+ 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
+ 	"type": "module",
+@@ -35,7 +35,7 @@
+ 	"license": "MIT",
+ 	"repository": {
+ 		"type": "git",
+-		"url": "git+https://github.com/earendil-works/pi.git",
++		"url": "git+https://github.com/bramburn/pi.git",
+ 		"directory": "packages/tui"
+ 	},
+ 	"engines": {

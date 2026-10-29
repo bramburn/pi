@@ -1,0 +1,22 @@
+--- a/c:/dev/ai-compact-hot-swap/index.ts
++++ b/c:/dev/ai-compact-hot-swap/index.ts
+@@ -433,6 +433,7 @@
+ 		ctx.ui.notify("Hot-swap compaction started", "info");
+ 		ctx.compact({
++			background: true,
+ 			customInstructions,
+ 			onComplete: (result) => {
+ 				compacting = false;
+@@ -458,8 +459,13 @@
+ 			onError: (err) => {
+ 				compacting = false;
+ 				pendingCompaction = false;
+ 				const message = err instanceof Error ? err.message : String(err);
+-				ctx.ui.notify(`Hot-swap compaction failed: ${message}`, "error");
++				if (/Nothing to compact|Already compacted|nothing to summarize/i.test(message)) {
++					ctx.ui.notify(`Hot-swap compaction skipped: ${message}`, "warning");
++					return;
++				}
++				ctx.ui.notify(`Hot-swap compaction failed: ${message}`, "error");
+ 			},
+ 		});

@@ -1,5 +1,5 @@
-import type { ImageContent } from "@earendil-works/pi-ai/compat";
-import type { PasteAttachment } from "@earendil-works/pi-tui";
+import type { ImageContent } from "@bramburn/qi-ai/compat";
+import type { PasteAttachment } from "@bramburn/qi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 

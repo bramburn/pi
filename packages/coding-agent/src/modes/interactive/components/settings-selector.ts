@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Transport } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@bramburn/qi-agent-core";
+import type { Transport } from "@bramburn/qi-ai";
 import {
 	type Component,
 	Container,
@@ -11,7 +11,7 @@ import {
 	SettingsList,
 	Spacer,
 	Text,
-} from "@earendil-works/pi-tui";
+} from "@bramburn/qi-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type {
 	DefaultProjectTrust,
@@ -96,6 +96,10 @@ export interface SettingsConfig {
 	newSessionModelSpecificLabel?: string;
 	/** Human label for the last used model, when known. */
 	lastUsedModelLabel?: string;
+	/** Configured compaction (summarisation) model reference; absent = current model. */
+	compactionModel?: { provider: string; modelId: string };
+	/** Human label for the configured compaction model, when set. */
+	compactionModelLabel?: string;
 }
 
 export interface NewSessionModelSubmenuCallbacks {
@@ -153,6 +157,7 @@ export interface SettingsCallbacks {
 	 * the picker resolves.
 	 */
 	requestModelSelector: (onPicked: (selection: { provider: string; modelId: string } | undefined) => void) => void;
+	onCompactionModelChange: (model: { provider: string; modelId: string } | undefined) => void;
 	onCancel: () => void;
 }
 
@@ -372,6 +377,97 @@ class NewSessionModelSubmenu extends Container {
 				}
 			},
 			onCancel,
+		);
+
+		this.addChild(this.settingsList);
+	}
+
+	handleInput(data: string): void {
+		this.settingsList.handleInput(data);
+	}
+}
+
+/**
+ * Settings submenu for choosing which model summarises / compacts context.
+ *
+ * Two options: "Use current model" (the default; clears any configured
+ * preference) and "Use specific model" (defers to the host interactive mode
+ * via `requestModelSelector` to open the same searchable model picker as
+ * /model). The host is responsible for re-opening the settings list once a
+ * model is picked.
+ */
+class CompactionModelSubmenu extends Container {
+	private settingsList: SettingsList;
+
+	constructor(
+		initial: { provider: string; modelId: string } | undefined,
+		specificLabel: string | undefined,
+		callbacks: {
+			onChange: (model: { provider: string; modelId: string } | undefined) => void;
+			requestModelSelector: (
+				onPicked: (selection: { provider: string; modelId: string } | undefined) => void,
+			) => void;
+		},
+		onDone: (value?: string) => void,
+	) {
+		super();
+
+		const specificDesc = specificLabel ? `Currently ${specificLabel}` : "Open the model picker to choose a model";
+
+		// Single-shot activation: each row's `submenu` callback fires
+		// `done` synchronously, which routes through this SettingsList's
+		// onChange (the id dispatch below). We return a no-op Container
+		// because SettingsList assigns the return value to submenuComponent,
+		// but the submenu is closed via done() in the dispatch, so the inner
+		// submenu is never reachable and the placeholder is orphaned.
+		const fireAndForget = (done: (value?: string) => void, value: string): Container => {
+			done(value);
+			return new Container();
+		};
+
+		const items: SettingItem[] = [
+			{
+				id: "mode-current",
+				label: "Use current model",
+				description: "Summarise and compact context with the session's current model",
+				currentValue: initial === undefined ? "current" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "current"),
+			},
+			{
+				id: "mode-specific",
+				label: "Use specific model",
+				description: specificDesc,
+				currentValue: initial !== undefined ? "specific" : "",
+				submenu: (_currentValue, done) => fireAndForget(done, "specific"),
+			},
+		];
+
+		this.settingsList = new SettingsList(
+			items,
+			items.length,
+			getSettingsListTheme(),
+			(id) => {
+				if (id === "mode-current") {
+					callbacks.onChange(undefined);
+					// Close the submenu and refresh the main row so the user
+					// sees "Current model" immediately.
+					onDone("Current model");
+					return;
+				}
+				if (id === "mode-specific") {
+					// Defer to the host to open the model picker. The host's
+					// requestModelSelector bridge closes the submenu (via
+					// done()) before opening the picker and re-opens settings
+					// afterwards, so we don't call onDone() here.
+					callbacks.requestModelSelector((selection) => {
+						if (selection) {
+							callbacks.onChange(selection);
+						}
+						// User cancelled: leave the preference untouched.
+					});
+				}
+			},
+			() => onDone(),
 		);
 
 		this.addChild(this.settingsList);
@@ -680,6 +776,33 @@ export class SettingsSelectorComponent extends Container {
 				description: "Automatically compact context when it gets too large",
 				currentValue: config.autoCompact ? "true" : "false",
 				values: ["true", "false"],
+			},
+			{
+				id: "compaction-model",
+				label: "Compaction model",
+				description: "Model used to summarise and compact context; defaults to the current model",
+				currentValue: config.compactionModel
+					? (config.compactionModelLabel ?? `${config.compactionModel.provider}/${config.compactionModel.modelId}`)
+					: "Current model",
+				submenu: (_currentValue, done) =>
+					new CompactionModelSubmenu(
+						config.compactionModel,
+						config.compactionModelLabel,
+						{
+							onChange: (model) => {
+								callbacks.onCompactionModelChange(model);
+							},
+							requestModelSelector: (onPicked) => {
+								// Close the settings submenu, then have the
+								// host drive the model picker. The host is
+								// responsible for re-opening settings after
+								// the picker resolves.
+								done();
+								callbacks.requestModelSelector(onPicked);
+							},
+						},
+						(value) => done(value),
+					),
 			},
 			{
 				id: "steering-mode",

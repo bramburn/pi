@@ -6,7 +6,7 @@ import type {
 	TextContent,
 	ThinkingBudgets,
 	Transport,
-} from "@earendil-works/pi-ai";
+} from "@bramburn/qi-ai";
 import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
@@ -619,7 +619,7 @@ export class Agent {
 			// background task posts a result to an idle session). Drop the event
 			// instead of throwing — nothing should be able to crash the host
 			// process from a benign post-run notification.
-			if (process.env.PI_DEBUG_AGENT_LISTENER === "1") {
+			if (process.env.QI_DEBUG_AGENT_LISTENER === "1") {
 				console.warn(`[agent] dropping ${event.type} after run ended`);
 			}
 			return;

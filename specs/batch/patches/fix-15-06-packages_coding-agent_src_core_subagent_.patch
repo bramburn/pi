@@ -1,0 +1,20 @@
+--- a/packages/coding-agent/src/core/subagent/types.ts
++++ b/packages/coding-agent/src/core/subagent/types.ts
+@@ -165,6 +165,8 @@
+ 	step?: number;
+ 	/** True when the run was aborted (caller signal, timeout, or kill). */
+ 	aborted: boolean;
++	/** True when the child was terminated for exceeding `maxTurns` (REQ-D03). */
++	turnCapExceeded?: boolean;
+ 	/** Last assistant text message, or empty string if none. */
+ 	finalOutput: string;
+ 	/** Raw stderr captured from the child process. */
+@@ -206,6 +208,8 @@
+ 	timeoutMs?: number;
+ 	/** Per-task JSONL event log path. */
+ 	logPath?: string;
++	/** Per-child assistant turn limit (REQ-D03). */
++	maxTurns?: number;
+ 	/** Emit `checkpoint_pending` this many ms before `timeoutMs` fires. */
+ 	checkpointBeforeDeadlineMs?: number;
+ 	/** Directory for the file control plane (`control/` + `supervisor/`). */

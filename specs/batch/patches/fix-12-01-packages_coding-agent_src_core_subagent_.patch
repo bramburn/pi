@@ -1,0 +1,346 @@
+--- a/packages/coding-agent/src/core/subagent/subagent-tool.ts
++++ b/packages/coding-agent/src/core/subagent/subagent-tool.ts
+@@ -478,6 +478,7 @@
+ 	step: number | undefined,
+ 	signal: AbortSignal | undefined,
+ 	onPartial?: (snapshot: SubagentResult) => void,
++	onEvent?: SubagentEventListener,
+ ): Promise<SubagentResult> {
+ 	const cwd = spec.cwd ? (isAbsolute(spec.cwd) ? spec.cwd : resolvePath(baseCwd, spec.cwd)) : baseCwd;
+ 	// A schema-bound child gets the format contract in its system prompt; the
+@@ -514,8 +515,10 @@
+ 		let lastText = "";
+ 		const liveUsage = createEmptyUsage();
+ 		const seen: Message[] = [];
+-		const listener: SubagentEventListener | undefined = onPartial
+-			? (event) => {
++		const listener: SubagentEventListener | undefined =
++			onPartial || onEvent
++				? (event) => {
++					onEvent?.(event);
+ 					if (event.type === "message_end" || event.type === "tool_result_end") {
+ 						seen.push(event.message);
+ 					}
+@@ -539,10 +542,10 @@
+ 						usage: { ...liveUsage },
+ 						...(step === undefined ? {} : { step }),
+ 						messages: [...seen],
+ 					});
+-				}
+-			: undefined;
++				  }
++				: undefined;
+ 
+ 		const result = await runner.run(request, signal, listener);
+ 		const settled = await applyOutputContract(spec, cwd, result, signal);
+@@ -565,24 +568,6 @@
+ 	}
+ }
+ 
+-/** Map with a bounded number of concurrently running promises, preserving order. */
+-async function mapWithConcurrencyLimit<TIn, TOut>(
+-	items: TIn[],
+-	concurrency: number,
+-	fn: (item: TIn, index: number) => Promise<TOut>,
+-): Promise<TOut[]> {
+-	if (items.length === 0) return [];
+-	const limit = Math.max(1, Math.min(concurrency, items.length));
+-	const results = new Array<TOut>(items.length);
+-	let nextIndex = 0;
+-	const workers = new Array(limit).fill(null).map(async () => {
+-		while (true) {
+-			const current = nextIndex++;
+-			if (current >= items.length) return;
+-			results[current] = await fn(items[current], current);
+-		}
+-	});
+-	await Promise.all(workers);
+-	return results;
+-}
+-
+ /**
+  * Cap model-facing output at PER_TASK_OUTPUT_CAP bytes (UTF-8).
+  *
+@@ -690,8 +675,9 @@
+ 	settings: () => ResolvedSubagentSettings;
+ 	taskId?: string;
+ 	onSettled?: (taskId: string, result: SubagentResult) => void;
++	liveInlineCount?: () => number;
+ }): { taskId: string; started: boolean; queuePosition: number } {
+-	const cap = (): number => args.settings().maxConcurrent;
++	const cap = (): number => Math.max(0, args.settings().maxConcurrent - (args.liveInlineCount?.() ?? 0));
+ 	let released = false;
+ 	const request = requestBackgroundDispatch(
+ 		args.registry,
+@@ -725,6 +711,17 @@
+ 	};
+ }
+ 
++function safeUpdateLeaseWriter(
++	lease: SessionLeaseHandle,
++	writer: { state: "none" | "spawning" | "running"; pid?: number },
++): void {
++	try {
++		lease.updateWriter(writer);
++	} catch (err) {
++		console.warn(`[subagent] ${err instanceof Error ? err.message : String(err)}`);
++	}
++}
++
+ /**
+  * Report a batch of detached dispatch ids, splitting work that started from
+  * work that is waiting for a slot. Naming a queued task as "started" would send
+@@ -769,6 +766,89 @@
+ 	// batch is either admitted in full or rejected in full — no partial
+ 	// admission, no two parallel calls slipping through the same hole.
+ 	let totalSpawnCount = 0;
++
++	// Session-wide concurrency budget (REQ-C02, REQ-C03): inline and background
++	// runs share one live-children cap (`subagent.maxConcurrent`). Inline runs
++	// acquire a slot on this session-scoped semaphore before spawning and release
++	// it in `finally`, draining any queued background work on settle.
++	let activeInlineCount = 0;
++	const inlineWaiters: Array<{
++		tryAcquire: () => boolean;
++		cleanup: () => void;
++	}> = [];
++
++	const getMaxConcurrent = (): number =>
++		Math.max(1, (options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS).maxConcurrent);
++
++	const getActiveBackgroundCount = (runner: SubagentRunner): number => {
++		const registry = options?.registry ?? getBackgroundRegistry();
++		const runningBg = registry.listRunning().filter((t) => t.status === "running").length;
++		const totalRunner = runner.listRunning?.().length ?? 0;
++		return Math.max(runningBg, totalRunner - activeInlineCount);
++	};
++
++	const getEffectiveBackgroundCap = (runner: SubagentRunner): number =>
++		Math.max(0, getMaxConcurrent() - activeInlineCount);
++
++	const pumpConcurrencyWaiters = (runner: SubagentRunner): void => {
++		while (inlineWaiters.length > 0) {
++			const max = getMaxConcurrent();
++			const inUse = activeInlineCount + getActiveBackgroundCount(runner);
++			if (inUse >= max) break;
++			const next = inlineWaiters.shift();
++			if (next && next.tryAcquire()) {
++				continue;
++			}
++		}
++		const bgCap = getEffectiveBackgroundCap(runner);
++		if (bgCap > 0) {
++			const registry = options?.registry ?? getBackgroundRegistry();
++			releaseBackgroundDispatch(registry, "", bgCap);
++		}
++	};
++
++	const acquireInlineSlot = (runner: SubagentRunner, signal: AbortSignal | undefined): Promise<() => void> => {
++		if (signal?.aborted) {
++			return Promise.reject(new Error("Subagent dispatch aborted while waiting for a concurrency slot."));
++		}
++		let released = false;
++		const release = (): void => {
++			if (released) return;
++			released = true;
++			activeInlineCount = Math.max(0, activeInlineCount - 1);
++			pumpConcurrencyWaiters(runner);
++		};
++		const max = getMaxConcurrent();
++		const inUse = activeInlineCount + getActiveBackgroundCount(runner);
++		if (inUse < max && inlineWaiters.length === 0) {
++			activeInlineCount += 1;
++			return Promise.resolve(release);
++		}
++		return new Promise<() => void>((resolve, reject) => {
++			const onAbort = (): void => {
++				const idx = inlineWaiters.indexOf(entry);
++				if (idx !== -1) inlineWaiters.splice(idx, 1);
++				entry.cleanup();
++				reject(new Error("Subagent dispatch aborted while waiting for a concurrency slot."));
++			};
++			const entry = {
++				tryAcquire: (): boolean => {
++					entry.cleanup();
++					if (signal?.aborted) {
++						reject(new Error("Subagent dispatch aborted while waiting for a concurrency slot."));
++						return false;
++					}
++					activeInlineCount += 1;
++					resolve(release);
++					return true;
++				},
++				cleanup: (): void => {
++					signal?.removeEventListener("abort", onAbort);
++				},
++			};
++			signal?.addEventListener("abort", onAbort, { once: true });
++			inlineWaiters.push(entry);
++		});
++	};
++
++	const runOneBounded = async (
++		runner: SubagentRunner,
++		spec: SubagentSpec,
++		baseCwd: string,
++		parent: ParentContext,
++		parentSessionFile: string | undefined,
++		step: number | undefined,
++		signal: AbortSignal | undefined,
++		onPartial?: (snapshot: SubagentResult) => void,
++		onEvent?: SubagentEventListener,
++	): Promise<SubagentResult> => {
++		const releaseSlot = await acquireInlineSlot(runner, signal);
++		try {
++			return await runOne(runner, spec, baseCwd, parent, parentSessionFile, step, signal, onPartial, onEvent);
++		} finally {
++			releaseSlot();
++		}
++	};
+ 
+ 	// ------------------------------------------------------------------------
+ 	// Control plane: action = status | stop | interrupt | steer | swap-model |
+@@ -895,7 +975,11 @@
+ 			onUpdate: SubagentToolUpdateCallback | undefined;
+ 			background: boolean;
+ 		},
+-		leaseControl: { handOff: () => void; release: () => void },
++		leaseControl: {
++			lease: SessionLeaseHandle;
++			handOff: () => void;
++			release: () => void;
++		},
+ 	): Promise<SubagentToolResult> => {
+ 		const { action, target } = payload;
+ 		if (target.kind === "inline") {
+@@ -932,12 +1016,28 @@
+ 		const verb = action === "steer" ? "Steered" : action === "resume" ? "Resumed" : "Re-dispatched with a new model";
+ 		const head = `${verb} ${target.kind} run ${target.id} (role=${target.role}), resuming child session ${target.sessionFile}`;
+ 
++		// REQ-L02.1: mark the lease as "spawning" before the child exists, and
++		// transition to "running" with pid when the runner emits `spawned` (only
++		// when pid is a valid positive integer; otherwise stay "spawning").
++		safeUpdateLeaseWriter(leaseControl.lease, { state: "spawning" });
++		const leaseRunner: SubagentRunner = {
++			...payload.runner,
++			run: (req, sig, onEv) =>
++				payload.runner.run(req, sig, (ev) => {
++					if (ev.type === "spawned") {
++						if (typeof ev.pid === "number" && Number.isInteger(ev.pid) && ev.pid > 0) {
++							safeUpdateLeaseWriter(leaseControl.lease, { state: "running", pid: ev.pid });
++						}
++					}
++					onEv?.(ev);
++				}),
++		};
++
+ 		if (payload.background) {
+ 			const registry = options?.registry ?? getBackgroundRegistry();
+ 			// Routed through the capped dispatcher: a steering replacement is a new
+ 			// child process, and starting it beside a full set of running children
+ 			// is exactly the bypass this issue is about. The replacement parks
+ 			// behind the cap instead, still holding the lease until it settles.
+ 			const dispatch = dispatchDetached({
+ 				registry,
+-				runner: payload.runner,
++				runner: leaseRunner,
+ 				spec,
+ 				task: spec.instructions,
+ 				cwd: target.cwd,
+ 				parent: payload.parent,
+ 				parentSessionFile: payload.parentSessionFile,
+ 				settings: () => options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS,
++				liveInlineCount: () => activeInlineCount,
+ 				// The replacement child outlives this call, so the lease is not
+ 				// released in the wrapper's finally — it is released when the row
+ 				// settles, which is the last moment the child can be writing.
+@@ -961,8 +1061,8 @@
+ 			};
+ 		}
+ 
+-		const result = await runOne(
+-			payload.runner,
++		const result = await runOneBounded(
++			leaseRunner,
+ 			spec,
+ 			payload.baseCwd,
+ 			payload.parent,
+@@ -1005,6 +1105,7 @@
+ 		};
+ 		try {
+ 			return await dispatchRedirect(payload, {
++				lease,
+ 				handOff: () => {
+ 					handedOff = true;
+ 				},
+@@ -1272,10 +1373,7 @@
+ 			// by that same drain (its row is no longer pending). Cancelling without
+ 			// this would strand everything behind it until some unrelated settle
+ 			// happened to fire the pump.
+-			releaseBackgroundDispatch(
+-				registry,
+-				id,
+-				(options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS).maxConcurrent,
+-			);
++			releaseBackgroundDispatch(registry, id, getEffectiveBackgroundCap(runner));
+ 			const text =
+ 				outcome.kind === "cancelled-queued"
+ 					? `Background task ${id} (role=${row.role}) was queued and had not started: marked cancelled and dropped from the concurrency queue. ${reason} No child process was launched for it.`
+@@ -1488,6 +1586,7 @@
+ 						// change to subagent.maxConcurrent apply to the drain instead of promoting
+ 						// against a stale cap.
+ 						settings: () => options?.subagentSettings?.() ?? DEFAULT_SUBAGENT_SETTINGS,
++						liveInlineCount: () => activeInlineCount,
+ 						onSettled: onSettled ?? options?.onBackgroundSettled,
+ 						...(taskId === undefined ? {} : { taskId }),
+ 					}).taskId;
+@@ -1626,7 +1725,7 @@
+ 				});
+ 				const progress = await runDagInline(run, async (launch) => {
+ 					const spec = specFromInput({ ...launch.node, instructions: launch.instructions });
+-					return runOne(
++					return runOneBounded(
+ 						runner,
+ 						spec,
+ 						cwd,
+@@ -1664,7 +1763,7 @@
+ 							truncateModelFacingOutput(previousOutput),
+ 						),
+ 					});
+-					const result = await runOne(runner, spec, cwd, parent, parentSessionFile, i + 1, signal, (snapshot) => {
++					const result = await runOneBounded(runner, spec, cwd, parent, parentSessionFile, i + 1, signal, (snapshot) => {
+ 						onUpdate?.({
+ 							content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
+ 							details: { mode: "chain", results: [...results, snapshot] },
+@@ -1720,11 +1819,9 @@
+ 					});
+ 				};
+ 
+-				const results = await mapWithConcurrencyLimit(
+-					tasks,
+-					subagentSettings.maxConcurrent,
++				const results = await Promise.all(
++					tasks.map(
+ 					async (task, index) => {
+-						const result = await runOne(
++						const result = await runOneBounded(
+ 							runner,
+ 							specFromInput(task),
+ 							cwd,
+@@ -1742,6 +1839,7 @@
+ 						emitParallelUpdate();
+ 						return result;
+ 					},
++					),
+ 				);
+ 
+ 				const successCount = results.filter((r) => !isFailedSubagentResult(r)).length;
+@@ -1768,7 +1866,7 @@
+ 			// Single
+ 			// ----------------------------------------------------------------
+ 			const spec = singleSpec as SubagentSpec;
+-			const result = await runOne(runner, spec, cwd, parent, parentSessionFile, undefined, signal, (snapshot) => {
++			const result = await runOneBounded(runner, spec, cwd, parent, parentSessionFile, undefined, signal, (snapshot) => {
+ 				onUpdate?.({
+ 					content: [{ type: "text", text: snapshot.finalOutput || "(running)" }],
+ 					details: { mode: "single", results: [snapshot] },

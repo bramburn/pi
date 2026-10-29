@@ -1334,7 +1334,7 @@ Calls are tracked internally by `sourceIndex`. Hooks, events, and tool context s
 
 Both operations generate a summary through the same `deciding → generating → result` machinery, which is why they are specified together. The axes:
 
-By default summarisation uses the main agent model. The optional `PI_SUMMARIZER_BASE_URL`, `PI_SUMMARIZER_MODEL`, and `PI_SUMMARIZER_API_KEY` env vars override the summarisation model — e.g. point them at a cheap DeepSeek / OpenRouter / vLLM endpoint while the main agent keeps using a larger model. The override is always-active when all three required vars are set; partial sets log a warning and fall back to the main model. The override is independent of `--deepseek-harness`. See `packages/ai/src/summariser-env.ts` and `summariser-model.ts` for the env-var contract.
+By default summarisation uses the main agent model. The coding agent (`@earendil-works/pi-coding-agent`) can route summarisation through a different catalog model instead — e.g. a cheap DeepSeek / OpenRouter / vLLM model while the main agent keeps using a larger one — via the `compactionModel` setting, configured from `/settings` → Compaction model. When unset, or when the configured model is no longer available, summarisation falls back to the main agent model.
 
 | | compaction | navigation |
 |---|---|---|

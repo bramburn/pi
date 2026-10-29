@@ -66,28 +66,55 @@ describe("builtin providers", () => {
 		expect(getBuiltinModel("anthropic", "claude-haiku-4-5").compat?.supportsStrictTools).toBe(true);
 	});
 
-	it("uses official Kimi K3 pricing for Moonshot providers", () => {
+	it("reports numeric pricing for the Kimi models the vendor-cost checks below depend on", () => {
 		const models = builtinModels();
-		for (const provider of ["moonshotai", "moonshotai-cn"]) {
-			expect(models.getModel(provider, "kimi-k3")?.cost).toEqual({
-				input: 3,
-				output: 15,
-				cacheRead: 0.3,
-				cacheWrite: 0,
-			});
+		for (const [provider, modelId] of [
+			["moonshotai", "kimi-k3"],
+			["moonshotai-cn", "kimi-k3"],
+			["kimi-coding", "k3"],
+			["kimi-coding", "kimi-for-coding-highspeed"],
+		] as const) {
+			const cost = models.getModel(provider, modelId)?.cost;
+			expect(cost, `${provider}/${modelId}`).toBeDefined();
+			for (const field of ["input", "output", "cacheRead", "cacheWrite"] as const) {
+				const value = cost?.[field];
+				expect(typeof value, `${provider}/${modelId}.${field}`).toBe("number");
+				expect(Number.isFinite(value), `${provider}/${modelId}.${field}`).toBe(true);
+				expect(value as number, `${provider}/${modelId}.${field}`).toBeGreaterThanOrEqual(0);
+			}
 		}
 	});
 
-	it("uses API-equivalent implied pricing for Kimi Coding subscription models", () => {
-		const models = builtinModels();
-		const expectedCosts = {
-			k3: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
-			"kimi-for-coding-highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 0 },
-		};
+	// Exact vendor prices are read from the live upstream catalog by `bun run build`
+	// (packages/ai/src/providers/data/ is gitignored), so they move without any code
+	// change in this repo and used to break `bun run check`/CI on the day upstream
+	// repriced a model. They audit the generator's fallbacks against vendor data
+	// rather than guard a regression, so they run only on request:
+	// QI_CHECK_CATALOG_PRICING=1 (https://github.com/bramburn/qi/issues/1).
+	describe.skipIf(!process.env.QI_CHECK_CATALOG_PRICING)("catalog pricing matches vendor pricing", () => {
+		it("uses official Kimi K3 pricing for Moonshot providers", () => {
+			const models = builtinModels();
+			for (const provider of ["moonshotai", "moonshotai-cn"]) {
+				expect(models.getModel(provider, "kimi-k3")?.cost).toEqual({
+					input: 3,
+					output: 15,
+					cacheRead: 0.3,
+					cacheWrite: 0,
+				});
+			}
+		});
 
-		for (const [modelId, cost] of Object.entries(expectedCosts)) {
-			expect(models.getModel("kimi-coding", modelId)?.cost).toEqual(cost);
-		}
+		it("uses API-equivalent implied pricing for Kimi Coding subscription models", () => {
+			const models = builtinModels();
+			const expectedCosts = {
+				k3: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+				"kimi-for-coding-highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 0 },
+			};
+
+			for (const [modelId, cost] of Object.entries(expectedCosts)) {
+				expect(models.getModel("kimi-coding", modelId)?.cost).toEqual(cost);
+			}
+		});
 	});
 
 	it("resolves Anthropic bearer auth from env with auth token precedence", async () => {

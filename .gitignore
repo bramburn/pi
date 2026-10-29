@@ -12,6 +12,12 @@ packages/ai/src/providers/data/
 packages/ai/src/providers/.model-generation-*/
 *.cpuprofile
 
+# remove repomix
+repomix-*.xml
+
+#.pi skills
+.pi/skills/xerj-code-search
+
 # Environment
 .env
 
@@ -66,3 +72,6 @@ packages/session-backends/sqlite-node/sqlite-node/
 
 # Sync-upstream script runtime state
 scripts/.upstream-sync-state.json
+
+# windows null-device artifact
+nul

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@bramburn/qi-ai";
 import { describe, expect, it } from "vitest";
 import { validateLlmMessages } from "../src/agent-loop.ts";
 

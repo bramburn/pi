@@ -1,0 +1,57 @@
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -1,13 +1,14 @@
+ {
+-	"name": "@earendil-works/pi-coding-agent",
++	"name": "@bramburn/qi-coding-agent",
+ 	"version": "0.85.0-b1",
+ 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
+ 	"type": "module",
+ 	"piConfig": {
+-		"configDir": ".pi"
++		"name": "qi",
++		"configDir": ".qi"
+ 	},
+ 	"//build-binary": "Note: build:binary also invokes the full node build chain (via the embedded 'bun --bun run build' step) because the bundle's dist/cli.js must exist before 'bun build --compile' can include it. This is intentional and is why 'bun run build-both' runs the node build twice when --bun-only is not used.",
+ 	"bin": {
+-		"pi": "dist/bundle/cli.js"
++		"qi": "dist/bundle/cli.js"
+ 	},
+ 	"main": "./dist/index.js",
+ 	"types": "./dist/index.d.ts",
+@@ -39,7 +40,7 @@
+ 		"clean": "shx rm -rf dist",
+ 		"build": "bun --bun run build:unbundled && bun ../../scripts/build-coding-agent-bundle.mjs",
+ 		"build:unbundled": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js dist/rpc-entry.js && bun --bun run copy-assets",
+-		"build:binary": "bun --cwd ../tui run build && bun --cwd ../telemetry run build && bun --cwd ../ai run build && bun --cwd ../agent run build && bun --cwd ../protocol run build && bun --cwd ../client run build && bun --bun run build && bun build --compile --no-compile-autoload-bunfig ./src/bun/cli.ts ./src/utils/image-resize-worker.ts --outfile dist/pi && bun --bun run copy-binary-assets && bun --bun run build:promote",
++		"build:binary": "bun --cwd ../tui run build && bun --cwd ../telemetry run build && bun --cwd ../ai run build && bun --cwd ../agent run build && bun --cwd ../protocol run build && bun --cwd ../client run build && bun --bun run build && bun build --compile --no-compile-autoload-bunfig ./src/bun/cli.ts ./src/utils/image-resize-worker.ts --outfile dist/qi && bun --bun run copy-binary-assets && bun --bun run build:promote",
+ 		"build:promote": "bun ../../scripts/promote-binary.mjs",
+ 		"copy-assets": "shx mkdir -p dist/modes/interactive/theme && shx cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && shx mkdir -p dist/modes/interactive/assets && shx cp src/modes/interactive/assets/*.png dist/modes/interactive/assets/ && shx mkdir -p dist/core/export-html/vendor && shx cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && shx cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/",
+ 		"copy-binary-assets": "shx cp package.json dist/ && shx cp README.md dist/ && shx cp CHANGELOG.md dist/ && shx mkdir -p dist/theme && shx cp src/modes/interactive/theme/*.json dist/theme/ && shx mkdir -p dist/assets && shx cp src/modes/interactive/assets/*.png dist/assets/ && shx mkdir -p dist/export-html/vendor && shx cp src/core/export-html/template.html dist/export-html/ && shx cp src/core/export-html/vendor/*.js dist/export-html/vendor/ && shx cp -r docs dist/ && shx cp -r examples dist/ && shx cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm dist/",
+@@ -48,12 +49,12 @@
+ 		"prepublishOnly": "bun --bun run clean && bun --bun run build && bun --bun run shrinkwrap"
+ 	},
+ 	"dependencies": {
+-		"@earendil-works/pi-agent-core": "^0.85.0-b1",
++		"@bramburn/qi-agent-core": "^0.85.0-b1",
+ 		"better-sqlite3": "11.9.1",
+-		"@earendil-works/pi-ai": "^0.85.0-b1",
+-		"@earendil-works/pi-client": "^0.85.0-b1",
+-		"@earendil-works/pi-protocol": "^0.85.0-b1",
+-		"@earendil-works/pi-tui": "^0.85.0-b1",
++		"@bramburn/qi-ai": "^0.85.0-b1",
++		"@bramburn/qi-client": "^0.85.0-b1",
++		"@bramburn/qi-protocol": "^0.85.0-b1",
++		"@bramburn/qi-tui": "^0.85.0-b1",
+ 		"@sentry/node": "10.72.0",
+ 		"@silvia-odwyer/photon-node": "0.3.4",
+ 		"chalk": "5.6.2",
+@@ -96,7 +97,7 @@
+ 	"license": "MIT",
+ 	"repository": {
+ 		"type": "git",
+-		"url": "git+https://github.com/earendil-works/pi.git",
++		"url": "git+https://github.com/bramburn/pi.git",
+ 		"directory": "packages/coding-agent"
+ 	},
+ 	"engines": {

@@ -1,4 +1,4 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@bramburn/qi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 
 /**
@@ -28,20 +28,32 @@ export class CustomEditor extends Editor {
 		this.actionHandlers.set(action, handler);
 	}
 
+	/**
+	 * Remove a handler registered with `onAction`. Scoped overlays (the
+	 * background-task dashboard) bind their navigation keys only while they
+	 * are the visible surface, so the keys fall back to the editor otherwise.
+	 */
+	offAction(action: AppKeybinding): void {
+		this.actionHandlers.delete(action);
+	}
+
 	handleInput(data: string): void {
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
 			return;
 		}
 
-		// Check for clipboard paste keybindings (pasteImage wins over pasteText so a
-		// user who binds both to the same key still gets image-or-text behavior).
-		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
-			this.onPasteImage?.();
+		// Clipboard paste keybindings. When both are bound to the same key,
+		// the image handler wins — but only when it is wired: onPasteImage
+		// really means "paste anything" (image → video → pdf → text), and a
+		// custom editor that only wired onPasteText must still get its
+		// handler called instead of a no-op early return.
+		if (this.keybindings.matches(data, "app.clipboard.pasteImage") && this.onPasteImage) {
+			this.onPasteImage();
 			return;
 		}
-		if (this.keybindings.matches(data, "app.clipboard.pasteText")) {
-			this.onPasteText?.();
+		if (this.keybindings.matches(data, "app.clipboard.pasteText") && this.onPasteText) {
+			this.onPasteText();
 			return;
 		}
 

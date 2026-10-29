@@ -22,7 +22,7 @@
  * `["read"]`). The `read` tool exemption breaks the read → truncate
  * → read loop (decision matrix item 10).
  */
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@bramburn/qi-agent-core";
 
 /** Configuration for the pruner. */
 export interface PrunerConfig {

@@ -1,5 +1,5 @@
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@earendil-works/pi-ai";
+import type { AgentMessage, ThinkingLevel } from "@bramburn/qi-agent-core";
+import { type ImageContent, type Message, type TextContent, type Usage, uuidv7 } from "@bramburn/qi-ai";
 import { randomUUID } from "crypto";
 import {
 	appendFileSync,
@@ -25,6 +25,7 @@ import {
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
 	createCustomMessage,
+	normalizeToolPairing,
 } from "./messages.ts";
 
 export const CURRENT_SESSION_VERSION = 3;
@@ -480,6 +481,7 @@ export function buildContextEntries(
  * Build the session context from entries using tree traversal.
  * If leafId is provided, walks from that entry to root.
  * Handles compaction and branch summaries along the path.
+ * Messages are normalized so tool results stay adjacent to their tool calls.
  */
 export function buildSessionContext(
 	entries: SessionEntry[],
@@ -488,7 +490,9 @@ export function buildSessionContext(
 ): SessionContext {
 	const path = buildSessionPath(entries, leafId, byId);
 	const { thinkingLevel, model } = getSessionContextSettings(path);
-	const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
+	const messages = normalizeToolPairing(
+		buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages),
+	);
 	return { messages, thinkingLevel, model };
 }
 

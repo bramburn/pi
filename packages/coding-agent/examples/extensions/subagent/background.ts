@@ -30,7 +30,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@bramburn/qi-coding-agent";
 
 export const BG_DIR_NAME = "subagent-bg";
 export const BG_REGISTRY_FILE = "registry.json";

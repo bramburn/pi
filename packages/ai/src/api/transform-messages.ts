@@ -274,9 +274,20 @@ export function transformMessages<TApi extends Api>(
 		return msg;
 	});
 
-	// Second pass: insert synthetic empty tool results for orphaned tool calls
-	// This preserves thinking signatures and satisfies API requirements
+	// Second pass: keep tool results adjacent to their tool calls and synthesize
+	// results for tool calls whose results never arrive. Non-result messages that
+	// interpose between a tool call and its result (user steering, re-projected
+	// compaction summaries, extension messages) are deferred until the tool call
+	// group resolves: providers reject a tool_result that does not immediately
+	// follow its tool_use (Anthropic "tool_use ids were found without
+	// tool_result blocks immediately after", MiniMax 400 (2013) "tool call
+	// result does not follow tool call"), and synthesizing before the real
+	// result arrives would duplicate the tool_result id. Calls whose results
+	// never arrive include the known checkpoint-resume class (a goal checkpoint
+	// interrupts tool execution and the resumed session has no result to append)
+	// — see "Known Issues & Recovery" in packages/coding-agent/docs/compaction.md.
 	const result: Message[] = [];
+	const deferredMessages: Message[] = [];
 	let pendingToolCalls: ToolCall[] = [];
 	let existingToolResultIds = new Set<string>();
 	const insertSyntheticToolResults = () => {
@@ -297,13 +308,25 @@ export function transformMessages<TApi extends Api>(
 			existingToolResultIds = new Set();
 		}
 	};
+	const flushDeferredMessages = () => {
+		if (deferredMessages.length > 0) {
+			result.push(...deferredMessages);
+			deferredMessages.length = 0;
+		}
+	};
+	// Close the open tool call group: synthesize results for calls that never got
+	// one, then release the messages deferred behind it.
+	const closeToolCallGroup = () => {
+		insertSyntheticToolResults();
+		flushDeferredMessages();
+	};
 
 	for (let i = 0; i < transformed.length; i++) {
 		const msg = transformed[i];
 
 		if (msg.role === "assistant") {
-			// If we have pending orphaned tool calls from a previous assistant, insert synthetic results now
-			insertSyntheticToolResults();
+			// Close any previous tool call group before a new assistant message
+			closeToolCallGroup();
 
 			// Skip errored/aborted assistant messages entirely.
 			// These are incomplete turns that shouldn't be replayed:
@@ -326,17 +349,27 @@ export function transformMessages<TApi extends Api>(
 		} else if (msg.role === "toolResult") {
 			existingToolResultIds.add(msg.toolCallId);
 			result.push(msg);
-		} else if (msg.role === "user") {
-			// User message interrupts tool flow - insert synthetic results for orphaned calls
-			insertSyntheticToolResults();
-			result.push(msg);
+			if (pendingToolCalls.length > 0 && pendingToolCalls.every((tc) => existingToolResultIds.has(tc.id))) {
+				// Every tracked tool call has its result: the group is complete and
+				// contiguous, so the deferred messages can follow it now.
+				pendingToolCalls = [];
+				existingToolResultIds = new Set();
+				flushDeferredMessages();
+			}
 		} else {
-			result.push(msg);
+			// User and other messages. While a tool call group is open, defer them
+			// until its results are placed — the results may still arrive later in
+			// the list, and this message must not separate them from their calls.
+			if (pendingToolCalls.length > 0) {
+				deferredMessages.push(msg);
+			} else {
+				result.push(msg);
+			}
 		}
 	}
 
 	// If the conversation ends with unresolved tool calls, synthesize results now.
-	insertSyntheticToolResults();
+	closeToolCallGroup();
 
 	return result;
 }

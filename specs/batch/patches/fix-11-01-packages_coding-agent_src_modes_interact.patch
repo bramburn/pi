@@ -1,0 +1,46 @@
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -2078,7 +2078,9 @@
+ 			compact: (options) => {
+ 				void (async () => {
+ 					try {
+-						const result = await this.session.compact(options?.customInstructions);
++						const result = options?.background
++							? await this.session.compactInBackground(options?.customInstructions)
++							: await this.session.compact(options?.customInstructions);
+ 						options?.onComplete?.(result);
+ 					} catch (error) {
+ 						const err = error instanceof Error ? error : new Error(String(error));
+@@ -3600,6 +3602,16 @@
+ 					} else {
+ 						this.showStatus("Auto-compaction cancelled");
+ 					}
++				} else if (
++					(event as { skipped?: boolean }).skipped ||
++					(event.errorMessage && /nothing to compact|already compacted|nothing to summarize/i.test(event.errorMessage))
++				) {
++					const skipMessage = event.errorMessage ?? "Nothing to compact";
++					if (event.reason === "manual") {
++						this.showWarning(skipMessage);
++					} else if (!event.background) {
++						this.showStatus(skipMessage);
++					}
+ 				} else if (event.result) {
+ 					const entries = this.sessionManager.buildContextEntries();
+ 					if (entries[0]?.type !== "compaction") {
+@@ -3628,7 +3640,9 @@
+ 					reportProviderError({
+ 						message: event.errorMessage,
+ 						stopReason: "compaction_error",
+ 					});
+-					if (event.reason === "manual") {
++					if (event.reason === "manual" || event.background) {
++						this.showWarning(event.errorMessage);
++					} else {
+ 						this.showError(event.errorMessage);
+-					} else {
+-						this.chatContainer.addChild(new Spacer(1));
+-						this.chatContainer.addChild(new Text(theme.fg("error", event.errorMessage), 1, 0));
+ 					}
+ 				}
+ 				if (!event.background) {

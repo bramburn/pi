@@ -1,0 +1,32 @@
+--- a/scripts/fork-publish-rename.mjs
++++ b/scripts/fork-publish-rename.mjs
+@@ -20,8 +20,8 @@
+ 	process.exit(2);
+ }
+ 
+-const WORKSPACE_PREFIX = "@earendil-works/pi-";
+-const FORK_PREFIX = "@bramburn/pi-";
++const WORKSPACE_PREFIX = "@earendil-works/pi-";
++const FORK_PREFIX = "@bramburn/qi-";
+ const UPSTREAM_REPO_URL = "git+https://github.com/earendil-works/pi.git";
+ const FORK_REPO_URL = "git+https://github.com/bramburn/pi.git";
+ 
+@@ -45,12 +45,14 @@
+ 	process.exit(2);
+ }
+ 
+-if (!pkg.name?.startsWith(WORKSPACE_PREFIX)) {
+-	console.error(`name "${pkg.name}" is not under ${WORKSPACE_PREFIX}; aborting`);
++if (!pkg.name?.startsWith(WORKSPACE_PREFIX) && !pkg.name?.startsWith(FORK_PREFIX)) {
++	console.error(`name "${pkg.name}" is not under ${WORKSPACE_PREFIX} or ${FORK_PREFIX}; aborting`);
+ 	process.exit(2);
+ }
+ 
+ const oldName = pkg.name;
+-const newName = FORK_PREFIX + oldName.slice(WORKSPACE_PREFIX.length);
++const newName = oldName.startsWith(WORKSPACE_PREFIX)
++	? FORK_PREFIX + oldName.slice(WORKSPACE_PREFIX.length)
++	: oldName;
+ pkg.name = newName;
+ 
+ // Rewrite workspace deps in every dep section. Skips registry aliases

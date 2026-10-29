@@ -1,4 +1,4 @@
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@bramburn/qi-ai";
 import { mkdirSync, rmSync } from "fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Args } from "../src/cli/args.ts";

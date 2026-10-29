@@ -1,6 +1,6 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Transport } from "@earendil-works/pi-ai";
-import type { TerminalCapabilities, TuiMode } from "@earendil-works/pi-tui";
+import type { ThinkingLevel } from "@bramburn/qi-agent-core";
+import type { Transport } from "@bramburn/qi-ai";
+import type { TerminalCapabilities, TuiMode } from "@bramburn/qi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -9,12 +9,15 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { stripBom } from "../utils/text.ts";
 import { MINIMAX_PROFILE } from "./deepseek-harness-profile.ts";
+import { DEFAULT_SUBAGENT_SETTINGS } from "./defaults.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 20000
+	summaryMaxTokens?: number; // default: 16384 - absolute ceiling on summariser output tokens
+	summaryThinking?: ThinkingLevel; // default: "off" - opt-in reasoning for the summariser
 }
 
 /**
@@ -161,6 +164,33 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+/** Settings for the native subagent capability (`subagent.*`). */
+export interface SubagentSettings {
+	/** Master switch for the built-in `subagent` tool. Default true. */
+	enabled?: boolean;
+	/** Max subagents running at once in parallel mode. Default 4. */
+	maxConcurrent?: number;
+	/** Max tasks accepted in one parallel `tasks: [...]` call. Default 8. */
+	maxParallelTasks?: number;
+	/** Base directory for experiment worktrees. Default ".worktrees". */
+	worktreeBase?: string;
+	/** Gates the experiment tools, registry, research mode, and dashboard. Default false. */
+	enableExperiments?: boolean;
+	/** Same-error streak that triggers Research Mode. Default 3. */
+	researchModeTriggerCount?: number;
+	/** Max subagent spawns allowed per session (inline + background combined). Default 64. */
+	maxTotalSpawns?: number;
+	/** Per-tool-call wall-clock budget inside a child subagent. Default 300_000 (5 min). */
+	toolTimeoutMs?: number;
+	/** Max assistant turns per child subagent before the parent kills the run. Default 30 (REQ-D03). */
+	maxTurns?: number;
+	/**
+	 * Deepest delegation level allowed, where 0 is the top-level session.
+	 * Default 1 — one level of subagents, no grandchildren. 0 forbids delegation.
+	 */
+	maxDepth?: number;
+}
+
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
@@ -190,6 +220,12 @@ export interface Settings {
 	modelThinkingLevels?: Record<string, ThinkingLevel>; // per-model default thinking level overrides keyed by "provider/modelId"
 	/** New-session model preference; global-only. */
 	newSessionModel?: NewSessionModelPreference;
+	/**
+	 * Model used for context summarisation (manual /compact, auto-compaction,
+	 * branch summaries): a catalog model reference. Absent = use the session's
+	 * current model. Global-only; configured from /settings → Compaction model.
+	 */
+	compactionModel?: { provider: string; modelId: string };
 	/** Most recently selected model (provider + modelId). Updated on every
 	 * setModel / cycleModel call. Global-only. */
 	lastUsedModel?: { provider: string; modelId: string };
@@ -201,6 +237,7 @@ export interface Settings {
 	deepseekHarness?: DeepseekHarnessSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
+	subagent?: SubagentSettings;
 	hideThinkingBlock?: boolean;
 	showCacheMissNotices?: boolean; // default: false - show transcript notices for significant prompt-cache misses
 	externalEditor?: string; // Command for Ctrl+G external editor; takes precedence over VISUAL/EDITOR
@@ -837,6 +874,21 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getCompactionModel(): { provider: string; modelId: string } | undefined {
+		return this.settings.compactionModel;
+	}
+
+	/**
+	 * Set (or, with `undefined`, clear) the model used for context
+	 * summarisation. Clearing restores the default: the session's current
+	 * model. Global-only.
+	 */
+	setCompactionModel(model: { provider: string; modelId: string } | undefined): void {
+		this.globalSettings.compactionModel = model;
+		this.markModified("compactionModel");
+		this.save();
+	}
+
 	getLastUsedModel(): { provider: string; modelId: string } | undefined {
 		const lastUsed = this.settings.lastUsedModel;
 		if (!lastUsed) return undefined;
@@ -960,6 +1012,14 @@ export class SettingsManager {
 
 	getCompactionReserveTokens(): number {
 		return this.settings.compaction?.reserveTokens ?? 16384;
+	}
+
+	getCompactionSummaryMaxTokens(): number {
+		return this.settings.compaction?.summaryMaxTokens ?? 16384;
+	}
+
+	getCompactionSummaryThinking(): ThinkingLevel {
+		return this.settings.compaction?.summaryThinking ?? "off";
 	}
 
 	getCompactionKeepRecentTokens(): number {
@@ -1345,7 +1405,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return process.env.QI_CLEAR_ON_SHRINK === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1460,7 +1520,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? process.env.QI_HARDWARE_CURSOR === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
@@ -1533,5 +1593,78 @@ export class SettingsManager {
 		this.globalSettings.warnings = { ...warnings };
 		this.markModified("warnings");
 		this.save();
+	}
+
+	getSubagentEnabled(): boolean {
+		const value = this.settings.subagent?.enabled;
+		return typeof value === "boolean" ? value : DEFAULT_SUBAGENT_SETTINGS.enabled;
+	}
+
+	getSubagentMaxConcurrent(): number {
+		const value = this.settings.subagent?.maxConcurrent;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxConcurrent;
+	}
+
+	getSubagentMaxParallelTasks(): number {
+		const value = this.settings.subagent?.maxParallelTasks;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxParallelTasks;
+	}
+
+	getSubagentWorktreeBase(): string {
+		const value = this.settings.subagent?.worktreeBase;
+		return typeof value === "string" && value.trim() !== "" ? value : DEFAULT_SUBAGENT_SETTINGS.worktreeBase;
+	}
+
+	getSubagentEnableExperiments(): boolean {
+		const value = this.settings.subagent?.enableExperiments;
+		return typeof value === "boolean" ? value : DEFAULT_SUBAGENT_SETTINGS.enableExperiments;
+	}
+
+	getSubagentResearchModeTriggerCount(): number {
+		const value = this.settings.subagent?.researchModeTriggerCount;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(1, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.researchModeTriggerCount;
+	}
+
+	getSubagentMaxTotalSpawns(): number {
+		const value = this.settings.subagent?.maxTotalSpawns;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxTotalSpawns;
+	}
+
+	getSubagentToolTimeoutMs(): number {
+		const value = this.settings.subagent?.toolTimeoutMs;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.toolTimeoutMs;
+	}
+
+	/**
+	 * Per-child assistant turn cap (REQ-D03). 0 disables the cap; the default is
+	 * DEFAULT_SUBAGENT_SETTINGS.maxTurns.
+	 */
+	getSubagentMaxTurns(): number {
+		const value = this.settings.subagent?.maxTurns;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxTurns;
+	}
+
+	/**
+	 * Deepest delegation level allowed, where 0 is the top-level session.
+	 * Default 1. Unlike maxTotalSpawns this crosses the process boundary,
+	 * because the depth is handed to each child on argv.
+	 */
+	getSubagentMaxDepth(): number {
+		const value = this.settings.subagent?.maxDepth;
+		return typeof value === "number" && Number.isFinite(value)
+			? Math.max(0, Math.floor(value))
+			: DEFAULT_SUBAGENT_SETTINGS.maxDepth;
 	}
 }

@@ -8,6 +8,7 @@ import {
 	getOpenRouterThinkingLevelMap,
 	type OpenRouterReasoningMetadata,
 } from "./openrouter-reasoning-options.ts";
+import { shouldIncludeOpenRouterModel } from "./openrouter-model-filter.ts";
 import {
 	CLOUDFLARE_AI_GATEWAY_ANTHROPIC_BASE_URL,
 	CLOUDFLARE_AI_GATEWAY_COMPAT_BASE_URL,
@@ -1108,8 +1109,9 @@ async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 		const models: Model<any>[] = [];
 
 		for (const model of data.data ?? []) {
-			// Only include models that support tools
-			if (!model.supported_parameters?.includes("tools")) continue;
+			// Only include models that support tools (allowlist covers verified
+			// tool-capable models whose OpenRouter metadata lags behind).
+			if (!shouldIncludeOpenRouterModel(model)) continue;
 
 			// Parse provider from model ID
 			let provider: KnownProvider = "openrouter";

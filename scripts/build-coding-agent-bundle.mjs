@@ -87,7 +87,7 @@ function commonBuildOptions() {
 		absWorkingDir: repoRoot,
 		banner,
 		bundle: true,
-		define: { PI_BUNDLED_NODE: "true" },
+		define: { QI_BUNDLED_NODE: "true" },
 		external: ["@silvia-odwyer/photon-node", "https-proxy-agent"],
 		format: "esm",
 		legalComments: "none",

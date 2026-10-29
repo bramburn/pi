@@ -1,0 +1,5 @@
+{
+	"_doc": "Allowlist for scripts/check-no-earendil.mjs (run via `bun run check:qi-brand`). ignoreFiles: repo-relative file paths skipped entirely (lockfiles, generated artifacts, immutable historical specs). ignoreLinePatterns: regular expressions tested against '<file>:<line text>' — a finding whose file:line string matches is not reported. Patterns must stay as narrow as possible: they are a carve-out, not a backlog. Known entries: 'check-no-earendil\\.mjs' lets lines that reference the guard script itself (e.g. the package.json invocation of node scripts/check-no-earendil.mjs) pass — the guard's own invocation necessarily contains its earendil-named filename, so without this carve-out the guard flags itself and only itself is excused, never other earendil references.",
+	"ignoreFiles": [],
+	"ignoreLinePatterns": ["check-no-earendil\\.mjs"]
+}

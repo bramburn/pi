@@ -7,8 +7,8 @@
  *   pi -e ./bash-spawn-hook.ts
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashTool } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@bramburn/qi-coding-agent";
+import { createBashTool } from "@bramburn/qi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();
@@ -17,7 +17,7 @@ export default function (pi: ExtensionAPI) {
 		spawnHook: ({ command, cwd, env }) => ({
 			command: `source ~/.profile\n${command}`,
 			cwd,
-			env: { ...env, PI_SPAWN_HOOK: "1" },
+			env: { ...env, QI_SPAWN_HOOK: "1" },
 		}),
 	});
 

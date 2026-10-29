@@ -137,10 +137,13 @@ if (!platform || !arch || !existsSync(binaryPath)) {
 		if (skipOnHeadless(t)) return;
 
 		// No image on the clipboard to start with. hasImage returns
-		// false and getImageBinary returns an empty array.
+		// false and getImageBinary returns an empty Buffer (Uint8Array).
 		assert.equal(await clipboard.hasImage(), false);
 		const empty = await clipboard.getImageBinary();
-		assert.ok(Array.isArray(empty), "getImageBinary must return an array");
+		assert.ok(
+			empty instanceof Uint8Array,
+			"getImageBinary must return a Buffer/Uint8Array",
+		);
 		assert.equal(empty.length, 0, "getImageBinary must be empty when no image is on the clipboard");
 
 		// Writing text must not flip hasImage. This guards the TS-side

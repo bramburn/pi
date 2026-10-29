@@ -27,9 +27,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentToolResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
-import { StringEnum } from "@earendil-works/pi-ai";
+import type { AgentToolResult, ThinkingLevel } from "@bramburn/qi-agent-core";
+import type { Message } from "@bramburn/qi-ai";
+import { StringEnum } from "@bramburn/qi-ai";
 import {
 	CONFIG_DIR_NAME,
 	type ExtensionAPI,
@@ -41,8 +41,8 @@ import {
 	startSubagentTask,
 	type ThemeColor,
 	withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
-import { Container, Key, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+} from "@bramburn/qi-coding-agent";
+import { Container, Key, Markdown, Spacer, Text } from "@bramburn/qi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
 import { getRegistry as getBackgroundRegistry } from "./background.ts";

@@ -1,0 +1,31 @@
+--- a/specs/subagent/requirements.md
++++ b/specs/subagent/requirements.md
+@@ -24,7 +24,7 @@
+ | **REQ-D05** | Tool description states when-not-to-delegate and the output contract | P2 | GAP | [delegation](features/delegation/spec.md) §4 |
+ | **REQ-O01** | Decide `buildStatusInjection`: wire or delete | P2 | GAP | [observability](features/observability/spec.md) §2 |
+ | **REQ-O02** | Inline runs inspectable while running | P2 | GAP | [observability](features/observability/spec.md) §3 |
+-| **REQ-O03** | Decide durable completion records: wire or delete | P2 | GAP | [durability](features/durability/spec.md) §3 |
++| **REQ-O03** | Durable completion records and startup replay | P2 | **IMPLEMENTED** | [durability](features/durability/spec.md) §3 |
+ | **REQ-C04** | Documented concurrency scope matches enforcement | P2 | GAP | [concurrency](features/concurrency/spec.md) §2.6 |
+ | **REQ-L01** | Session lease needs a time-based expiry | P2 | GAP | [lifecycle](features/lifecycle/spec.md) §6 |
+ | **REQ-C01** | Parallel admission gates on `concurrentSafe` | P2 | GAP | [concurrency](features/concurrency/spec.md) §2.3 |
+@@ -202,17 +202,13 @@
+ 
+-## REQ-O03 — Decide durable completion records: wire or delete (P2, GAP)
++## REQ-O03 — Durable completion records and startup replay (P2, IMPLEMENTED)
+ 
+ Detail: [durability §3](features/durability/spec.md).
+ 
+-> `result-record.ts` (453 lines, 27 exports) implements a claim-gated durable completion-record
+-> store with **zero call sites**, while `background.ts:9-13` and `:20-26` document the replay
+-> protocol, claim lock, attempt cap and escalation as shipped.
+-
+-**Audit recommendation: WIRE.** `runDetached` writes the terminal row before it notifies, and
+-`isOrphanCandidate` admits only `running`/`pending`, so a parent killed in that window loses the
+-notification permanently — reachable by closing a laptop mid-turn. Wiring costs M and needs its
+-own test suite. Deleting is the user's call; if taken, the two doc comments must go with it.
++> Shipped. `notifySettled` (`background.ts:1049-1081`) calls `recordSettle` (`:1129-1182`) under
++> `withLock` before `onSettled` fires, folding streaks into `failure-counters.json` and writing a
++> claimed record to `replay/<taskId>.json`, then calling `completeReplayDelivery` (`:1194-1206`)
++> on return. `claimReplayDeliveries` (`:1219-1267`) replays unclaimed records at session startup
++> (`agent-session.ts:569,590`). Covered by `test/subagent-bg-replay.test.ts`.

@@ -1,0 +1,61 @@
+--- a/packages/coding-agent/src/core/subagent/worktree.ts
++++ b/packages/coding-agent/src/core/subagent/worktree.ts
+@@ -201,18 +201,29 @@
+  * Runs under the repo worktree lock (see `createWorktree`), so it cannot race
+  * a concurrent create or prune. Throws `WorktreeLockError` on lock contention
+  * timeout.
+  */
+-export async function removeWorktree(repoRoot: string, worktreePath: string, force: boolean): Promise<GitResult> {
+-	return withWorktreeLock(repoRoot, () => removeWorktreeLocked(repoRoot, worktreePath, force));
++export async function removeWorktree(
++	repoRoot: string,
++	worktreePath: string,
++	force: boolean,
++	deleteBranch: boolean = true,
++): Promise<GitResult> {
++	return withWorktreeLock(repoRoot, () => removeWorktreeLocked(repoRoot, worktreePath, force, deleteBranch));
+ }
+ 
+-async function removeWorktreeLocked(repoRoot: string, worktreePath: string, force: boolean): Promise<GitResult> {
++export async function removeWorktreeLocked(
++	repoRoot: string,
++	worktreePath: string,
++	force: boolean,
++	deleteBranch: boolean = true,
++): Promise<GitResult> {
+ 	const args = ["worktree", "remove", worktreePath];
+ 	if (force) args.push("--force");
+ 	const res = await git(args, repoRoot);
+ 	if (res.exitCode !== 0) return res;
++	if (!deleteBranch) return res;
+ 
+ 	const branch = `exp/${basename(worktreePath)}`;
+ 	const branchCheck = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], repoRoot);
+ 	if (branchCheck.exitCode !== 0) return res;
+ 	const deleted = await git(["branch", "-D", branch], repoRoot);
+@@ -225,6 +236,24 @@
+ 	return res;
+ }
+ 
++/**
++ * Composite discard mutation: remove the worktree, prune stale worktree admin
++ * dirs, and (when `keepBranch` is false) delete `exp/<slug>` — all inside a
++ * single repo-lock acquisition so no concurrent `createWorktree` can interleave
++ * between remove and prune.
++ */
++export async function discardWorktree(
++	repoRoot: string,
++	worktreePath: string,
++	opts: { force: boolean; keepBranch: boolean },
++): Promise<GitResult> {
++	return withWorktreeLock(repoRoot, async () => {
++		const removed = await removeWorktreeLocked(repoRoot, worktreePath, opts.force, !opts.keepBranch);
++		if (removed.exitCode !== 0 || removed.complete === false) return removed;
++		await git(["worktree", "prune"], repoRoot);
++		return removed;
++	});
++}
++
+ /**
+  * Drop admin data for worktrees whose directories are gone. Runs under the
+  * repo worktree lock: an unlocked prune could delete the admin directory of a

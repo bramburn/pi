@@ -5,8 +5,8 @@
  * and provides a transformer to convert them to LLM-compatible messages.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@bramburn/qi-agent-core";
+import type { ImageContent, Message, TextContent, UserMessage } from "@bramburn/qi-ai";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -73,7 +73,7 @@ export interface CompactionSummaryMessage {
 }
 
 // Extend CustomAgentMessages via declaration merging
-declare module "@earendil-works/pi-agent-core" {
+declare module "@bramburn/qi-agent-core" {
 	interface CustomAgentMessages {
 		bashExecution: BashExecutionMessage;
 		custom: CustomMessage;
@@ -141,6 +141,84 @@ export function createCustomMessage(
 		details,
 		timestamp: new Date(timestamp).getTime(),
 	};
+}
+
+/**
+ * Reorder projected messages so every toolResult directly follows the assistant
+ * message that issued its tool call. Providers reject sequences where a
+ * user-role message (e.g. a re-projected compaction summary persisted between a
+ * tool call and its result) separates a tool call from its result — "tool call
+ * result does not follow tool call", MiniMax 400 (2013). Interposed messages
+ * are moved after the tool result group instead.
+ *
+ * A toolResult whose tool call is no longer in the message list (the
+ * compaction cut dropped its assistant message) is converted to a plain user
+ * message: a tool_result block without a matching tool_use is equally invalid,
+ * but the content is still worth keeping in context.
+ */
+export function normalizeToolPairing(messages: AgentMessage[]): AgentMessage[] {
+	const out: AgentMessage[] = [];
+	let openCallIds: Set<string> | null = null;
+	let deferred: AgentMessage[] = [];
+
+	const closeGroup = (): void => {
+		openCallIds = null;
+		if (deferred.length > 0) {
+			out.push(...deferred);
+			deferred = [];
+		}
+	};
+
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			closeGroup();
+			out.push(message);
+			const callIds = new Set<string>();
+			for (const block of message.content) {
+				if (block.type === "toolCall") {
+					callIds.add(block.id);
+				}
+			}
+			if (callIds.size > 0) {
+				openCallIds = callIds;
+			}
+			continue;
+		}
+		if (message.role === "toolResult") {
+			if (openCallIds?.has(message.toolCallId)) {
+				out.push(message);
+				openCallIds.delete(message.toolCallId);
+				if (openCallIds.size === 0) {
+					closeGroup();
+				}
+				continue;
+			}
+			const orphaned: UserMessage = {
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: `Tool result for ${message.toolName} (its tool call is no longer in the conversation):`,
+					},
+					...message.content,
+				],
+				timestamp: message.timestamp,
+			};
+			if (openCallIds) {
+				deferred.push(orphaned);
+			} else {
+				out.push(orphaned);
+			}
+			continue;
+		}
+		if (openCallIds) {
+			deferred.push(message);
+		} else {
+			out.push(message);
+		}
+	}
+	closeGroup();
+	return out;
 }
 
 /**

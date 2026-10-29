@@ -1,0 +1,92 @@
+--- a/packages/coding-agent/src/package-manager-cli.ts
++++ b/packages/coding-agent/src/package-manager-cli.ts
+@@ -47,12 +47,13 @@
+ 
+ type UpdateTarget = { type: "all" } | { type: "self" } | { type: "extensions"; source?: string } | { type: "models" };
+ 
+-const DEFAULT_INSTALLER_API_BASE = "https://pi.dev/api/installer/releases";
++// TODO(deferred-porting): severed upstream installer releases endpoint (ADR-0002 / D4).
++const DEFAULT_INSTALLER_API_BASE = "";
+ const MANAGED_INSTALL_MARKER = "managed-install.json";
+ const MANAGED_RELEASE_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+ 
+ function getActiveManagedInstallRoot(): string | undefined {
+-	const configuredRoot = process.env.PI_MANAGED_INSTALL_ROOT?.trim();
++	const configuredRoot = process.env.QI_MANAGED_INSTALL_ROOT?.trim();
+ 	if (!configuredRoot) return undefined;
+ 
+ 	const managedRoot = resolve(configuredRoot);
+@@ -67,7 +68,7 @@
+ 			layout?: unknown;
+ 			schemaVersion?: unknown;
+ 		};
+-		if (marker.kind !== "pi-managed-install" || marker.schemaVersion !== 1 || marker.layout !== "releases-v1") {
++		if (marker.kind !== "qi-managed-install" || marker.schemaVersion !== 1 || marker.layout !== "releases-v1") {
+ 			throw new Error();
+ 		}
+ 	} catch {
+@@ -177,10 +178,13 @@
+ 	let stageDir: string | undefined;
+ 	try {
+ 		cleanupManagedStaging(managedRoot);
+-		const installerApiBase = (process.env.PI_INSTALLER_API_BASE?.trim() || DEFAULT_INSTALLER_API_BASE).replace(
++		const installerApiBase = (process.env.QI_INSTALLER_API_BASE?.trim() || DEFAULT_INSTALLER_API_BASE).replace(
+ 			/\/+$/,
+ 			"",
+ 		);
++		if (!installerApiBase) {
++			throw new Error(`Managed ${APP_NAME} self-update is disabled: no installer release endpoint is configured.`);
++		}
+ 		const releaseUrl = `${installerApiBase}/${encodeURIComponent(version)}`;
+ 		const stagingRoot = join(managedRoot, "staging");
+ 		const releasesRoot = join(managedRoot, "releases");
+@@ -259,7 +263,7 @@
+ 		case "remove":
+ 			return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
+ 		case "update":
+-			return `${APP_NAME} update [source|self|pi] [--self|--extensions|--models|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
++			return `${APP_NAME} update [source|self|qi] [--self|--extensions|--models|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
+ 		case "list":
+ 			return `${APP_NAME} list [--approve|--no-approve]`;
+ 	}
+@@ -323,24 +327,24 @@
+ 			console.log(`${chalk.bold("Usage:")}
+   ${getPackageCommandUsage("update")}
+ 
+-Update pi, installed packages, or model catalogs.
++Update qi, installed packages, or model catalogs.
+ 
+ Options:
+-  --self                  Update pi only (default when no target is given)
++  --self                  Update qi only (default when no target is given)
+   --extensions            Update installed packages only
+   --models                Refresh model catalogs only
+-  --all                   Update pi and installed packages
++  --all                   Update qi and installed packages
+   --extension <source>    Update one package only
+   -a, --approve           Trust project-local files for this command
+   -na, --no-approve       Ignore project-local files for this command
+-  --force                 Reinstall pi even if the current version is latest
++  --force                 Reinstall qi even if the current version is latest
+ 
+ Short forms:
+-  ${APP_NAME} update                Update pi only
+-  ${APP_NAME} update --all          Update pi and all extensions
++  ${APP_NAME} update                Update qi only
++  ${APP_NAME} update --all          Update qi and all extensions
+   ${APP_NAME} update --models       Refresh model catalogs only
+   ${APP_NAME} update <source>       Update one package
+-  ${APP_NAME} update pi             Update pi only (self works as alias to pi)
++  ${APP_NAME} update qi             Update qi only (self works as alias to qi)
+ `);
+ 			return;
+ 
+@@ -512,7 +516,7 @@
+ 			}
+ 			updateTarget = { type: "extensions", source: extensionFlagSource };
+ 		} else if (source) {
+-			const sourceIsSelf = source === "self" || source === "pi";
++			const sourceIsSelf = source === "self" || source === "qi";
+ 			if (sourceIsSelf) {
+ 				updateTarget = extensionsFlag ? { type: "all" } : { type: "self" };
+ 			} else {

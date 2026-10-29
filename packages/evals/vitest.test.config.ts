@@ -21,6 +21,7 @@ export default mergeConfig(
 		resolve: {
 			alias: [
 				{ find: /^@earendil-works\/pi-coding-agent$/, replacement: workspaceSourcePaths.codingAgentIndex },
+				{ find: /^@bramburn\/qi-coding-agent$/, replacement: workspaceSourcePaths.codingAgentIndex },
 				// Bypass the published `source` export condition by aliasing to the dist file.
 				{ find: /^@vitest-evals\/core$/, replacement: vitestEvalsCoreIndex },
 				{ find: /^vitest-evals$/, replacement: vitestEvalsIndex },

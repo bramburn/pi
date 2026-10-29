@@ -1,4 +1,4 @@
-import { bedrockProviderModule } from "@earendil-works/pi-ai/bedrock-provider";
-import { setBedrockProviderModule } from "@earendil-works/pi-ai/compat";
+import { bedrockProviderModule } from "@bramburn/qi-ai/bedrock-provider";
+import { setBedrockProviderModule } from "@bramburn/qi-ai/compat";
 
 setBedrockProviderModule(bedrockProviderModule);

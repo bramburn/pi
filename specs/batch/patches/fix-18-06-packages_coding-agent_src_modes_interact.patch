@@ -1,0 +1,62 @@
+--- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
+@@ -1162,7 +1162,7 @@
+ 	async run(): Promise<void> {
+ 		await this.init();
+ 
+-		if (!process.env.PI_OFFLINE) {
++		if (!process.env.QI_OFFLINE) {
+ 			const controller = new AbortController();
+ 			const timeout = setTimeout(() => controller.abort(), 15_000);
+ 			void refreshModelCatalogs(this.session.modelRuntime, controller.signal)
+@@ -1265,7 +1265,7 @@
+ 	}
+ 
+ 	private async checkForPackageUpdates(): Promise<string[]> {
+-		if (process.env.PI_OFFLINE) {
++		if (process.env.QI_OFFLINE) {
+ 			return [];
+ 		}
+ 
+@@ -1357,24 +1357,10 @@
+ 		return undefined;
+ 	}
+ 
+-	private reportInstallTelemetry(version: string): void {
+-		if (process.env.PI_OFFLINE) {
+-			return;
+-		}
+-
+-		if (!isInstallTelemetryEnabled(this.settingsManager)) {
+-			return;
+-		}
+-
+-		void fetch(`https://pi.dev/api/report-install?version=${encodeURIComponent(version)}`, {
+-			headers: {
+-				"User-Agent": getPiUserAgent(version),
+-			},
+-			signal: AbortSignal.timeout(5000),
+-		})
+-			.then(() => undefined)
+-			.catch(() => undefined);
++	private reportInstallTelemetry(_version: string): void {
++		// TODO(deferred-porting): severed upstream install telemetry endpoint (ADR-0002 / D4).
++		void isInstallTelemetryEnabled;
++		void getPiUserAgent;
+ 	}
+ 
+ 	private getMarkdownThemeWithSettings(): MarkdownTheme {
+@@ -4640,11 +4626,8 @@
+ 	showNewVersionNotification(release: LatestPiRelease): void {
+ 		const action = theme.fg("accent", `${APP_NAME} update`);
+ 		const updateInstruction = theme.fg("muted", `New version ${release.version} is available. Run `) + action;
+-		const changelogUrl = "https://pi.dev/changelog";
+-		const changelogLink = getCapabilities().hyperlinks
+-			? hyperlink(theme.fg("accent", changelogUrl), changelogUrl)
+-			: theme.fg("accent", changelogUrl);
+-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
++		// TODO(deferred-porting): severed upstream changelog URL (ADR-0002 / D4).
++		const changelogLine = theme.fg("muted", "Run /changelog to view local release notes.");
+ 		const note = release.note?.trim();
+ 
+ 		this.chatContainer.addChild(new Spacer(1));

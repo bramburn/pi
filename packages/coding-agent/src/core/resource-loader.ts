@@ -15,6 +15,7 @@ import {
 	createExtensionRuntime,
 	loadExtensionFromFactory,
 	loadExtensionsCached,
+	resolveExtensionPaths,
 } from "./extensions/loader.ts";
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
 import { findGitPaths } from "./footer-data-provider.ts";
@@ -443,15 +444,21 @@ export class DefaultResourceLoader implements ResourceLoader {
 				metadataByPath.set(r.path, { source: "cli", scope: "temporary", origin: "top-level" });
 			}
 		}
+		this.registerDefaultMetadata(metadataByPath);
 
 		const cliEnabledExtensions = getEnabledPaths(cliExtensionPaths.extensions);
 		const cliEnabledSkills = getEnabledPaths(cliExtensionPaths.skills);
 		const cliEnabledPrompts = getEnabledPaths(cliExtensionPaths.prompts);
 		const cliEnabledThemes = getEnabledPaths(cliExtensionPaths.themes);
 
-		const extensionPaths = this.noExtensions
+		const extensionInputPaths = this.noExtensions
 			? cliEnabledExtensions
-			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
+			: [
+					...this.mergePaths(cliEnabledExtensions, enabledExtensions),
+					...this.getUnsurfacedDefaultPaths(this.getDefaultExtensionPaths(), resolvedPaths.extensions),
+				];
+
+		const extensionPaths = resolveExtensionPaths(extensionInputPaths, this.cwd);
 
 		const extensionsResult = await this.loadFinalExtensionSet(extensionPaths, preTrustExtensions);
 		for (const p of this.additionalExtensionPaths) {
@@ -467,7 +474,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		const skillPaths = this.noSkills
 			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
-			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
+			: this.mergePaths(
+					[
+						...cliEnabledSkills,
+						...enabledSkills,
+						...this.getUnsurfacedDefaultPaths(this.getDefaultSkillPaths(), resolvedPaths.skills),
+					],
+					this.additionalSkillPaths,
+				);
 
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
@@ -482,7 +496,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		const promptPaths = this.noPromptTemplates
 			? this.mergePaths(cliEnabledPrompts, this.additionalPromptTemplatePaths)
-			: this.mergePaths([...cliEnabledPrompts, ...enabledPrompts], this.additionalPromptTemplatePaths);
+			: this.mergePaths(
+					[
+						...cliEnabledPrompts,
+						...enabledPrompts,
+						...this.getUnsurfacedDefaultPaths(this.getDefaultPromptPaths(), resolvedPaths.prompts),
+					],
+					this.additionalPromptTemplatePaths,
+				);
 
 		this.lastPromptPaths = promptPaths;
 		this.updatePromptsFromPaths(promptPaths, metadataByPath);
@@ -501,7 +522,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		const themePaths = this.noThemes
 			? this.mergePaths(cliEnabledThemes, this.additionalThemePaths)
-			: this.mergePaths([...cliEnabledThemes, ...enabledThemes], this.additionalThemePaths);
+			: this.mergePaths(
+					[
+						...cliEnabledThemes,
+						...enabledThemes,
+						...this.getUnsurfacedDefaultPaths(this.getDefaultThemePaths(), resolvedPaths.themes),
+					],
+					this.additionalThemePaths,
+				);
 
 		this.lastThemePaths = themePaths;
 		this.updateThemesFromPaths(themePaths, metadataByPath);
@@ -553,9 +581,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 		});
 		const enabledExtensions = resolvedPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
 		const cliEnabledExtensions = cliExtensionPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
-		const extensionPaths = this.noExtensions
+		const extensionInputPaths = this.noExtensions
 			? cliEnabledExtensions
-			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
+			: [
+					...this.mergePaths(cliEnabledExtensions, enabledExtensions),
+					...this.getUnsurfacedDefaultPaths(this.getDefaultExtensionPaths(), resolvedPaths.extensions),
+				];
+		const extensionPaths = resolveExtensionPaths(extensionInputPaths, this.cwd);
 		const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
 		if (!options.includeInlineFactories) {
 			return extensionsResult;
@@ -569,6 +601,129 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	private resolveExtensionLoadPath(path: string): string {
 		return resolvePath(path, this.cwd, { normalizeUnicodeSpaces: true });
+	}
+	/**
+	 * Default project/user extension directories, in precedence order.
+	 *
+	 * Project directories are only returned when project trust is active.
+	 * Non-existent directories are skipped so `loadExtensionsCached` never gets a
+	 * missing path (which would surface as a load error instead of a silent skip).
+	 */
+	private getDefaultExtensionPaths(): string[] {
+		const paths: string[] = [];
+		const projectExtDir = join(this.cwd, CONFIG_DIR_NAME, "extensions");
+		if (this.settingsManager.isProjectTrusted() && existsSync(projectExtDir)) {
+			paths.push(projectExtDir);
+		}
+		const userExtDir = join(this.agentDir, "extensions");
+		if (existsSync(userExtDir)) {
+			paths.push(userExtDir);
+		}
+		return paths;
+	}
+
+	/**
+	 * Default project/user skill directories, in precedence order.
+	 *
+	 * Mirrors `getDefaultExtensionPaths`: project scope is gated on trust, missing
+	 * directories are skipped (though `loadSkills` also tolerates missing dirs).
+	 */
+	private getDefaultSkillPaths(): string[] {
+		const paths: string[] = [];
+		const projectSkillDir = join(this.cwd, CONFIG_DIR_NAME, "skills");
+		if (this.settingsManager.isProjectTrusted() && existsSync(projectSkillDir)) {
+			paths.push(projectSkillDir);
+		}
+		const userSkillDir = join(this.agentDir, "skills");
+		if (existsSync(userSkillDir)) {
+			paths.push(userSkillDir);
+		}
+		return paths;
+	}
+
+	/** Default prompt directories, in precedence order. */
+	private getDefaultPromptPaths(): string[] {
+		const paths: string[] = [];
+		const projectPromptsDir = join(this.cwd, CONFIG_DIR_NAME, "prompts");
+		if (this.settingsManager.isProjectTrusted() && existsSync(projectPromptsDir)) {
+			paths.push(projectPromptsDir);
+		}
+		const userPromptsDir = join(this.agentDir, "prompts");
+		if (existsSync(userPromptsDir)) {
+			paths.push(userPromptsDir);
+		}
+		return paths;
+	}
+
+	/** Default theme directories, in precedence order. */
+	private getDefaultThemePaths(): string[] {
+		const paths: string[] = [];
+		const projectThemesDir = join(this.cwd, CONFIG_DIR_NAME, "themes");
+		if (this.settingsManager.isProjectTrusted() && existsSync(projectThemesDir)) {
+			paths.push(projectThemesDir);
+		}
+		const userThemesDir = join(this.agentDir, "themes");
+		if (existsSync(userThemesDir)) {
+			paths.push(userThemesDir);
+		}
+		return paths;
+	}
+
+	/**
+	 * Default directories the package manager did not surface at all.
+	 *
+	 * `DefaultPackageManager.resolve()` already auto-discovers these directories and
+	 * applies settings overrides (e.g. `-skills/skip-skill`), canonical dedupe, and
+	 * precedence sorting on the collected files. Re-adding a directory it already
+	 * reported would bypass those decisions: a disabled file would load again and a
+	 * symlinked alias would load a second copy. Only directories with no surfaced
+	 * resource are kept, so the defaults act purely as a fallback. The check runs
+	 * against the unfiltered resolved list (disabled entries included) and matches
+	 * both raw and canonical forms so symlinked directories and files are covered.
+	 */
+	private getUnsurfacedDefaultPaths(defaultDirs: string[], resolved: ResolvedResource[]): string[] {
+		const isUnder = (child: string, root: string): boolean => {
+			if (child === root) return true;
+			return child.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+		};
+		const forms = (p: string): string[] => {
+			const canonical = canonicalizePath(p);
+			return canonical === p ? [p] : [p, canonical];
+		};
+
+		return defaultDirs.filter(
+			(dir) =>
+				!resolved.some((entry) => {
+					const entryForms = forms(this.resolveResourcePath(entry.path));
+					return forms(dir).some((dirForm) => entryForms.some((entryForm) => isUnder(entryForm, dirForm)));
+				}),
+		);
+	}
+
+	/**
+	 * Seed `metadataByPath` for the default directories so auto-discovered skills,
+	 * prompts, themes, and extensions under `.qi/{skills,prompts,themes,extensions}`
+	 * and `~/.qi/agent/{...}` get `source: local` with the correct `scope`.
+	 *
+	 * Existing entries are left untouched so package-manager metadata (which may
+	 * include richer fields like `origin: package`) wins.
+	 */
+	private registerDefaultMetadata(metadataByPath: Map<string, PathMetadata>): void {
+		const register = (dir: string, scope: "user" | "project") => {
+			if (existsSync(dir) && !metadataByPath.has(dir)) {
+				metadataByPath.set(dir, { source: "local", scope, origin: "top-level", baseDir: dir });
+			}
+		};
+		register(join(this.agentDir, "skills"), "user");
+		register(join(this.agentDir, "prompts"), "user");
+		register(join(this.agentDir, "themes"), "user");
+		register(join(this.agentDir, "extensions"), "user");
+		if (this.settingsManager.isProjectTrusted()) {
+			register(join(this.cwd, CONFIG_DIR_NAME, "skills"), "project");
+			register(join(this.cwd, CONFIG_DIR_NAME, "prompts"), "project");
+			register(join(this.cwd, CONFIG_DIR_NAME, "themes"), "project");
+			register(join(this.cwd, CONFIG_DIR_NAME, "extensions"), "project");
+		}
 	}
 
 	private async loadFinalExtensionSet(

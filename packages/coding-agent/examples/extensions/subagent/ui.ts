@@ -5,7 +5,7 @@
  * - dashboard overlay: 2-column table of all experiments, opened via /experiments
  */
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@bramburn/qi-coding-agent";
 import { type ExperimentRow, type ExperimentStatus, listExperiments } from "./registry.ts";
 
 const STATUS_KEY = "experiments";

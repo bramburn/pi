@@ -16,6 +16,70 @@
 - When the user asks a question, answer it first before making edits or running implementation commands.
 - When responding to user feedback or an analysis, explicitly say whether you agree or disagree before saying what you changed.
 
+## Runtime: Bun only
+
+pi runs on Bun. New code must use Bun APIs, not Node APIs, and must not carry a
+Node fallback.
+
+- Use `Bun.spawn` for subprocesses. Never import `node:child_process` in new code; use `Bun.spawn` and do not rely on a `spawn` re-export from the `"bun"` import path; there is no dual-backend runner.
+- Use `Bun.write` / `Bun.file(...)` for file IO in new code, not `node:fs` or `node:fs/promises`. `Bun.file(p).exists()`, `.text()`, `.delete()` cover the common cases.
+- `node:path` and `node:os` are fine and are not a Node fallback — Bun implements them and there is no replacement for POSIX path primitives.
+- Do not gate new code on `typeof Bun === "undefined"` unless it is a registration-time capability check that prevents registering a tool which cannot run (see `isBunRuntime()` in `src/core/subagent/runtime.ts`).
+- Declare the Bun surface you use in a local module and read it from `globalThis`; do not add `bun-types` as a dependency and do not rely on a `Bun` global being typed. The root tsconfig pins `"types": ["node"]` and `lib: ["ES2024"]` (no DOM), so `Bun` and `ReadableStream` are both untyped by default.
+- `node:fs` stays allowed where Bun has no equivalent primitive: atomic rename (`renameSync`) and exclusive-create locking (`openSync(path, "wx")`). `src/core/subagent/experiment-registry.ts` is the worked example — `Bun.write` is neither atomic nor lockable.
+- Verify Bun behaviour with a throwaway script run under `bun`, not from docs or memory. Concrete cases already disproven in this repo: `Bun.$` keeps stdout and stderr separate and does not need `.nothrow()` (use `.quiet()`, which also stops the child writing to the parent's terminal); `subprocess.signalCode` resolves to a signal *name* string, not a number; `exited` is `128 + signal`, not null, when the child is signalled.
+
+### Subprocess pipes
+
+A child's grandchildren inherit its stdout/stderr, so a pipe can stay open after
+the child exits. `await new Response(proc.stdout).text()` then never settles, and
+`proc.stdout.cancel()` throws `Cannot cancel a locked ReadableStream` because the
+pending `Response` holds the lock.
+
+Never read a subprocess pipe to EOF before awaiting `exited`. Take the lock
+yourself and bound the wait:
+
+```ts
+const reader = stream.getReader(); // we own the lock
+// ... pump chunks, then after `exited`:
+await Promise.race([finished, deadline]);
+await reader.cancel(); // safe: we own the lock
+```
+
+`src/core/subagent/stream.ts` implements this (`createStreamPump`,
+`collectStream`). Reuse it rather than re-deriving the pattern.
+`test/subagent-stream.test.ts` covers it, with a fake never-closing pipe so the
+assertion runs in the Node-based vitest suite, plus real-process cases that run
+only under Bun.
+
+### `Bun.$` vs `Bun.spawn`
+
+Pick the backend by what the caller needs. Both claims below were verified by
+running Bun, because the intuitive answer is wrong in both directions.
+
+`Bun.$`, when no timeout or abort is requested:
+
+- Returns `{ stdout, stderr, exitCode }` with the streams kept separate.
+- `.quiet()` and `.nothrow()` are both required, in either order. `.quiet()`
+  alone still rejects with `ShellError` on a non-zero exit; `.nothrow()` alone
+  still leaks the child's stdout to the parent terminal.
+- `$\`${[cmd, ...args]}\`` spreads and escapes: an argument of `"a b"` and one of
+  `"c;echo injected"` both stay single argv elements.
+- `$.cwd(dir)` works.
+
+`Bun.spawn`, whenever a timeout or an abort signal is supplied, or the command is
+a shell line:
+
+- `$.timeout` is `undefined`, so `$` cannot time out at all.
+- `$` exposes no pid, so nothing can be signalled — no tree kill, no cancel.
+- `$` hangs on a grandchild-held pipe and returns no partial output.
+
+A dynamic command *line* is not expressible in `Bun.$`:
+`$\`${"echo dynamic-line-works"}\`` fails with `command not found`, because an
+interpolated value is escaped into one quoted word. Lines with pipes, redirects
+or quoting are shell source, so they need `Bun.spawn` with `sh -c` / `cmd /c`.
+See `src/core/subagent/shell.ts` for the split contract.
+
 ## Code Quality
 
 - Read files in full before wide-ranging changes, before editing files you have not fully inspected, and when asked to investigate or audit. Do not rely on search snippets for broad changes.
@@ -33,6 +97,7 @@
 ## Commands
 
 - After code changes (not docs): `bun run check` (full output, no tail). Fix all errors, warnings, and infos before committing. Does not run tests. `npm run check` still works (calls the same scripts); use `bun run` so the run is consistent with CI.
+- `bun run check` is not a formatting gate when you run it from a worktree under `.worktrees/`. The root `biome.json` excludes `**/.worktrees/**/*`, so in such a checkout biome prints `Checked 0 files` and skips lint and format entirely (`tsgo --noEmit` and the other steps still run). CI does not catch the drift either: `biome check --write` rewrites the checkout and exits 0 rather than diffing. Match the formatter (tabs, 120 columns) or copy the changed files to a directory tree outside `.worktrees/` and run `node_modules/.bin/biome check --write` there.
 - Never run `bun run build` or `bun test` directly unless requested by the user; CI and `./test.sh` orchestrate the full build → check → test sequence.
 - Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root:
   - Vitest: `node "$(git rev-parse --show-toplevel)/node_modules/vitest/dist/cli.js" --run test/specific.test.ts"`
@@ -121,6 +186,23 @@ If rebase conflicts occur:
 - Resolve conflicts only in files you modified.
 - If a conflict is in a file you did not modify, abort and ask the user.
 - Never force push.
+
+### Worktrees
+
+- Never create a worktree of repo X inside repo Y's workspace. A checkout that
+  belongs to another repository is invisible to `git worktree list` in this repo
+  (its record lives in the other repo's `<common dir>/worktrees/`) but every
+  recursive grep, build and editor scan reads it as a second source tree.
+- Subagent and ad-hoc worktrees go under `.worktrees/` in the repo root, which is
+  what `subagent.worktreeBase` defaults to (`DEFAULT_SUBAGENT_SETTINGS` in
+  `packages/coding-agent/src/core/defaults.ts`). Anything else is outside the
+  contract that creates and discards them, so nothing will ever clean it up.
+- Copying a `.git` directory copies `<common dir>/worktrees/` with it, i.e. the
+  worktree registry. `git worktree prune` cannot undo that: it validates a record
+  only by checking that its `gitdir` pointer names an existing git file, which it
+  does - in the other repository. `listWorktrees()`/`pruneWorktrees()` in
+  `packages/coding-agent/src/core/subagent/worktree.ts` filter and drop those
+  records; deleting them by hand is never the right first move.
 
 ## Fork vs Upstream Remotes
 
@@ -232,6 +314,32 @@ Attribution:
 
 5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
+## Adding a new workspace package
+
+When you create a new package under `packages/*` or `packages/session-backends/*` that should ship to npm, the workspace layout, the release pre-flight, and the publish workflow all need to learn about it. Skipping any of these steps is the single most common reason a fresh release fails with `The following public workspace packages are not registered on npm`, which `scripts/release.mjs` throws before it bumps a version. Follow this checklist:
+
+1. **Pick the published name up front.** There is exactly one pattern: the `name` in the package's `package.json` is the published name, under the `@bramburn/qi-*` scope (e.g. `@bramburn/qi-ai`, `@bramburn/qi-clipboard-rs`). There is no publish-time rename shim — `scripts/fork-publish-rename.mjs` was removed on 2026-10-20 when the workspace packages were renamed in-tree (ADR-0001, `specs/adr/0001-qi-hard-cut-rebrand.md`). Naming a new package `@earendil-works/...` is not an option by policy (ADR-0001), even though nothing blocks it mechanically: the brand guard is `scripts/check-no-earendil.mjs`, run as `bun run check:qi-brand`, and it is **not** part of `check` or of CI. It also still carries a large backlog (1599 findings across `.github/`, `docs/` and the workflows on 2026-10-29), so a run flags pre-existing references alongside yours. Treat an `@earendil-works/` published name as a review defect rather than a build failure.
+
+2. **Check the workspace entry.** The root `package.json` `workspaces` array already globs `packages/*` and `packages/session-backends/*`, so a package under those directories needs no edit. Add an entry only for something outside them (the `examples/extensions/*` packages are listed individually). Without a workspace entry `findPackageDirectories()` in `scripts/package-workspaces.mjs` and the npm CLI will not see the package, so the release script and the publish workflow both skip it.
+
+3. **Add a publish step** in `.github/workflows/publish.yml`:
+
+   ```yaml
+   - name: Publish @bramburn/qi-<x>
+     run: |
+       node scripts/publish-with-skip.mjs packages/<dir> npm publish --access public --tag fork
+   ```
+
+   `scripts/publish-with-skip.mjs` is what makes the step idempotent: a version already on npm is logged as `version already on npm, treating as success (idempotent)` and the step exits 0, so re-running the publish workflow does not fail on packages that already landed.
+
+4. **Create the npm trusted publisher entry once per package.** `.github/workflows/publish.yml` publishes through GitHub Actions OIDC with the `npm-publish` environment, and a trusted publisher is per package — it is not inherited from the scope. A missing entry produces `ENEEDAUTH`, which `scripts/publish-with-skip.mjs` reports as a hard step failure. See the `npm trusted publisher setup` subsection under `## Forking` for the repository / workflow / environment values. If the package name does not exist on npm at all yet, bootstrap it once (`npm login`, then `cd packages/<dir> && npm publish --access public --tag fork` from a local checkout) before adding the entry. For a package with prebuilt native binaries, run `.github/workflows/clipboard-rs-build.yml` first to populate `prebuilds/`.
+
+5. **Decide on `private`.** If the package is internal-only and should never ship to npm (e.g. a test harness, a build-time tool), set `"private": true` in its `package.json`. `scripts/release-packages.mjs` filters on `pkg.private !== true`, which takes the package out of the release pre-flight and the publish loop. Do not mix `private: true` with `@bramburn/qi-` naming — the name implies a public release artifact.
+
+6. **Regenerate the release artifacts if the new package is reachable from `@bramburn/qi-coding-agent`.** Run `node scripts/generate-coding-agent-shrinkwrap.mjs` and `node scripts/generate-coding-agent-install-lock.mjs`; `check:shrinkwrap` and `check:install-lock:coding-agent` are part of `npm run check`.
+
+7. **Add a regression test that pulls the package by name** (e.g. `import { ... } from "@bramburn/qi-<x>"` in a vitest spec). This catches two failures fast: a typo in the name during dev, and the missing bootstrap above.
+
 ## Code Review Bundles
 
 External LLM code reviews run via the `repomix-code-review` skill. That skill writes four artefacts to `dist/repomix-review/` (gitignored by the top-level `dist/` rule in `.gitignore`, so the bundles stay out of tracked files but persist across sessions for the user to send to the reviewer):
@@ -305,7 +413,8 @@ distinguishing log line now comes from `scripts/publish-with-skip.mjs`:
 | --- | --- | --- |
 | `version already on npm, treating as success (idempotent)` | npm returned HTTP 403 `You cannot publish over the previously published versions`. Expected on re-runs. | nothing |
 | `ENEEDAUTH / registry auth failure. ... Configure it under the package's npmjs.com Settings -> Trusted Publishers` | The npm trusted publisher entry for this package is missing, or its workflow filename / environment / repository doesn't match the running workflow. | Add or fix the entry per `## npm trusted publisher setup` above, then re-run the workflow (`gh workflow run publish.yml --repo bramburn/pi --ref v<version> -f tag=v<version>`). |
-| `Cannot resolve @bramburn/pi-<x> from root. No matching lockfile entry found.` | `fork-publish-rename.mjs` has rewritten the publishing package's deps to `@bramburn/pi-*` and the shrinkwrap / install-lock script can't find a matching workspace entry. | The shrinkwrap fix in this branch builds a fork-scope-aware workspace index; ensure both `scripts/generate-coding-agent-shrinkwrap.mjs` and `generate-coding-agent-install-lock.mjs` are on the latest version, then re-run the workflow. |
+
+(Publish-time package renaming via `scripts/fork-publish-rename.mjs` was removed on 2026-10-20: workspace packages are renamed in-tree to `@bramburn/qi-*` per ADR-0001, so the `Cannot resolve @bramburn/pi-<x>` failure mode can no longer occur.)
 
 ### Windows prebuild file lock
 

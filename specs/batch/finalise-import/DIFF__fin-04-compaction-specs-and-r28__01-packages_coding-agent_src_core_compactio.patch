@@ -1,0 +1,18 @@
+--- a/packages/coding-agent/src/core/compaction/compaction.ts
++++ b/packages/coding-agent/src/core/compaction/compaction.ts
+@@ -892,11 +892,14 @@ export function formatCompactionSkipReason(skipReason: CompactionSkipReason): st
+  */
+ export class CompactionSkippedError extends Error {
+ 	readonly skipReason: CompactionSkipReason;
++	readonly reason: string;
+ 
+ 	constructor(skipReason: CompactionSkipReason, message?: string) {
+-		super(message ?? formatCompactionSkipReason(skipReason));
++		const formatted = message ?? formatCompactionSkipReason(skipReason);
++		super(formatted.startsWith("Nothing to compact") ? formatted : `Nothing to compact: ${formatted}`);
+ 		this.name = "CompactionSkippedError";
+ 		this.skipReason = skipReason;
++		this.reason = formatted;
+ 	}
+ }
+ 

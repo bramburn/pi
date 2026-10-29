@@ -24,10 +24,15 @@ export default defineConfig({
 	resolve: {
 		alias: [
 			{ find: /^@earendil-works\/pi-telemetry$/, replacement: telemetryIndex },
+			{ find: /^@bramburn\/qi-telemetry$/, replacement: telemetryIndex },
 			{ find: /^@earendil-works\/pi-agent-core\/session\/testing$/, replacement: agentSessionTesting },
+			{ find: /^@bramburn\/qi-agent-core\/session\/testing$/, replacement: agentSessionTesting },
 			{ find: /^@earendil-works\/pi-agent-core\/node$/, replacement: agentNode },
+			{ find: /^@bramburn\/qi-agent-core\/node$/, replacement: agentNode },
 			{ find: /^@earendil-works\/pi-agent-core$/, replacement: agentIndex },
+			{ find: /^@bramburn\/qi-agent-core$/, replacement: agentIndex },
 			{ find: /^@earendil-works\/pi-ai$/, replacement: aiIndex },
+			{ find: /^@bramburn\/qi-ai$/, replacement: aiIndex },
 		],
 	},
 });

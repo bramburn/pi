@@ -1,0 +1,217 @@
+{
+	"version": "1.0",
+	"mode": "hybrid",
+	"stack": ["typescript", "bun"],
+	"domains": ["rebrand", "extensions", "subagents", "compaction"],
+	"not_applicable": {
+		"ux": "CLI/TUI product; this change set alters text strings only, no visual token surface. Screen/design-token specs carry no decisions for these four domains."
+	},
+	"specs": [
+		{
+			"id": "REQ-REBRAND",
+			"type": "requirements",
+			"domain": "rebrand",
+			"path": "00-requirements/features/rebrand-requirements.md",
+			"title": "qi rebrand and earendil cut-off requirements",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": [
+				"packages/*/package.json",
+				"packages/coding-agent/src/config.ts",
+				"packages/coding-agent/src/cli/**",
+				"packages/coding-agent/src/main.ts",
+				"scripts/*",
+				"README.md"
+			],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0001",
+			"type": "adr",
+			"domain": "rebrand",
+			"path": "adr/0001-qi-hard-cut-rebrand.md",
+			"title": "Hard-cut rename to qi with no legacy aliases",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/config.ts", "packages/coding-agent/package.json"],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0002",
+			"type": "adr",
+			"domain": "rebrand",
+			"path": "adr/0002-sever-upstream-endpoints.md",
+			"title": "Sever all earendil-controlled endpoints and sync tooling",
+			"status": "accepted",
+			"depends_on": ["ADR-0001"],
+			"governs": ["packages/coding-agent/src/**", "scripts/*"],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0006",
+			"type": "adr",
+			"domain": "rebrand",
+			"path": "adr/0006-npm-registry-self-update.md",
+			"title": "qi self-update via the npm registry",
+			"status": "accepted",
+			"depends_on": ["ADR-0002"],
+			"governs": [
+				"packages/coding-agent/src/utils/version-check.ts",
+				"packages/coding-agent/src/package-manager-cli.ts"
+			],
+			"verifies": []
+		},
+		{
+			"id": "REQ-EXT",
+			"type": "requirements",
+			"domain": "extensions",
+			"path": "00-requirements/features/extensions-requirements.md",
+			"title": "0.85-compatible extension install pinning requirements",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": [
+				"packages/coding-agent/src/core/package-manager.ts",
+				"packages/coding-agent/src/core/extensions/**",
+				"packages/coding-agent/src/package-manager-cli.ts"
+			],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0003",
+			"type": "adr",
+			"domain": "extensions",
+			"path": "adr/0003-extension-compat-manifest.md",
+			"title": "Extension compatibility manifest resolved at install",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/core/package-manager.ts"],
+			"verifies": []
+		},
+		{
+			"id": "CONTRACT-EXT-COMPAT-MANIFEST",
+			"type": "contract",
+			"domain": "extensions",
+			"path": "contracts/json-schema/extension-compat-manifest.schema.json",
+			"title": "extension-compat manifest (v1)",
+			"status": "accepted",
+			"depends_on": ["ADR-0003"],
+			"governs": ["packages/coding-agent/src/core/package-manager.ts"],
+			"verifies": []
+		},
+		{
+			"id": "CONTRACT-EXT-COMPAT-MANIFEST-EXAMPLES",
+			"type": "contract",
+			"domain": "extensions",
+			"path": "contracts/json-schema/extension-compat-manifest.examples.md",
+			"title": "extension-compat manifest (v1) examples",
+			"status": "accepted",
+			"depends_on": ["CONTRACT-EXT-COMPAT-MANIFEST"],
+			"governs": ["packages/coding-agent/src/core/package-manager.ts"],
+			"verifies": []
+		},
+		{
+			"id": "BEHAV-EXT-INSTALL-PINNING",
+			"type": "behavior",
+			"domain": "extensions",
+			"path": "features/extensions/install-pinning.feature",
+			"title": "Install-time version pinning",
+			"status": "accepted",
+			"depends_on": ["REQ-EXT"],
+			"aspirational": true,
+			"governs": [],
+			"verifies": []
+		},
+		{
+			"id": "IMPL-EXTENSIONS",
+			"type": "impl",
+			"domain": "extensions",
+			"path": "impl/extensions-phase.md",
+			"title": "Extensions compat-pin implementation phase",
+			"status": "accepted",
+			"depends_on": ["REQ-EXT", "ADR-0003", "CONTRACT-EXT-COMPAT-MANIFEST"],
+			"governs": ["packages/coding-agent/src/core/package-manager.ts"],
+			"verifies": []
+		},
+		{
+			"id": "REQ-SUBAG",
+			"type": "requirements",
+			"domain": "subagents",
+			"path": "00-requirements/features/subagents-requirements.md",
+			"title": "Native subagent self-sufficiency and defect-closure requirements",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": [
+				"packages/coding-agent/src/core/subagent/**",
+				"docs/subagents.md",
+				"specs/subagent/**"
+			],
+			"verifies": []
+		},
+		{
+			"id": "REQ-SUBAG-REGISTER",
+			"type": "requirements",
+			"domain": "subagents",
+			"path": "subagent/requirements.md",
+			"title": "Pre-existing subagent requirements register (status vocabulary: EXISTING/GAP/DEFECT)",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/core/subagent/**"],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0004",
+			"type": "adr",
+			"domain": "subagents",
+			"path": "adr/0004-native-subagent-self-sufficiency.md",
+			"title": "Native subagent subsystem is the only subagent implementation",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/core/subagent/**", "docs/subagents.md"],
+			"verifies": []
+		},
+		{
+			"id": "IMPL-SUBAGENTS",
+			"type": "impl",
+			"domain": "subagents",
+			"path": "impl/subagents-phase.md",
+			"title": "Subagent defect-closure implementation phase",
+			"status": "accepted",
+			"depends_on": ["REQ-SUBAG", "ADR-0004"],
+			"governs": ["packages/coding-agent/src/core/subagent/**"],
+			"verifies": []
+		},
+		{
+			"id": "ADR-0005",
+			"type": "adr",
+			"domain": "compaction",
+			"path": "adr/0005-compaction-skip-not-error.md",
+			"title": "Compaction no-op is a typed skip, not a user-facing error",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/core/agent-session.ts", "packages/coding-agent/src/core/compaction/compaction.ts", "packages/coding-agent/src/modes/interactive/interactive-mode.ts"],
+			"verifies": []
+		},
+		{
+			"id": "REQ-COMPACTION",
+			"type": "requirements",
+			"domain": "compaction",
+			"path": "00-requirements/features/compaction-requirements.md",
+			"title": "Compaction error-surface requirements (screenshot errors)",
+			"status": "accepted",
+			"depends_on": [],
+			"governs": ["packages/coding-agent/src/core/agent-session.ts", "packages/agent/src/harness/compaction/**"],
+			"verifies": []
+		},
+		{
+			"id": "IMPL-COMPACTION",
+			"type": "impl",
+			"domain": "compaction",
+			"path": "impl/compaction-phase.md",
+			"title": "Compaction error-fix implementation phase",
+			"status": "accepted",
+			"depends_on": ["REQ-COMPACTION"],
+			"governs": ["packages/coding-agent/src/core/agent-session.ts"],
+			"verifies": []
+		}
+	]
+}

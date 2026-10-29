@@ -8,7 +8,7 @@
  *   - Forward-delete cleanup of the paste registry
  *   - Renumbering higher IDs after a marker is removed
  *   - Insertion guards that refuse to splice into a paste marker
- *   - Undo stack clearing after image paste
+ *   - Undo history retained across image/video pastes
  */
 import assert from "node:assert";
 import { describe, it } from "node:test";
@@ -124,14 +124,22 @@ describe("Editor PR-B: atomic paste markers & attachments", () => {
 			assert.ok(marker.length <= 51, `marker unexpectedly long: ${marker.length}`);
 		});
 
-		it("clears the undo stack after a paste so undo cannot resurrect image bytes", () => {
+		it("keeps undo history across an image paste and undoes the marker", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			// Type something so an undo snapshot exists.
 			editor.handleInput("prefix ");
 			assert.ok(internals(editor).undoStack.length > 0);
 
 			editor.pasteImage(new Uint8Array([1, 2, 3]), "image/png", "foo.png");
-			assert.strictEqual(internals(editor).undoStack.length, 0);
+			// The paste pushes its own snapshot but must not wipe the
+			// pre-existing history (snapshots share attachment payloads by
+			// reference, so retaining them copies no bytes).
+			assert.ok(internals(editor).undoStack.length > 1);
+
+			// One undo removes the marker and restores the pre-paste state.
+			editor.handleInput("\x1b[45;5u"); // undo
+			assert.strictEqual(editor.getText(), "prefix ");
+			assert.strictEqual(internals(editor).pastes.size, 0);
 		});
 	});
 
@@ -153,13 +161,17 @@ describe("Editor PR-B: atomic paste markers & attachments", () => {
 			}
 		});
 
-		it("clears the undo stack after a video paste so undo cannot resurrect video bytes", () => {
+		it("keeps undo history across a video paste and undoes the marker", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			editor.handleInput("prefix ");
 			assert.ok(internals(editor).undoStack.length > 0);
 
 			editor.pasteVideo(new Uint8Array([1, 2, 3]), "video/webm", "clip.webm");
-			assert.strictEqual(internals(editor).undoStack.length, 0);
+			assert.ok(internals(editor).undoStack.length > 1);
+
+			editor.handleInput("\x1b[45;5u"); // undo
+			assert.strictEqual(editor.getText(), "prefix ");
+			assert.strictEqual(internals(editor).pastes.size, 0);
 		});
 	});
 

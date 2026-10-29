@@ -1,0 +1,15 @@
+--- a/packages/agent/src/types.ts
++++ b/packages/agent/src/types.ts
+@@ -429,6 +429,12 @@
+ 	 * If omitted, the default execution mode applies.
+ 	 */
+ 	executionMode?: ToolExecutionMode;
++	/**
++	 * Whether this tool is safe to execute concurrently across parallel subagent
++	 * processes against the same working tree (REQ-I02 / REQ-C01).
++	 * Mutating tools (bash, edit, write) default to false; pure read/search tools set true.
++	 */
++	concurrentSafe?: boolean;
+ }
+ 
+ /** Context snapshot passed into the low-level agent loop. */

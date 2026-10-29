@@ -556,7 +556,7 @@ describe("AgentHarness tools", () => {
 		it("prepares command, cwd, and an explicit environment with the turn context", async () => {
 			const env = new NodeExecutionEnv({
 				cwd: createTempDir(),
-				shellEnv: { PI_BASH_PREPARE_INHERITED: "inherited" },
+				shellEnv: { QI_BASH_PREPARE_INHERITED: "inherited" },
 			});
 			getOrThrow(await env.createDir("workspace"));
 			const context = { env, workspace: `${env.cwd}/workspace` };
@@ -569,7 +569,7 @@ describe("AgentHarness tools", () => {
 					receivedContext = turnContext;
 					receivedSignal = signal;
 					execution.cwd = turnContext.workspace;
-					execution.env = { PI_BASH_PREPARE_EXPLICIT: "explicit" };
+					execution.env = { QI_BASH_PREPARE_EXPLICIT: "explicit" };
 					execution.inheritEnv = false;
 					// Use `pwd -W` on Windows git-bash (MSYS) where the bash
 					// builtin emits the Windows-native path with forward slashes,
@@ -579,7 +579,7 @@ describe("AgentHarness tools", () => {
 					// is the virtual MSYS POSIX path (e.g. /tmp/...) while
 					// canonicalPath() returns C:/Users/.../Temp/... for the
 					// same directory, and the assertion fails on Windows.
-					execution.command += `\npwd_str=$(pwd -W 2>/dev/null || pwd); printf '%s:%s:%s:%s' "$prefix" "\${PI_BASH_PREPARE_INHERITED-}" "$PI_BASH_PREPARE_EXPLICIT" "$pwd_str"`;
+					execution.command += `\npwd_str=$(pwd -W 2>/dev/null || pwd); printf '%s:%s:%s:%s' "$prefix" "\${QI_BASH_PREPARE_INHERITED-}" "$QI_BASH_PREPARE_EXPLICIT" "$pwd_str"`;
 				},
 			});
 

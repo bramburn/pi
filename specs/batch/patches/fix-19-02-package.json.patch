@@ -1,0 +1,14 @@
+--- a/package.json
++++ b/package.json
+@@ -15,9 +15,10 @@
+ 		"clean": "bun run --if-present --filter '*' clean",
+ 		"build": "bun run --cwd packages/tui build && bun run --cwd packages/telemetry build && bun run --cwd packages/ai build && bun run --cwd packages/agent build && bun run --cwd packages/session-backends/sqlite-node build && bun run --cwd packages/protocol build && bun run --cwd packages/client build && bun run --cwd packages/server build && bun run --cwd packages/coding-agent build",
+ 		"build:offline": "bun run --cwd packages/tui build && bun run --cwd packages/telemetry build && bun run --cwd packages/ai build:offline && bun run --cwd packages/agent build && bun run --cwd packages/session-backends/sqlite-node build && bun run --cwd packages/protocol build && bun run --cwd packages/client build && bun run --cwd packages/server build && bun run --cwd packages/coding-agent build",
+-		"check": "biome check --write --error-on-warnings --no-errors-on-unmatched . && bun run check:pinned-deps && bun run check:ts-imports && bun run check:shrinkwrap && bun run check:install-lock:coding-agent && tsgo --noEmit && bun run check:browser-smoke",
++		"check": "biome check --write --error-on-warnings --no-errors-on-unmatched . && bun run check:pinned-deps && bun run check:qi-brand && bun run check:ts-imports && bun run check:shrinkwrap && bun run check:install-lock:coding-agent && tsgo --noEmit && bun run check:browser-smoke",
+ 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
+ 		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
++		"check:qi-brand": "node scripts/check-no-earendil.mjs",
+ 		"check:shrinkwrap": "node scripts/generate-coding-agent-shrinkwrap.mjs --check",
+ 		"check:install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs --check",
+ 		"check:ts-imports": "node scripts/check-ts-relative-imports.mjs",

@@ -1,0 +1,120 @@
+--- a/packages/coding-agent/src/core/subagent/bun-process-runner.ts
++++ b/packages/coding-agent/src/core/subagent/bun-process-runner.ts
+@@ -57,6 +57,8 @@
+ 	killGraceMs?: number;
+ 	/** Per-tool-call wall-clock budget in ms. The child is killed if a single tool call exceeds this. */
+ 	toolTimeoutMs?: number;
++	/** Default per-child assistant turn cap when `request.maxTurns` is not set (REQ-D03). */
++	maxTurns?: number;
+ }
+ 
+ // ============================================================================
+@@ -323,6 +325,7 @@
+ 					killGraceMs: options?.killGraceMs,
+ 					logPath: request.logPath,
+ 					toolTimeoutMs: options?.toolTimeoutMs,
++					maxTurns: request.maxTurns ?? options?.maxTurns,
+ 					checkpointBeforeDeadlineMs: request.checkpointBeforeDeadlineMs,
+ 				};
+ 
+@@ -378,6 +381,7 @@
+ 	killGraceMs?: number;
+ 	logPath?: string;
+ 	toolTimeoutMs?: number;
++	maxTurns?: number;
+ 	checkpointBeforeDeadlineMs?: number;
+ }
+ 
+@@ -400,6 +404,8 @@
+ 	streams: ChildStreams,
+ 	emit: SubagentEventListener,
+ 	resetToolTimer: () => void,
++	maxTurns: number | undefined,
++	onTurnCapReached: () => void,
+ ): void {
+ 	const type = event.type;
+ 	// Capture session_start before the message-type gate: it is a control event,
+@@ -417,6 +423,9 @@
+ 	if (type === "message_end") {
+ 		applyAssistantMessage(message, streams);
+ 		emit({ type: "message_end", message });
++		if (maxTurns !== undefined && maxTurns > 0 && streams.usage.turns >= maxTurns) {
++			onTurnCapReached();
++		}
+ 	} else {
+ 		emit({ type: "tool_result_end", message });
+ 	}
+@@ -453,6 +462,8 @@
+ 	timeoutMs: number | undefined,
+ 	toolTimedOut: boolean,
+ 	toolTimeoutMs: number | undefined,
++	turnCapped: boolean,
++	maxTurns: number | undefined,
+ ): void {
+ 	result.messages = streams.messages;
+ 	result.finalOutput = streams.finalOutput;
+@@ -469,7 +480,15 @@
+ 		result.aborted = true;
+ 		result.errorMessage = `Subagent tool call timed out after ${toolTimeoutMs}ms`;
+ 	}
+-	if (killed && !timedOut && !toolTimedOut) result.aborted = true;
++	if (turnCapped) {
++		result.aborted = true;
++		result.turnCapExceeded = true;
++		const notice = `[Stopped at turn cap (${maxTurns} turns). Resume this subagent session to continue.]`;
++		result.finalOutput = result.finalOutput ? `${result.finalOutput}\n\n${notice}` : notice;
++		result.stopReason = "turn_cap";
++		result.errorMessage = `Subagent stopped at turn cap (${maxTurns} turns)`;
++	}
++	if (killed && !timedOut && !toolTimedOut && !turnCapped) result.aborted = true;
+ }
+ 
+ /** Attach the caller's AbortSignal to a kill callback. Returns a detach function. */
+@@ -554,6 +573,7 @@
+ 	let killed = false;
+ 	let timedOut = false;
+ 	let toolTimedOut = false;
++	let turnCapped = false;
+ 	const kills = createKillController(proc, child.killGraceMs);
+ 	const killOnce = () => {
+ 		killed = true;
+@@ -608,8 +628,12 @@
+ 	// progress, not stay silent until it exits. The pumps run with the child and
+ 	// release only after it is gone, so the drain grace bounds the post-exit
+ 	// wait and never the child's lifetime.
++	const onTurnCapReached = () => {
++		turnCapped = true;
++		killOnce();
++	};
+ 	const stdoutPump = createStreamPump(proc.stdout, (chunk) => {
+-		parser.push(chunk, (event) => applyJsonEvent(event, streams, emit, resetToolTimer));
++		parser.push(chunk, (event) => applyJsonEvent(event, streams, emit, resetToolTimer, child.maxTurns, onTurnCapReached));
+ 	});
+ 	const stderrBuffer = new BoundedText(MAX_STDERR_CHARS);
+ 	const stderrPump = createStreamPump(proc.stderr, (chunk) => {
+@@ -632,12 +656,23 @@
+ 	// Flush AFTER the drain, not before: a final JSONL line without a trailing
+ 	// newline that completes during the drain window sits in the parser buffer
+ 	// past a pre-release flush, and the run's last event would be dropped.
+-	parser.flush((event) => applyJsonEvent(event, streams, emit, resetToolTimer));
++	parser.flush((event) => applyJsonEvent(event, streams, emit, resetToolTimer, child.maxTurns, onTurnCapReached));
+ 	kills.dispose();
+ 	if (proc.pid) untrackDetachedChildPid(proc.pid);
+ 
+ 	result.stderr = stderrBuffer.text;
+ 	result.exitCode = exitCode ?? HARD_KILL_EXIT_CODE;
+-	finishResult(result, streams, killed, timedOut, child.timeoutMs, toolTimedOut, child.toolTimeoutMs);
++	finishResult(
++		result,
++		streams,
++		killed,
++		timedOut,
++		child.timeoutMs,
++		toolTimedOut,
++		child.toolTimeoutMs,
++		turnCapped,
++		child.maxTurns,
++	);
+ 	const signalName = killed ? "SIGTERM" : null;
+ 	emit({ type: "exit", exitCode, signal: signalName });
+ 	log.append({ type: "EXIT", exitCode, killed });

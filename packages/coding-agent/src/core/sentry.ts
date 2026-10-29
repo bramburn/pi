@@ -2,7 +2,7 @@
  * Sentry telemetry wiring for the coding-agent CLI.
  *
  * Initialize the official `@sentry/node` SDK when the user opts in via
- * `PI_AI_DEBUG=1` and supplies a `SENTRY_DSN`. Both variables are required;
+ * `QI_AI_DEBUG=1` and supplies a `SENTRY_DSN`. Both variables are required;
  * either alone is a no-op so dev/CI never silently phones home without an
  * explicit destination.
  *
@@ -48,11 +48,11 @@ export function _resetSentryInitializedForTests(): void {
 }
 
 /**
- * Returns true when the user has opted in to Sentry via `PI_AI_DEBUG=1` and
+ * Returns true when the user has opted in to Sentry via `QI_AI_DEBUG=1` and
  * provided a `SENTRY_DSN`. Both must be present; either alone is a no-op.
  */
 export function isSentryDebugEnabled(): boolean {
-	return isTruthyEnvFlag(process.env.PI_AI_DEBUG) && hasSentryDsn();
+	return isTruthyEnvFlag(process.env.QI_AI_DEBUG) && hasSentryDsn();
 }
 
 function hasSentryDsn(): boolean {
@@ -67,7 +67,7 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
 
 function detectEnvironment(): string {
 	if (process.env.NODE_ENV) return process.env.NODE_ENV;
-	if (process.env.PI_ENVIRONMENT) return process.env.PI_ENVIRONMENT;
+	if (process.env.QI_ENVIRONMENT) return process.env.QI_ENVIRONMENT;
 	return "development";
 }
 
@@ -79,7 +79,7 @@ function parseSampleRate(value: string | undefined, fallback: number): number {
 }
 
 /**
- * Creates a Sentry context when the user opts in via `PI_AI_DEBUG=1` and a
+ * Creates a Sentry context when the user opts in via `QI_AI_DEBUG=1` and a
  * `SENTRY_DSN` is configured. Returns `undefined` otherwise.
  *
  * The returned handle also installs process-level handlers that capture
@@ -98,7 +98,7 @@ export function initSentryIfEnabled(): SentryContextHandle | undefined {
 		release: SENTRY_RELEASE,
 		environment,
 		tracesSampleRate,
-		// Keep the agent quiet on stdout; users opt in via PI_AI_DEBUG, not
+		// Keep the agent quiet on stdout; users opt in via QI_AI_DEBUG, not
 		// because they want Sentry to spam their terminal.
 		debug: false,
 	});
@@ -142,7 +142,7 @@ export function initSentryIfEnabled(): SentryContextHandle | undefined {
  * `stopReason: "error"` and never reach the `uncaughtException` listener.
  *
  * This function is a no-op unless the user opted in via
- * `PI_AI_DEBUG=1` AND `SENTRY_DSN`, in which case it ships a Sentry event
+ * `QI_AI_DEBUG=1` AND `SENTRY_DSN`, in which case it ships a Sentry event
  * tagged with `source: "provider_error"`, `stop_reason`, and (if parseable
  * from the error message) `request_id`. `provider` and `model` are attached
  * as scope extras so the Sentry UI can filter by them.

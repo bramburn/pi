@@ -77,9 +77,9 @@ For VS Code, include `--wait` so pi resumes after the editor exits:
 
 ### Telemetry and update checks
 
-`enableInstallTelemetry` only controls the anonymous install/update ping to `https://pi.dev/api/report-install`. Opting out of telemetry does not disable update checks; Pi can still fetch `https://pi.dev/api/latest-version` to look for the latest version.
+`enableInstallTelemetry` gates the anonymous install/update ping. **Upstream endpoints are severed (ADR-0002):** `qi` no longer posts install telemetry and no longer fetches an upstream latest-version endpoint, so this setting and the automatic version check are inert until replacement endpoints are ported (deferred with `TODO(deferred-porting)`).
 
-Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Set `QI_SKIP_VERSION_CHECK=1` to disable the version check entirely. Use `--offline` or `QI_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
 
 ### Network
 
@@ -114,14 +114,20 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--off
 | `compaction.enabled` | boolean | `true` | Enable auto-compaction |
 | `compaction.reserveTokens` | number | `16384` | Tokens reserved for LLM response |
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens to keep (not summarized) |
+| `compaction.summaryMaxTokens` | number | `16384` | Absolute ceiling on summariser output tokens |
+| `compaction.summaryThinking` | string | `"off"` | Thinking level for the summariser: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` |
+| `compactionModel` | object | - | Model used for context summarisation (`{ "provider": "...", "modelId": "..." }`). Absent = the session's current model. Configure from `/settings` → Compaction model; falls back to the current model with a warning if the configured model is no longer available. |
 
 ```json
 {
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
-    "keepRecentTokens": 20000
-  }
+    "keepRecentTokens": 20000,
+    "summaryMaxTokens": 16384,
+    "summaryThinking": "off"
+  },
+  "compactionModel": { "provider": "openai", "modelId": "gpt-5-mini" }
 }
 ```
 
@@ -238,6 +244,34 @@ On Windows, select `powershell` instead of `bash`, or include both:
 ```
 
 An empty array starts with no built-in tools while preserving extension and SDK custom tools. `--tools` replaces this behavior with a strict allowlist for all tools, `--no-tools` disables all tools, and `--no-builtin-tools` disables the built-in defaults. `--exclude-tools` filters the resulting list. A project `defaultTools` array replaces the global array.
+
+### Subagents
+
+See [Subagents](subagents.md) for the built-in delegation tool and the experiments surface.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `subagent.enabled` | boolean | `true` | Register the built-in `subagent` tool. Requires the Bun runtime |
+| `subagent.maxConcurrent` | number | `4` | Max subagent children running at once in this pi process, counted across every mode — inline `single`, `chain` and `parallel` batches, plus background dispatches. Inline calls beyond the limit wait; background dispatches beyond it are queued as `pending` rows and start in FIFO order as slots free. Two pi processes each get their own budget of 4 |
+| `subagent.maxParallelTasks` | number | `8` | Max tasks accepted in one parallel `tasks: [...]` call |
+| `subagent.maxTurns` | number | `30` | Max assistant turns per child subagent; the parent stops an over-cap child and reports partial output with an explicit turn-cap notice (`[Stopped at turn cap ...]`) |
+| `subagent.maxDepth` | number | `1` | Deepest delegation level. `0` is a top-level session, so the default permits one level of subagents and refuses grandchildren. `0` forbids delegation entirely; raise it to allow nesting |
+| `subagent.worktreeBase` | string | `".worktrees"` | Directory for experiment worktrees (`<repo>/<worktreeBase>/<slug>`) |
+| `subagent.enableExperiments` | boolean | `false` | Experiments surface: the eight `experiment_*` tools, the `.pi-experiments/` registry, and worktrees |
+| `subagent.researchModeTriggerCount` | number | `3` | Consecutive same-error tool failures before the Research Mode suggestion fires (see [Subagents](subagents.md#research-mode)) |
+
+```json
+{
+ "subagent": {
+ "enabled": true,
+ "maxConcurrent": 4,
+ "maxParallelTasks": 8,
+ "worktreeBase": ".worktrees",
+ "enableExperiments": false,
+ "researchModeTriggerCount": 3
+ }
+}
+```
 
 ### Sessions
 

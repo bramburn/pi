@@ -1,0 +1,11 @@
+--- a/packages/coding-agent/src/core/subagent/types.ts
++++ b/packages/coding-agent/src/core/subagent/types.ts
+@@ -68,6 +68,8 @@
+ 	role: string;
+ 	/** Complete task and behavioral instructions for the subagent. */
+ 	instructions: string;
++	/** One-line description of a saved specialist, rendered into the tool description (REQ-D04). */
++	description?: string;
+ 	/** Optional model override (`provider/id` or bare model id). Inherits parent when omitted. */
+ 	model?: string;
+ 	/** Optional tool allowlist. Defaults to the standard coding set when omitted. */

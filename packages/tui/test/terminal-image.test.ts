@@ -44,9 +44,9 @@ const ENV_KEYS = [
 	"CMUX_WORKSPACE_ID",
 	"WARP_SESSION_ID",
 	"WARP_TERMINAL_SESSION_UUID",
-	"PI_HYPERLINKS",
-	"PI_IMAGE_PROTOCOL",
-	"PI_TRUE_COLOR",
+	"QI_HYPERLINKS",
+	"QI_IMAGE_PROTOCOL",
+	"QI_TRUE_COLOR",
 ] as const;
 
 function withEnv<T>(overrides: Record<string, string | undefined>, fn: () => T): T {
@@ -226,11 +226,11 @@ describe("detectCapabilities", () => {
 
 	it("applies environment overrides", () => {
 		assert.deepStrictEqual(
-			withEnv({ PI_HYPERLINKS: "1", PI_IMAGE_PROTOCOL: "kitty", PI_TRUE_COLOR: "1" }, () => detectCapabilities()),
+			withEnv({ QI_HYPERLINKS: "1", QI_IMAGE_PROTOCOL: "kitty", QI_TRUE_COLOR: "1" }, () => detectCapabilities()),
 			{ images: "kitty", trueColor: true, hyperlinks: true },
 		);
 		assert.deepStrictEqual(
-			withEnv({ TERM_PROGRAM: "iterm.app", PI_HYPERLINKS: "0", PI_IMAGE_PROTOCOL: "none", PI_TRUE_COLOR: "0" }, () =>
+			withEnv({ TERM_PROGRAM: "iterm.app", QI_HYPERLINKS: "0", QI_IMAGE_PROTOCOL: "none", QI_TRUE_COLOR: "0" }, () =>
 				detectCapabilities(),
 			),
 			{ images: null, trueColor: false, hyperlinks: false },
@@ -242,9 +242,9 @@ describe("detectCapabilities", () => {
 			withEnv(
 				{
 					TERM_PROGRAM: "ghostty",
-					PI_HYPERLINKS: "auto",
-					PI_IMAGE_PROTOCOL: "auto",
-					PI_TRUE_COLOR: "auto",
+					QI_HYPERLINKS: "auto",
+					QI_IMAGE_PROTOCOL: "auto",
+					QI_TRUE_COLOR: "auto",
 				},
 				() => detectCapabilities(),
 			),
@@ -253,7 +253,7 @@ describe("detectCapabilities", () => {
 	});
 
 	it("applies and clears programmatic overrides", () => {
-		withEnv({ PI_HYPERLINKS: "1", PI_IMAGE_PROTOCOL: "kitty", PI_TRUE_COLOR: "1" }, () => {
+		withEnv({ QI_HYPERLINKS: "1", QI_IMAGE_PROTOCOL: "kitty", QI_TRUE_COLOR: "1" }, () => {
 			setCapabilityOverrides({ images: null, trueColor: false, hyperlinks: false });
 			try {
 				assert.deepStrictEqual(getCapabilities(), { images: null, trueColor: false, hyperlinks: false });
@@ -269,7 +269,7 @@ describe("detectCapabilities", () => {
 	it("bypasses the tmux probe when hyperlinks are overridden", () => {
 		let probed = false;
 		const caps = withEnv(
-			{ TMUX: "/tmp/tmux-1000/default,1234,0", PI_HYPERLINKS: "1", PI_IMAGE_PROTOCOL: "kitty" },
+			{ TMUX: "/tmp/tmux-1000/default,1234,0", QI_HYPERLINKS: "1", QI_IMAGE_PROTOCOL: "kitty" },
 			() =>
 				detectCapabilities(() => {
 					probed = true;

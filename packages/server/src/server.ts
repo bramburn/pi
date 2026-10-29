@@ -14,7 +14,7 @@ import {
 	type ServerHello,
 	type ServerHelloError,
 	type ServerMessage,
-} from "@earendil-works/pi-protocol";
+} from "@bramburn/qi-protocol";
 import {
 	type ByteConnection,
 	type ByteConnectionHandler,

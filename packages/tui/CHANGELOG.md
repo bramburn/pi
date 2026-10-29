@@ -7,6 +7,11 @@
 - Added video paste attachments: `PasteAttachment` now has a `video` variant and `Editor.pasteVideo()` inserts `[paste #N video: file]` markers.
 - Added PDF paste attachments: `PasteAttachment` now has a `pdf` variant and `Editor.pastePdf()` inserts `[paste #N pdf: file]` markers.
 
+### Fixed
+
+- `isKeyRelease()`/`isKeyRepeat()` now require a CSI prefix (`ESC [`), so plain text containing event-type markers (e.g. `http://example.com:3u` from an unbracketed paste) is no longer misclassified as a Kitty key release/repeat event.
+- Legacy ESC-prefixed alt sequences (`alt+a`, `alt+space`, `alt+left`/`alt+right`, `ctrl+alt+letter`) keep matching while the Kitty keyboard protocol is active: Tabby/xterm.js announce Kitty but still send the legacy byte forms, and the previous suppression made alt keybindings dead there. The Kitty-specific `\x1b\r`/`\n` shift+enter interpretation is unchanged.
+
 ## [0.85.0-b1] - 2026-09-14
 
 ## [0.84.4] - 2026-08-28

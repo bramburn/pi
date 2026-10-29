@@ -3,10 +3,11 @@
 // The shrinkwrap script regenerates packages/coding-agent/npm-shrinkwrap.json
 // from the root package-lock.json. It also runs as part of coding-agent's
 // `prepublishOnly` hook inside the fork publish workflow, which means it
-// has to keep working after fork-publish-rename.mjs has rewritten the
-// publishing package's name and workspace deps to the @bramburn/* scope
-// while the root lockfile and the other workspace package.json files
-// still use @earendil-works/pi-*. Without the fork-scope swap in the
+// has to keep working when a publishing package's name and workspace deps
+// use the @bramburn/* fork scope (historically rewritten at publish time
+// by the removed fork-publish-rename.mjs script; ADR-0001 now renames
+// in-tree) while the root lockfile and the other workspace package.json
+// files still use @bramburn/qi-*. Without the fork-scope swap in the
 // workspace index, `npm run shrinkwrap` aborts with:
 //   Cannot resolve @bramburn/pi-agent-core from root.
 //   No matching lockfile entry found.
@@ -59,29 +60,29 @@ function buildRepoTree(overrides = {}) {
 				dependencies: {},
 			},
 			"packages/agent": {
-				name: "@earendil-works/pi-agent-core",
+				name: "@bramburn/qi-agent-core",
 				version: "0.85.0-b1",
 				license: "MIT",
 			},
-			"node_modules/@earendil-works/pi-agent-core": {
+			"node_modules/@bramburn/qi-agent-core": {
 				resolved: "packages/agent",
 				link: true,
 			},
 			"packages/ai": {
-				name: "@earendil-works/pi-ai",
+				name: "@bramburn/qi-ai",
 				version: "0.85.0-b1",
 				license: "MIT",
 			},
-			"node_modules/@earendil-works/pi-ai": {
+			"node_modules/@bramburn/qi-ai": {
 				resolved: "packages/ai",
 				link: true,
 			},
 			"packages/coding-agent": {
-				name: "@earendil-works/pi-coding-agent",
+				name: "@bramburn/qi-coding-agent",
 				version: "0.85.0-b1",
 				license: "MIT",
 			},
-			"node_modules/@earendil-works/pi-coding-agent": {
+			"node_modules/@bramburn/qi-coding-agent": {
 				resolved: "packages/coding-agent",
 				link: true,
 			},
@@ -140,7 +141,7 @@ function buildRepoTree(overrides = {}) {
 	};
 	// packages/agent is a leaf; its only deps are non-workspace.
 	const agentPackage = {
-		name: "@earendil-works/pi-agent-core",
+		name: "@bramburn/qi-agent-core",
 		version: "0.85.0-b1",
 		license: "MIT",
 		dependencies: {
@@ -151,23 +152,23 @@ function buildRepoTree(overrides = {}) {
 	};
 	// packages/ai is a leaf.
 	const aiPackage = {
-		name: "@earendil-works/pi-ai",
+		name: "@bramburn/qi-ai",
 		version: "0.85.0-b1",
 		license: "MIT",
 		dependencies: {},
 	};
 	// packages/coding-agent depends on two workspace packages, plus the
 	// install-script packages and a platform-specific optional dep that
-	// the shrinkwrap validator requires. After fork-publish-rename, its
-	// name and its workspace deps use the @bramburn/* scope. The other
-	// workspace package.json files are unchanged on disk.
+	// the shrinkwrap validator requires. When its name and workspace deps
+	// use the @bramburn/* fork scope, the other workspace package.json
+	// files are unchanged on disk.
 	const codingAgentPackage = {
-		name: "@earendil-works/pi-coding-agent",
+		name: "@bramburn/qi-coding-agent",
 		version: "0.85.0-b1",
 		license: "MIT",
 		dependencies: {
-			"@earendil-works/pi-agent-core": "^0.85.0-b1",
-			"@earendil-works/pi-ai": "^0.85.0-b1",
+			"@bramburn/qi-agent-core": "^0.85.0-b1",
+			"@bramburn/qi-ai": "^0.85.0-b1",
 			diff: "8.0.4",
 			"@google/genai": "1.52.0",
 			protobufjs: "7.6.5",
@@ -207,7 +208,7 @@ async function makeRepo(overrides) {
 	return root;
 }
 
-test("regenerates shrinkwrap with upstream names when no fork rename happened", async () => {
+test("regenerates shrinkwrap with published-scope names when no fork rename happened", async () => {
 	const repoRoot = await makeRepo();
 	try {
 		const result = await runScript({ repoRoot });
@@ -216,21 +217,21 @@ test("regenerates shrinkwrap with upstream names when no fork rename happened", 
 		const shrinkwrap = JSON.parse(
 			await readFile(`${repoRoot}/packages/coding-agent/npm-shrinkwrap.json`, "utf8"),
 		);
-		assert.equal(shrinkwrap.name, "@earendil-works/pi-coding-agent");
-		// Workspace deps resolve to the upstream-scope @earendil-works/*
+		assert.equal(shrinkwrap.name, "@bramburn/qi-coding-agent");
+		// Workspace deps resolve to the published-scope @bramburn/qi-*
 		// node_modules entries, with tarball URLs under that scope.
-		const agentPath = "node_modules/@earendil-works/pi-agent-core";
+		const agentPath = "node_modules/@bramburn/qi-agent-core";
 		assert.ok(shrinkwrap.packages[agentPath], `missing ${agentPath}`);
 		assert.equal(
 			shrinkwrap.packages[agentPath].resolved,
-			"https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.85.0-b1.tgz",
+			"https://registry.npmjs.org/@bramburn/qi-agent-core/-/qi-agent-core-0.85.0-b1.tgz",
 		);
 	} finally {
 		await rm(repoRoot, { recursive: true, force: true });
 	}
 });
 
-test("resolves @bramburn/* workspace deps after fork-publish-rename rewrites the publishing package.json", async () => {
+test("resolves @bramburn/* workspace deps when the publishing package.json uses the legacy fork scope", async () => {
 	const repoRoot = await makeRepo({
 		codingAgentPackage: {
 			name: "@bramburn/pi-coding-agent",
@@ -276,7 +277,7 @@ test("resolves @bramburn/* workspace deps after fork-publish-rename rewrites the
 		assert.ok(shrinkwrap.packages[aiPath], `missing ${aiPath}`);
 		// The upstream-scope entries should NOT appear — they would be
 		// duplicates (same workspace, different scope).
-		assert.equal(shrinkwrap.packages["node_modules/@earendil-works/pi-agent-core"], undefined);
+		assert.equal(shrinkwrap.packages["node_modules/@bramburn/qi-agent-core"], undefined);
 	} finally {
 		await rm(repoRoot, { recursive: true, force: true });
 	}
@@ -318,7 +319,7 @@ test("--check exits non-zero when the on-disk shrinkwrap is stale", async () => 
 	try {
 		// Write a deliberately wrong shrinkwrap so --check trips.
 		await writeJson(`${repoRoot}/packages/coding-agent/npm-shrinkwrap.json`, {
-			name: "@earendil-works/pi-coding-agent",
+			name: "@bramburn/qi-coding-agent",
 			version: "0.0.0",
 			lockfileVersion: 3,
 			packages: {},

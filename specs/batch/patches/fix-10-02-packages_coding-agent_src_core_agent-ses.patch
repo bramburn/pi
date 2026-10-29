@@ -1,0 +1,206 @@
+--- a/packages/coding-agent/src/core/agent-session.ts
++++ b/packages/coding-agent/src/core/agent-session.ts
+@@ -39,6 +39,8 @@
+ import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
+ import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+ import {
++	type CompactionPreparationOutcome,
+ 	type CompactionResult,
++	type CompactionSkipReason,
+ 	calculateContextTokens,
+ 	collectEntriesForBranchSummary,
+ 	compact,
+@@ -47,6 +49,7 @@
+ 	estimateTokens,
+ 	generateBranchSummary,
+ 	prepareCompaction,
++	prepareCompactionResult,
+ 	pruneSession,
+ 	shouldCompact,
+ } from "./compaction/index.ts";
+@@ -162,6 +165,9 @@
+ 			aborted: boolean;
+ 			willRetry: boolean;
+ 			errorMessage?: string;
++			skipped?: boolean;
++			skipReason?: CompactionSkipReason;
++			skipMessage?: string;
+ 			/** True when the compaction ran in the background (hot-swap apply). */
+ 			background?: boolean;
+ 	  }
+@@ -361,6 +367,12 @@
+ 	// part of `isCompacting` so neither the prompt() gate nor the TUI input
+ 	// queue treat it as blocking.
+ 	private _backgroundCompaction: { abortController: AbortController; reason: "manual" | "threshold" } | undefined =
+ 		undefined;
++	/**
++	 * Leaf entry id (or `"__empty__"`) at which a threshold compaction check
++	 * determined there was nothing to compact. Prevents threshold background
++	 * compaction from re-firing on every prompt until the branch grows.
++	 */
++	private _thresholdCompactionSkippedAtLeafId: string | null | undefined = undefined;
+ 	private _pendingBackgroundCompaction:
+ 		| {
+ 				reason: "manual" | "threshold";
+@@ -2215,13 +2227,26 @@
+ 	// =========================================================================
+ 	// Compaction
+ 	// =========================================================================
++
++	private _getEffectiveCompactionSettings() {
++		const settings = { ...this.settingsManager.getCompactionSettings() };
++		const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
++		if (dh.enabled) {
++			settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
++			settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
++			if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
++				settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
++			}
++		}
++		return settings;
++	}
+ 
+ 	/**
+ 	 * Manually compact the session context.
+ 	 * Aborts current agent operation first.
+ 	 *
+ 	 * Interactive mode uses {@link compactInBackground} instead; this blocking
+ 	 * path remains for RPC and extension callers that await the result.
+ 	 * @param customInstructions Optional instructions for the compaction summary
+ 	 */
+-	async compact(customInstructions?: string): Promise<CompactionResult> {
++	async compact(customInstructions?: string): Promise<CompactionResult | undefined> {
+ 		this._abortBackgroundCompaction();
+ 		await this.abort();
+ 		this._compactionAbortController = new AbortController();
+@@ -2235,27 +2260,25 @@
+ 			const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+ 
+ 			const pathEntries = this.sessionManager.getBranch();
+-			const settings = this.settingsManager.getCompactionSettings();
+-
+-			// When the DeepSeek Harness bundle is enabled, layer the
+-			// ratio-based policy on top of the legacy absolute-token
+-			// settings. The harness module's `shouldCompact` and
+-			// `findCutPoint` use whichever values are present.
+-			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+-			if (dh.enabled) {
+-				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+-				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+-				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+-					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+-				}
+-			}
+-
+-			const preparation = prepareCompaction(pathEntries, settings);
+-			if (!preparation) {
+-				// Check why we can't compact
+-				const lastEntry = pathEntries[pathEntries.length - 1];
+-				if (lastEntry?.type === "compaction") {
+-					throw new Error("Already compacted");
+-				}
+-				throw new Error("Nothing to compact (session too small)");
++			const settings = this._getEffectiveCompactionSettings();
++
++			const prepOutcome: CompactionPreparationOutcome = prepareCompactionResult(pathEntries, settings);
++			if (prepOutcome.skipped) {
++				const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
++				this._thresholdCompactionSkippedAtLeafId = leafKey;
++				this._compactionAbortController = undefined;
++				this._emit({
++					type: "compaction_end",
++					reason: "manual",
++					result: undefined,
++					aborted: false,
++					willRetry: false,
++					skipped: true,
++					skipReason: prepOutcome.skipReason,
++					skipMessage: prepOutcome.reason,
++				});
++				return undefined;
+ 			}
++			const preparation = prepOutcome.preparation;
+ 
+ 			let extensionCompaction: CompactionResult | undefined;
+ 			let fromExtension = false;
+@@ -2324,6 +2347,7 @@
+ 			}
+ 
+ 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
++			this._thresholdCompactionSkippedAtLeafId = undefined;
+ 			const newEntries = this.sessionManager.getEntries();
+ 			const sessionContext = this.sessionManager.buildSessionContext();
+ 			this.agent.state.messages = sessionContext.messages;
+@@ -2404,6 +2428,20 @@
+ 		) {
+ 			return;
+ 		}
++		const pathEntries = this.sessionManager.getBranch();
++		const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
++		if (this._thresholdCompactionSkippedAtLeafId !== undefined && this._thresholdCompactionSkippedAtLeafId === leafKey) {
++			return;
++		}
++		const settings = this._getEffectiveCompactionSettings();
++		const prepOutcome = prepareCompactionResult(pathEntries, settings);
++		if (prepOutcome.skipped) {
++			this._thresholdCompactionSkippedAtLeafId = leafKey;
++			return;
++		}
++		this._thresholdCompactionSkippedAtLeafId = undefined;
+ 		void this._launchBackgroundCompaction("threshold", undefined).catch(() => {
+ 			// Errors are surfaced via the compaction_end event.
+ 		});
+@@ -2446,24 +2484,26 @@
+ 
+ 			const pathEntries = snapshot.pathEntries;
+ 			const previousCompactionId = snapshot.previousCompactionId;
+-			const settings = this.settingsManager.getCompactionSettings();
+-
+-			// DeepSeek Harness ratio policy layering, same as compact().
+-			const dh = this.settingsManager.getDeepseekHarnessSettings(this.model ?? undefined);
+-			if (dh.enabled) {
+-				settings.thresholdRatio = settings.thresholdRatio ?? dh.thresholdRatio;
+-				settings.retainRatio = settings.retainRatio ?? dh.retainRatio;
+-				if (settings.retainRatio && this.model && this.model.contextWindow > 0) {
+-					settings.keepRecentTokens = Math.floor(this.model.contextWindow * settings.retainRatio);
+-				}
+-			}
+-
+-			const preparation = prepareCompaction(pathEntries, settings);
+-			if (!preparation) {
+-				const lastEntry = pathEntries[pathEntries.length - 1];
+-				if (lastEntry?.type === "compaction") {
+-					throw new Error("Already compacted");
+-				}
+-				throw new Error("Nothing to compact (session too small)");
++			const settings = this._getEffectiveCompactionSettings();
++
++			const prepOutcome = prepareCompactionResult(pathEntries, settings);
++			if (prepOutcome.skipped) {
++				const leafKey = pathEntries.length > 0 ? (pathEntries[pathEntries.length - 1].id ?? null) : "__empty__";
++				this._thresholdCompactionSkippedAtLeafId = leafKey;
++				this._emit({
++					type: "compaction_end",
++					reason,
++					result: undefined,
++					aborted: false,
++					willRetry: false,
++					skipped: true,
++					skipReason: prepOutcome.skipReason,
++					skipMessage: prepOutcome.reason,
++					background: true,
++				});
++				return undefined;
+ 			}
++			const preparation = prepOutcome.preparation;
+ 
+ 			let extensionCompaction: CompactionResult | undefined;
+ 			let fromExtension = false;
+@@ -2618,6 +2658,7 @@
+ 			pending.fromExtension,
+ 			pending.result.usage,
+ 		);
++		this._thresholdCompactionSkippedAtLeafId = undefined;
+ 		const newEntries = this.sessionManager.getEntries();
+ 		const sessionContext = this.sessionManager.buildSessionContext();
+ 		this.agent.state.messages = sessionContext.messages;

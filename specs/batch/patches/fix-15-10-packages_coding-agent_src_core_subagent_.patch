@@ -1,0 +1,19 @@
+--- a/packages/coding-agent/src/core/subagent/background.ts
++++ b/packages/coding-agent/src/core/subagent/background.ts
+@@ -970,6 +970,8 @@
+ 	parentSessionFile?: string;
+ 	/** Delegation depth of the child to launch. Root session is 0, so its children are 1. */
+ 	depth?: number;
++	/** Per-child assistant turn limit (REQ-D03). */
++	maxTurns?: number;
+ 	/** Called once the task reaches a terminal state. Must not throw. */
+ 	onSettled?: (taskId: string, result: SubagentResult) => void;
+ 	/** No hard limit by default: a background task is expected to outlive a turn. */
+@@ -1359,6 +1361,7 @@
+ 			logPath: join(getAgentDir(), BG_DIR_NAME, taskId, BG_LOG_FILE),
+ 			...(options.parentSessionFile === undefined ? {} : { parentSessionFile: options.parentSessionFile }),
+ 			...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
++			...(options.maxTurns === undefined ? {} : { maxTurns: options.maxTurns }),
+ 		},
+ 		// No caller signal: a background task must not inherit the turn's abort.
+ 		undefined,

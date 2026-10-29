@@ -34,9 +34,23 @@ contextTokens > contextWindow - reserveTokens
 
 By default, `reserveTokens` is 16384 tokens (configurable in `~/.pi/agent/settings.json` or `<project-dir>/.pi/settings.json`). This leaves room for the LLM's response.
 
-During a multi-turn agent run, Pi checks this threshold after tools finish and their results are appended, before starting the next assistant response. If the threshold is crossed, Pi compacts inside the same agent run and resumes with the summary and retained messages. It skips this between-turn check when the completed tool batch terminates the run and no queued message requires another response. Pi also checks the threshold before a new user prompt and after a low-level agent run ends.
+During a multi-turn agent run, Pi checks this threshold after tools finish and their results are appended, before starting the next assistant response. If the threshold is crossed, Pi starts a **background compaction** (see below) and the run continues with the current context; the summary is swapped in once ready. Pi skips this between-turn check when the completed tool batch terminates the run and no queued message requires another response. Pi also checks the threshold before a new user prompt and after a low-level agent run ends.
 
-You can also trigger manually with `/compact [instructions]`, where optional instructions focus the summary.
+You can also trigger manually with `/compact [instructions]`, where optional instructions focus the summary. `/compact` also runs in the background — it no longer aborts the in-flight turn or blocks input.
+
+### Background Compaction and Hot-Swap
+
+Manual `/compact` and threshold-triggered auto-compaction never interrupt the session:
+
+1. **Snapshot**: Pi snapshots the current session branch and computes the cut point from it. Messages that arrive after the snapshot are not part of the summary.
+2. **Summarize concurrently**: The summarisation request runs while you keep chatting and the agent keeps working.
+3. **Hot-swap**: When the summary is ready, Pi appends the `CompactionEntry` at the current leaf and swaps the live message list at the next safe boundary — between turns, when the run ends, or before your next prompt. Because messages after the snapshot sit after the compaction entry on the branch, they are kept verbatim; nothing is lost.
+
+If the session changed underneath the snapshot (tree navigation, `/new`, or a blocking compaction landing first), the pending summary is discarded instead of applied ("Background compaction discarded" in the TUI).
+
+**Overflow recovery is the exception**: when the provider reports context overflow (or a response is truncated by the output cap), compaction must finish before the turn can be retried, so it aborts the turn and blocks as before, superseding any background compaction in flight.
+
+The blocking abort-first behavior remains available to RPC clients (`compact` command) and extensions (`ctx.compact()` without the `background` option).
 
 ### How It Works
 
@@ -79,6 +93,20 @@ What the LLM sees:
 ```
 
 On repeated compactions, the summarized span starts at the previous compaction's kept boundary (`firstKeptEntryId`), not at the compaction entry itself, falling back to the entry after the previous compaction if that kept entry cannot be found in the path. This preserves messages that survived the earlier compaction by including them in the next summarization pass as well. Pi also recalculates `tokensBefore` from the rebuilt session context before writing the new `CompactionEntry`, so the token count reflects the actual pre-compaction context being replaced.
+
+### Summary Budget and Thinking
+
+The summariser's output is capped at an absolute ceiling of 16384 tokens by default, configurable via `compaction.summaryMaxTokens` in `~/.pi/agent/settings.json` or `<project-dir>/.pi/settings.json`. The effective token budget also feeds back into the summarisation prompt as a word-budget directive ("Budget: keep the complete summary under N words"), so the model knows how long the summary may be.
+
+Thinking (reasoning) is off by default for summarisation (`compaction.summaryThinking`, default `"off"`). Reasoning tokens are billed but never persisted — the stored summary keeps only text blocks — so passing the session's thinking level through would pay for tokens that are immediately discarded. Set `compaction.summaryThinking` to opt into a level.
+
+To compare candidate summariser models, use the dev script `scripts/experiment-summariser.mjs`:
+
+```bash
+node scripts/experiment-summariser.mjs --configs models.json [--fixture path]
+```
+
+The config file is a JSON array of `{ "name", "baseUrl", "model", "apiKeyEnv", "maxTokens"?, "thinking"? }` entries. The script runs each config against the same fixture, prints a Markdown table (output tokens, reasoning tokens, summary chars/words, elapsed ms per model) plus the first config's full summary. `--self-test` runs offline against a mock endpoint; `--help` shows full usage.
 
 ### Split Turns
 
@@ -214,40 +242,23 @@ Same as compaction, extensions can store custom data in `details`.
 
 See [`collectEntriesForBranchSummary()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), [`prepareBranchEntries()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts), and [`generateBranchSummary()`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/compaction/branch-summarization.ts) for the implementation.
 
-## Summariser Override
+## Summariser Model
 
-By default compaction and branch summarisation call the main agent model. Three `PI_SUMMARIZER_*` env vars route both operations through a separate OpenAI-compatible endpoint instead — useful when you want the main agent on a large model but the summariser on a cheaper / faster one.
+By default compaction and branch summarisation call the main agent model (the session's current model). To route both operations through a separate model — useful when you want the main agent on a large model but the summariser on a cheaper / faster one — pick one in `/settings` → **Compaction model** → *Use specific model*. The picker is the same searchable model list as `/model`, so any configured provider model (DeepSeek, OpenRouter, vLLM, ...) works without extra plumbing. The default, *Use current model*, clears the preference and follows whatever model the session is using.
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PI_SUMMARIZER_BASE_URL` | yes | Base URL of an OpenAI-compatible API (e.g. `https://api.deepseek.com/v1`, `https://openrouter.ai/api/v1`, a vLLM or llama.cpp endpoint). |
-| `PI_SUMMARIZER_MODEL` | yes | Model id passed to that endpoint (e.g. `deepseek-chat`). |
-| `PI_SUMMARIZER_API_KEY` | yes | API key for the endpoint. |
+The choice persists in `settings.json`:
 
-**Semantics**
+```json
+{
+  "compactionModel": { "provider": "openai", "modelId": "gpt-5-mini" }
+}
+```
 
-- All three must be set; partial sets emit `console.warn` and fall back to the main model. Whitespace-only values count as unset.
-- The override is **always active** whenever the three vars are present. It does not require `--deepseek-harness`, `--no-deepseek-harness`, or any other flag.
-- The override is an OpenAI-compatible chat-completions call against the configured base URL. DeepSeek, OpenRouter proxies, vLLM, llama.cpp, and other OpenAI-compatible services work without per-provider plumbing. Reasoning-aware endpoints are not used — the override explicitly disables reasoning.
-- Cost is reported as zero for the override model because the endpoint is unknown to pi's catalog.
-- The override provider is registered on the runtime once per summarisation call with a stable internal id (`pi-summariser-override`). Setting `PI_SUMMARIZER_PROVIDER` is **not** supported — pick a non-built-in value at your own risk; built-in ids are rejected with a warning to avoid clobbering real providers.
+If the configured model is no longer available in the catalog (provider removed, model renamed), summarisation falls back to the current model with a one-time console warning; re-pick in `/settings` to fix it.
 
 **Source**
 
-- [`packages/ai/src/summariser-env.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/summariser-env.ts) — env-var discovery; returns `undefined` when no override.
-- [`packages/ai/src/summariser-model.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/ai/src/summariser-model.ts) — builds the `Model<"openai-completions">` for the override.
-- [`packages/coding-agent/src/core/agent-session.ts` `_getSummarizationRequestAuth`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/agent-session.ts) — wires the override into manual `/compact`, auto-compaction, and the default summarisation path.
-
-**Example**
-
-```bash
-export PI_SUMMARIZER_BASE_URL="https://api.deepseek.com/v1"
-export PI_SUMMARIZER_MODEL="deepseek-chat"
-export PI_SUMMARIZER_API_KEY="sk-..."
-pi
-```
-
-Now every `/compact` (and the auto-compaction threshold) summarises through DeepSeek while the main agent keeps using whatever model you selected.
+- [`packages/coding-agent/src/core/agent-session.ts` `_getSummarizationRequestAuth`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/agent-session.ts) — resolves the configured compaction model from the runtime catalog and falls back to the main model when unset or unavailable.
 
 ## Summary Format
 
@@ -439,7 +450,9 @@ Configure compaction in `~/.pi/agent/settings.json` or `<project-dir>/.pi/settin
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
-    "keepRecentTokens": 20000
+    "keepRecentTokens": 20000,
+    "summaryMaxTokens": 16384,
+    "summaryThinking": "off"
   }
 }
 ```
@@ -449,5 +462,28 @@ Configure compaction in `~/.pi/agent/settings.json` or `<project-dir>/.pi/settin
 | `enabled` | `true` | Enable auto-compaction |
 | `reserveTokens` | `16384` | Tokens to reserve for LLM response |
 | `keepRecentTokens` | `20000` | Recent tokens to keep (not summarized) |
+| `summaryMaxTokens` | `16384` | Absolute ceiling on summariser output tokens |
+| `summaryThinking` | `"off"` | Thinking level for the summariser (`"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`) |
 
 Disable auto-compaction with `"enabled": false`. You can still compact manually with `/compact`.
+
+## Known Issues & Recovery
+
+### Stuck sessions: recurring `400 invalid params (2013)` after compaction
+
+Older pi versions could persist a `CompactionEntry` between an assistant tool-call message and its tool result (auto-compaction fired while a long-running tool such as `update_goal` was still executing). On the next compaction, the old summary was re-projected at its physical position, splitting the tool call from its result in the request. Providers reject that shape with `400 invalid params (2013)` ("tool call result does not follow tool call") on every subsequent turn, so the session appears permanently stuck.
+
+Recovery options:
+
+1. **Upgrade pi.** The context projection (`normalizeToolPairing` in [`core/messages.ts`](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/src/core/messages.ts)) moves any user-role message that lands between a tool call and its result to after the result group, and the request builder (`transformMessages`) keeps `tool_result` blocks adjacent to their `tool_use` instead of synthesizing duplicates. Existing stuck session files work again without modification.
+
+2. **Manual repair of the session JSONL** (only for files that must be handed to older pi versions). Back up the file first, then in `~/.pi/agent/sessions/<project>/<session>.jsonl`:
+   - Locate the compaction line sandwiched between an assistant message containing a `toolCall` block and the `toolResult` message for that call (the `toolResult` entry's `parentId` is the compaction entry's id).
+   - Delete the compaction line.
+   - Set the `toolResult` entry's `parentId` to the assistant entry's id.
+
+   Do not remove the tool result or its tool call. If a newer compaction entry exists, its summary already incorporates the deleted one (repeated compactions fold the previous summary into the new one). If the deleted entry was the only compaction, the full history returns to context — valid, just larger; `/compact` re-summarizes it.
+
+### Known issue: orphaned tool calls from checkpoint resume
+
+When a run is interrupted while a tool call is outstanding — e.g. a goal checkpoint pauses the session mid tool execution and the session resumes hours later — the tool call's result is never appended and the history keeps an assistant `toolCall` with no `toolResult`. Request building heals this at send time (a synthetic "No result provided" result is inserted when the call's result never arrives), so requests stay valid, but the orphaned tool call in the entry log is a separate class of session corruption. It is independent of the compaction pairing bug above and is recorded here as a known issue only; no repair is implemented.

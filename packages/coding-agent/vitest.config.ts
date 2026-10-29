@@ -10,7 +10,7 @@ export default mergeConfig(
 			environment: "node",
 			testTimeout: 30000,
 			// Tests run offline by default; opt in with allowNetwork() from test/test-network-env.ts.
-			env: { PI_OFFLINE: "1" },
+			env: { QI_OFFLINE: "1" },
 			unstubEnvs: true,
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
@@ -34,7 +34,15 @@ export default mergeConfig(
 					replacement: fileURLToPath(new URL("../client/src/index.ts", import.meta.url)),
 				},
 				{
+					find: /^@bramburn\/qi-client$/,
+					replacement: fileURLToPath(new URL("../client/src/index.ts", import.meta.url)),
+				},
+				{
 					find: /^@earendil-works\/pi-protocol$/,
+					replacement: fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+				},
+				{
+					find: /^@bramburn\/qi-protocol$/,
 					replacement: fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
 				},
 				{ find: /^@mariozechner\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },

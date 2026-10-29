@@ -13,5 +13,6 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [{ find: /^@earendil-works\/pi-telemetry$/, replacement: telemetrySrcIndex }],
+		alias: [{ find: /^@bramburn\/qi-telemetry$/, replacement: telemetrySrcIndex }],
 	},
 });

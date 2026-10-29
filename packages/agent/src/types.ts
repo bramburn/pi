@@ -12,7 +12,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 	Usage,
-} from "@earendil-works/pi-ai";
+} from "@bramburn/qi-ai";
 import type { Static, TSchema } from "typebox";
 
 /**
@@ -310,7 +310,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 /**
  * Thinking/reasoning level for models that support it.
  * Note: "xhigh" and "max" are only supported by selected model families. Use model
- * thinking-level metadata from @earendil-works/pi-ai to detect support for a concrete model.
+ * thinking-level metadata from @bramburn/qi-ai to detect support for a concrete model.
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -421,6 +421,13 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	 * If omitted, the default execution mode applies.
 	 */
 	executionMode?: ToolExecutionMode;
+	/**
+	 * Whether this tool is safe to execute concurrently across parallel subagents or tool batches (REQ-I02 / REQ-C01).
+	 * Pure read-only tools set `true`; tools that mutate files or spawn processes (`bash`, `edit`, `write`, `subagent`)
+	 * default to `false`. Parallel subagent admission serialises any batch whose tools are not all
+	 * `concurrentSafe: true` (`specs/subagent/features/isolation/spec.md` §4.2).
+	 */
+	concurrentSafe?: boolean;
 }
 
 /** Context snapshot passed into the low-level agent loop. */

@@ -1,0 +1,26 @@
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index 0b8184e5b..02955e4e5 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -401,9 +401,9 @@ function validateSessionParentFlags(parsed: Args): void {
+ 	if (parsed.sessionParent === undefined) return;
+ 
+ 	const conflictingFlags = [
+-		parsed.noSession ? '--no-session' : undefined,
+-		parsed.noSessionParent ? '--no-session-parent' : undefined,
+-		parsed.fork ? '--fork' : undefined,
++		parsed.noSession ? "--no-session" : undefined,
++		parsed.noSessionParent ? "--no-session-parent" : undefined,
++		parsed.fork ? "--fork" : undefined,
+ 	].filter((flag): flag is string => flag !== undefined);
+ 
+ 	if (conflictingFlags.length > 0) {
+@@ -412,7 +412,7 @@ function validateSessionParentFlags(parsed: Args): void {
+ 	}
+ 
+ 	const value = parsed.sessionParent;
+-	if (!value.includes('/') && !value.includes('\\') && !value.endsWith('.jsonl')) {
++	if (!value.includes("/") && !value.includes("\\") && !value.endsWith(".jsonl")) {
+ 		console.error(chalk.red(`Error: --session-parent expects a session file path ending in .jsonl, got '${value}'`));
+ 		process.exit(1);
+ 	}
